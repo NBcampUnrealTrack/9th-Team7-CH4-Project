@@ -1,24 +1,22 @@
+# Unreal Engine generated directories
 Binaries/
-Build/
 DerivedDataCache/
 Intermediate/
 Saved/
 
-*.sln
-*.suo
-*.xcodeproj
-*.xcworkspace
-*.VC.db
-*.VC.VC.opendb
-
-*.log
-*.tmp
-
-.DS_Store
-
-.vscode/
-.idea/
-
-# Visual Studio cache
+# IDE generated files
 .vs/
-*.ipch
+.idea/
+.vscode/
+
+*.sln
+*.slnx
+*.VC.db
+*.VC.opendb
+*.opensdf
+*.sdf
+*.suo
+
+# Local build products and crash artifacts
+*.pdb
+*.obj
