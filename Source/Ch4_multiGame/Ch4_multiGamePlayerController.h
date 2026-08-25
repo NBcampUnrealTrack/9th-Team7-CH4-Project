@@ -8,6 +8,7 @@
 
 class UInputMappingContext;
 class UUserWidget;
+class UInputAction;	// [추가]
 
 /**
  *  Basic PlayerController class for a third person game
@@ -25,9 +26,47 @@ public:
 	 */
 	UFUNCTION(Exec, BlueprintCallable, Category="Network|Debug")
 	void JoinHamachi(FString HostIPv4);
+	
+	// [추가] PauseMenu 관련 공개 함수들 선언
+	// P 키(이후에 ESC키로 전환)를 눌렀을 때 열려있으면 닫고, 닫혀있으면 여는 토글 함수
+	UFUNCTION(BlueprintCallable, Category = "UI|Pause Menu")
+	void TogglePauseMenu();
+	
+	// PauseMenu 열기
+	UFUNCTION(BlueprintCallable, Category = "UI|Pause Menu")
+	void ShowPauseMenu();
+	
+	// PauseMenu 닫기 (Resume 버튼 클릭 시에도 호출)
+	UFUNCTION(BlueprintCallable, Category = "UI|Pause Menu")
+	void HidePauseMenu();
+	
+	// 현재 PauseMenu가 켜져있는지 확인
+	UFUNCTION(BlueprintPure, Category = "UI|Pause Menu")
+	bool IsPauseMenuOpen() const;
+	
+	// 세션을 정리하고 메인 메뉴(L_MainMenu)로 돌아가기
+	UFUNCTION(BlueprintCallable, Category = "UI|Pause Menu")
+	void ReturnToMainMenu();
+	
+	// 게임 완전히 종료하기
+	UFUNCTION(BlueprintCallable, Category = "UI|Pause Menu")
+	void QuitGame();
 
 protected:
-
+	
+	// [추가] 에디터에서 설정할 프로퍼티와 위젯 인스턴스 변수
+	// 에디터에서 만든 IA_Pause를 넣어줄 변수
+	UPROPERTY(EditAnywhere, Category = "Input|Pause Menu")
+	TObjectPtr<UInputAction> PauseAction;
+	
+	// 에디터에서 디자인할 WBP_PauseMenu 위젯 클래스를 지정할 변수
+	UPROPERTY(EditAnywhere, Category = "Input|Pause Menu")
+	TSubclassOf<UUserWidget> PauseMenuWidgetClass;
+	
+	// 화면에 생성된 실제 PauseMenu 위젯의 주소를 기억할 포인터 변수
+	UPROPERTY()
+	TObjectPtr<UUserWidget> PauseMenuWidget;
+	
 	/** Input Mapping Contexts */
 	UPROPERTY(EditAnywhere, Category ="Input|Input Mappings")
 	TArray<UInputMappingContext*> DefaultMappingContexts;

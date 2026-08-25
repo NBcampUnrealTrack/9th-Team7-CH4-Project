@@ -10,6 +10,12 @@
 #include "InputMappingContext.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
+// [추가}
+#include "EnhancedInputComponent.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "OnlineSubsystem.h"
+#include "Interfaces/OnlineSessionInterface.h"
+
 namespace
 {
 	constexpr int32 HamachiDevelopmentPort = 7777;
@@ -123,6 +129,8 @@ void ACh4_multiGamePlayerController::JoinHamachi(FString HostIPv4)
 	ClientTravel(TravelURL, TRAVEL_Absolute);
 }
 
+
+
 void ACh4_multiGamePlayerController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -154,6 +162,15 @@ void ACh4_multiGamePlayerController::SetupInputComponent()
 	// only add IMCs for local player controllers
 	if (IsLocalPlayerController())
 	{
+		// [추가} P키(PauseAction)를 누르면(Started) TogglePauseMenu 함수를 실행하도록 연결
+		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
+		{
+			if (PauseAction)
+			{
+				EnhancedInputComponent->BindAction(PauseAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::TogglePauseMenu);
+			}
+		}
+		
 		// Add Input Mapping Contexts
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 		{
@@ -178,4 +195,93 @@ bool ACh4_multiGamePlayerController::ShouldUseTouchControls() const
 {
 	// are we on a mobile platform? Should we force touch?
 	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
+}
+
+// [추가]
+void ACh4_multiGamePlayerController::TogglePauseMenu()
+{
+	if (!IsLocalPlayerController()) return;
+	
+	if (IsPauseMenuOpen())
+	{
+		HidePauseMenu();
+	}
+	else
+	{
+		ShowPauseMenu();
+	}
+}
+
+void ACh4_multiGamePlayerController::ShowPauseMenu()
+{
+	if (!IsLocalPlayerController() || !PauseMenuWidgetClass) return;
+	
+	// 아직 위젯을 만든 적이 없다면 새로 생성
+	if (!PauseMenuWidget)
+	{
+		PauseMenuWidget = CreateWidget<UUserWidget>(this, PauseMenuWidgetClass);
+	}
+	
+	if (PauseMenuWidget && !PauseMenuWidget->IsInViewport())
+	{
+		// 1. 화면에 위젯 띄우기 (ZOrder: 100으로 다른 UI보다 항상 위에 나오게 설정)
+		PauseMenuWidget->AddToViewport(100);
+		
+		// 2. 마우스 커서 보이게 하기
+		bShowMouseCursor = true;
+		
+		// 3. 입력 모드를 GameAndUI로 변경 (게임은 계속 흘러가면서 마우스 클릭도 가능하게)
+		FInputModeGameAndUI InputMode;
+		InputMode.SetWidgetToFocus(PauseMenuWidget->TakeWidget());
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		SetInputMode(InputMode);
+	}
+}
+
+void ACh4_multiGamePlayerController::HidePauseMenu()
+{
+	if (!IsLocalPlayerController()) return;
+	
+	if (PauseMenuWidget && PauseMenuWidget->IsInViewport())
+	{
+		// 1. 화면에서 위젯 내리기
+		PauseMenuWidget->RemoveFromParent();
+	}
+	
+	// 2. 마우스 커서 숨기기
+	bShowMouseCursor = false;
+	
+	// 3. 입력 모드를 순수한 게임 조작(GameOnly)으로 원상 복구
+	FInputModeGameOnly InputMode;
+	SetInputMode(InputMode);
+}
+
+bool ACh4_multiGamePlayerController::IsPauseMenuOpen() const
+{
+	return PauseMenuWidget && PauseMenuWidget->IsInViewport();
+}
+
+void ACh4_multiGamePlayerController::ReturnToMainMenu()
+{
+	if (!IsLocalPlayerController()) return;
+	
+	// 온라인 세션이 활성화되어 있다면 세션 정리
+	if (IOnlineSubsystem* Subsystem = IOnlineSubsystem::Get())
+	{
+		IOnlineSessionPtr Session = Subsystem->GetSessionInterface();
+		if (Session.IsValid() && Session->GetNamedSession(NAME_GameSession) != nullptr)
+		{
+			Session->DestroySession(NAME_GameSession);
+		}
+	}
+	
+	// 메인 메뉴 레벨로 안전하게 이동
+	ClientTravel(TEXT("/Game/Maps/L_MainMenu"), TRAVEL_Absolute);
+}
+
+void ACh4_multiGamePlayerController::QuitGame()
+{
+	if (!IsLocalPlayerController()) return;
+	
+	UKismetSystemLibrary::QuitGame(GetWorld(), this, EQuitPreference::Quit, false);
 }
