@@ -15,6 +15,8 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "OnlineSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"
+#include "UI/PauseMenu/Ch4PauseMenuViewModel.h"
+#include "UObject/ConstructorHelpers.h"
 
 namespace
 {
@@ -86,6 +88,25 @@ namespace
 	}
 }
 
+ACh4_multiGamePlayerController::ACh4_multiGamePlayerController()
+{
+	// IA_Pause 기본값 로드 (로비 포함 모든 자식 클래스에 자동 상속)
+	static ConstructorHelpers::FObjectFinder<UInputAction> PauseActionFinder(
+		TEXT("/Game/Input/Actions/IA_Pause.IA_Pause"));
+	if (PauseActionFinder.Succeeded())
+	{
+		PauseAction = PauseActionFinder.Object;
+	}
+
+	// WBP_PauseMenu 기본값 로드
+	static ConstructorHelpers::FClassFinder<UUserWidget> PauseMenuClassFinder(
+		TEXT("/Game/UI/WBP_PauseMenu.WBP_PauseMenu_C"));
+	if (PauseMenuClassFinder.Succeeded())
+	{
+		PauseMenuWidgetClass = PauseMenuClassFinder.Class;
+	}
+}
+
 void ACh4_multiGamePlayerController::JoinHamachi(FString HostIPv4)
 {
 	if (!IsLocalPlayerController())
@@ -135,23 +156,50 @@ void ACh4_multiGamePlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// only spawn touch controls on local player controllers
-	if (IsLocalPlayerController() && ShouldUseTouchControls())
+	// only execute on local player controllers
+	if (IsLocalPlayerController())
 	{
-		// spawn the mobile controls widget
-		MobileControlsWidget = CreateWidget<UUserWidget>(this, MobileControlsWidgetClass);
-
-		if (MobileControlsWidget)
+		// 1. Enhanced Input Subsystem에 Mapping Context 등록 보장
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 		{
-			// add the controls to the player screen
-			MobileControlsWidget->AddToPlayerScreen(0);
+			for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
+			{
+				if (CurrentContext)
+				{
+					Subsystem->AddMappingContext(CurrentContext, 0);
+				}
+			}
 
-		} else {
-
-			UE_LOG(LogCh4_multiGame, Error, TEXT("Could not spawn mobile controls widget."));
-
+			if (!ShouldUseTouchControls())
+			{
+				for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
+				{
+					if (CurrentContext)
+					{
+						Subsystem->AddMappingContext(CurrentContext, 0);
+					}
+				}
+			}
 		}
 
+		// 2. PauseAction 키 바인딩 (Started 1회만, 중복 방지)
+		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
+		{
+			if (PauseAction)
+			{
+				EnhancedInputComponent->BindAction(PauseAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::TogglePauseMenu);
+			}
+		}
+
+		// 3. spawn touch controls on mobile platforms
+		if (ShouldUseTouchControls())
+		{
+			MobileControlsWidget = CreateWidget<UUserWidget>(this, MobileControlsWidgetClass);
+			if (MobileControlsWidget)
+			{
+				MobileControlsWidget->AddToPlayerScreen(0);
+			}
+		}
 	}
 }
 
@@ -162,21 +210,15 @@ void ACh4_multiGamePlayerController::SetupInputComponent()
 	// only add IMCs for local player controllers
 	if (IsLocalPlayerController())
 	{
-		// [추가} P키(PauseAction)를 누르면(Started) TogglePauseMenu 함수를 실행하도록 연결
-		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
-		{
-			if (PauseAction)
-			{
-				EnhancedInputComponent->BindAction(PauseAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::TogglePauseMenu);
-			}
-		}
-		
 		// Add Input Mapping Contexts
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 		{
 			for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
 			{
-				Subsystem->AddMappingContext(CurrentContext, 0);
+				if (CurrentContext)
+				{
+					Subsystem->AddMappingContext(CurrentContext, 0);
+				}
 			}
 
 			// only add these IMCs if we're not using mobile touch input
@@ -184,7 +226,10 @@ void ACh4_multiGamePlayerController::SetupInputComponent()
 			{
 				for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
 				{
-					Subsystem->AddMappingContext(CurrentContext, 0);
+					if (CurrentContext)
+					{
+						Subsystem->AddMappingContext(CurrentContext, 0);
+					}
 				}
 			}
 		}
@@ -202,6 +247,11 @@ void ACh4_multiGamePlayerController::TogglePauseMenu()
 {
 	if (!IsLocalPlayerController()) return;
 	
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, TEXT("[PauseMenu] P Key Pressed! TogglePauseMenu() Called"));
+	}
+
 	if (IsPauseMenuOpen())
 	{
 		HidePauseMenu();
@@ -214,27 +264,62 @@ void ACh4_multiGamePlayerController::TogglePauseMenu()
 
 void ACh4_multiGamePlayerController::ShowPauseMenu()
 {
-	if (!IsLocalPlayerController() || !PauseMenuWidgetClass) return;
+	if (!IsLocalPlayerController()) return;
+
+	if (!PauseMenuWidgetClass)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("[PauseMenu ERROR] PauseMenuWidgetClass is None!"));
+		}
+		return;
+	}
 	
-	// 아직 위젯을 만든 적이 없다면 새로 생성
+	// 1. ViewModel 인스턴스가 없다면 확실하게 생성
+	if (!PauseMenuViewModel)
+	{
+		PauseMenuViewModel = NewObject<UCh4PauseMenuViewModel>(this);
+	}
+
+	// 2. 아직 위젯을 만든 적이 없다면 새로 생성
 	if (!PauseMenuWidget)
 	{
 		PauseMenuWidget = CreateWidget<UUserWidget>(this, PauseMenuWidgetClass);
 	}
 	
-	if (PauseMenuWidget && !PauseMenuWidget->IsInViewport())
+	if (PauseMenuWidget)
 	{
-		// 1. 화면에 위젯 띄우기 (ZOrder: 100으로 다른 UI보다 항상 위에 나오게 설정)
-		PauseMenuWidget->AddToViewport(100);
-		
-		// 2. 마우스 커서 보이게 하기
-		bShowMouseCursor = true;
-		
-		// 3. 입력 모드를 GameAndUI로 변경 (게임은 계속 흘러가면서 마우스 클릭도 가능하게)
-		FInputModeGameAndUI InputMode;
-		InputMode.SetWidgetToFocus(PauseMenuWidget->TakeWidget());
-		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-		SetInputMode(InputMode);
+		// 3. 위젯의 MVVM ViewModel Setter가 있다면 안전하게 주입
+		if (UFunction* SetVMFunc = PauseMenuWidget->FindFunction(FName("SetCh4PauseMenuViewModel")))
+		{
+			struct FSetVMParams
+			{
+				UCh4PauseMenuViewModel* InViewModel;
+			};
+			FSetVMParams Params;
+			Params.InViewModel = PauseMenuViewModel;
+			PauseMenuWidget->ProcessEvent(SetVMFunc, &Params);
+		}
+
+		if (!PauseMenuWidget->IsInViewport())
+		{
+			// 화면에 위젯 띄우기 (ZOrder: 100)
+			PauseMenuWidget->AddToViewport(100);
+			
+			// 마우스 커서 보이게 하기
+			bShowMouseCursor = true;
+			
+			// 입력 모드를 GameAndUI로 변경
+			FInputModeGameAndUI InputMode;
+			InputMode.SetWidgetToFocus(PauseMenuWidget->TakeWidget());
+			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			SetInputMode(InputMode);
+
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, TEXT("[PauseMenu] Widget & ViewModel Loaded Successfully!"));
+			}
+		}
 	}
 }
 

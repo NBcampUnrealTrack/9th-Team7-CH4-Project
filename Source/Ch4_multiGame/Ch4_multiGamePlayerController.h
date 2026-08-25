@@ -20,6 +20,8 @@ class ACh4_multiGamePlayerController : public APlayerController
 	GENERATED_BODY()
 
 public:
+	ACh4_multiGamePlayerController();
+
 	/**
 	 * Safe development command for Hamachi direct-IP tests.
 	 * Usage: JoinHamachi 25.x.x.x (an optional :7777 suffix is accepted).
@@ -66,6 +68,10 @@ protected:
 	// 화면에 생성된 실제 PauseMenu 위젯의 주소를 기억할 포인터 변수
 	UPROPERTY()
 	TObjectPtr<UUserWidget> PauseMenuWidget;
+
+	// PauseMenu 전용 MVVM ViewModel 인스턴스
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Pause Menu")
+	TObjectPtr<class UCh4PauseMenuViewModel> PauseMenuViewModel;
 	
 	/** Input Mapping Contexts */
 	UPROPERTY(EditAnywhere, Category ="Input|Input Mappings")

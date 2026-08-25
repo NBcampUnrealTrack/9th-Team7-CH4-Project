@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "MVVMViewModelBase.h"
@@ -11,12 +11,32 @@ class CH4_MULTIGAME_API UCh4PauseMenuViewModel : public UMVVMViewModelBase
 {
 	GENERATED_BODY()
 	
-	public:
+public:
+	// ----------------------------------------------------------------
+	// [State] View Binding용 데이터 속성
+	// ----------------------------------------------------------------
+
+	// Settings 패널이 열려있는지 여부 (View Binding으로 위젯 Visibility와 연결)
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "PauseMenu|State")
+	bool bIsSettingsVisible = false;
+
+	// bIsSettingsVisible Setter (FieldNotify 변경 알림 포함)
+	UFUNCTION(BlueprintCallable, Category = "PauseMenu|State")
+	void SetIsSettingsVisible(bool bNewValue);
+
+	// bIsSettingsVisible Getter
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "PauseMenu|State")
+	bool GetIsSettingsVisible() const { return bIsSettingsVisible; }
+
+	// ----------------------------------------------------------------
+	// [Actions] 버튼 클릭 명령 함수
+	// ----------------------------------------------------------------
+
 	// [Resume] 버튼 클릭 시 : 메뉴 닫기
 	UFUNCTION(BlueprintCallable, Category = "PauseMenu|Actions")
 	void ResumeGame();
 	
-	// [Settings] 버튼 클릭 시 : 설정 패널 열기 (추후 구현)
+	// [Settings] 버튼 클릭 시 : 설정 패널 열고 닫기
 	UFUNCTION(BlueprintCallable, Category = "PauseMenu|Actions")
 	void OpenSettings();
 	
@@ -32,3 +52,4 @@ private:
 	class ACh4_multiGamePlayerController* GetOwningCh4PlayerController() const;
 	
 };
+
