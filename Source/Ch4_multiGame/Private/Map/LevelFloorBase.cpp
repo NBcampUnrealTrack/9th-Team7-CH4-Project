@@ -1,5 +1,7 @@
 #include "Public/Map/LevelFloorBase.h"
 #include "Components/BoxComponent.h"
+#include "Components/SplineComponent.h"
+#include "Components/SplineMeshComponent.h"
 #include "GameFramework/Character.h"
 
 ALevelFloorBase::ALevelFloorBase()
@@ -23,6 +25,13 @@ ALevelFloorBase::ALevelFloorBase()
 	CollisionBox = CreateDefaultSubobject<UBoxComponent>(TEXT("CollisionBox"));
 	CollisionBox->SetupAttachment(RootComponent);
 	CollisionBox->SetCollisionObjectType(ECC_WorldStatic);
+	
+	// 컴포넌트 생성 및 루트 부착
+	SplineComponent = CreateDefaultSubobject<USplineComponent>(TEXT("SplineComponent"));
+	SplineComponent->SetupAttachment(RootComponent);
+
+	SplineMeshComponent = CreateDefaultSubobject<USplineMeshComponent>(TEXT("SplineMeshComponent"));
+	SplineMeshComponent->SetupAttachment(RootComponent);
 	
 }
 

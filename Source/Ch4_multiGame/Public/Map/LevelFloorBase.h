@@ -4,6 +4,8 @@
 #include "GameFramework/Actor.h"
 #include "LevelFloorBase.generated.h"
 
+class USplineComponent;
+class USplineMeshComponent;
 class UPostProcessComponent;
 class UBoxComponent;
 
@@ -29,6 +31,14 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Collision")
 	TObjectPtr<UBoxComponent> CollisionBox;
+	
+	// 1. 스플라인 선 컴포넌트
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Spline")
+	TObjectPtr<USplineComponent> SplineComponent;
+
+	// 2. 스플라인 메시 컴포넌트
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Spline")
+	TObjectPtr<USplineMeshComponent> SplineMeshComponent;
 	
 	
 	UFUNCTION()
