@@ -43,6 +43,7 @@ public class Ch4_multiGame : ModuleRules
 			"Ch4_multiGame/Variant_SideScrolling/UI",
 			"Ch4_multiGame/UI/MainMenu",
 			"Ch4_multiGame/UI/PauseMenu",
+			"Ch4_multiGame/UI/Settings",
 		});
 
 		// Uncomment if you are using Slate UI
