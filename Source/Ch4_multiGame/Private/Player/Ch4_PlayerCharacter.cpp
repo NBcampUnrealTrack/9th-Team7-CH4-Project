@@ -5,6 +5,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
@@ -53,6 +54,11 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 
 void ACh4_PlayerCharacter::InputActionMove(const struct FInputActionValue& Value)
 {
+	if (bIsStunned)
+	{
+		return;
+	}
+	
 	const FVector2D MoveVec = Value.Get<FVector2D>();
 	
 	if (Controller == nullptr)
@@ -80,5 +86,81 @@ void ACh4_PlayerCharacter::InputActionLook(const struct FInputActionValue& Value
 
 void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
 {
+	if (bIsStunned)
+	{
+		return;
+	}
+	
 	Jump();
+}
+
+void ACh4_PlayerCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
+{
+	Super::OnMovementModeChanged(
+		PrevMovementMode,
+		PreviousCustomMode);
+
+	// Falling 상태로 진입했을 때
+	if (GetCharacterMovement()->MovementMode == MOVE_Falling)
+	{
+		FallStartTime = GetWorld()->GetTimeSeconds();
+		
+		UE_LOG(LogTemp, Warning, TEXT("OnMovementModeChanged to Falling"));
+	}
+}
+
+void ACh4_PlayerCharacter::Landed(const FHitResult& Hit)
+{
+	Super::Landed(Hit);
+
+	const float CurrentTime = GetWorld()->GetTimeSeconds();
+
+	// 낙하한 시간 = 착지 시간 - 낙하 시작 시간
+	const float FallDuration = CurrentTime - FallStartTime;
+
+	// 설정한 시간 이상 낙하했다면 경직
+	if (FallDuration >= FallStunThreshold)
+	{
+		ApplyStun();
+	}
+	UE_LOG(LogTemp, Warning, TEXT("Landed"));
+}
+
+void ACh4_PlayerCharacter::ApplyStun()
+{
+	if (bIsStunned)
+	{
+		return;
+	}
+
+	bIsStunned = true;
+
+	// 현재 이동 중이었다면 즉시 정지
+	GetCharacterMovement()->StopMovementImmediately();
+
+	// 이동 비활성화
+	GetCharacterMovement()->DisableMovement();
+
+	// 기존 타이머 제거
+	GetWorldTimerManager().ClearTimer(StunTimerHandle);
+
+	// StunDuration 후 경직 종료
+	GetWorldTimerManager().SetTimer(
+		StunTimerHandle,
+		this,
+		&ACh4_PlayerCharacter::EndStun,
+		StunDuration,
+		false);
+	
+	UE_LOG(LogTemp, Warning, TEXT("Apply Stun"));
+}
+
+void ACh4_PlayerCharacter::EndStun()
+{
+	bIsStunned = false;
+
+	// 다시 걷기 가능
+	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+	
+	UE_LOG(LogTemp, Warning, TEXT("End Stun"));
 }
