@@ -47,6 +47,7 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 	{
 		if (MoveAction) EIC->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ACh4_PlayerCharacter::InputActionMove);
 		if (LookAction) EIC->BindAction(LookAction, ETriggerEvent::Triggered, this, &ACh4_PlayerCharacter::InputActionLook);
+		if (JumpAction) EIC->BindAction(JumpAction, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionJump);
 	}
 }
 
@@ -75,4 +76,9 @@ void ACh4_PlayerCharacter::InputActionLook(const struct FInputActionValue& Value
 	
 	AddControllerYawInput(LookVec.X);
 	AddControllerPitchInput(LookVec.Y);
+}
+
+void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
+{
+	Jump();
 }

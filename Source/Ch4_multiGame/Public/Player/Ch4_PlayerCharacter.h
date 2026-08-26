@@ -33,7 +33,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Input")
 	class UInputAction* LookAction;
 
+	UPROPERTY(EditDefaultsOnly, Category="Input")
+	class UInputAction* JumpAction;
+	
 protected:
 	void InputActionMove(const struct FInputActionValue& Value);
 	void InputActionLook(const struct FInputActionValue& Value);
+	void InputActionJump(const struct FInputActionValue& Value);
 };
