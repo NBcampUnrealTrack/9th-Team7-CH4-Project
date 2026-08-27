@@ -1,4 +1,6 @@
 #include "Map/RoadBase.h"
+
+#include "Components/BoxComponent.h"
 #include "Components/SplineComponent.h"
 #include "Components/SplineMeshComponent.h"
 
@@ -27,11 +29,33 @@ ARoadBase::ARoadBase()
 
 	// Spline Mesh 진행 방향
 	ForwardAxis = ESplineMeshAxis::X;
+	
+	// 배경 배치 영역 가이드(지울예정)
+	BackgroundBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("BackgroundBounds"));
+	BackgroundBounds->SetupAttachment(RootComponent);
+	BackgroundBounds->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	// 모든 환경에서 사용할 기본 배경 영역(지울예정)
+	BackgroundBounds->SetBoxExtent(FVector(20000.0f, 20000.0f, 21000.0f));
+}
+
+void ARoadBase::BeginPlay()
+{
+	Super::BeginPlay();
+	
+	//(지울예정)
+	DrawBackgroundGuides();
+	
 }
 
 void ARoadBase::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	
+	BackgroundBounds->SetVisibility(bShowBackgroundBounds);
+	
+	//(지울예정)
+	DrawBackgroundGuides();
 
 	if (!SplineComponent)
 	{
@@ -146,4 +170,34 @@ void ARoadBase::OnConstruction(const FTransform& Transform)
 		SplineMeshComponents.Add(SplineMeshComp);
 	}
 }
+
+void ARoadBase::DrawBackgroundGuides()
+{
+	FlushPersistentDebugLines(GetWorld());
+
+	if (!BackgroundBounds || DivisionCount <= 1 || !bShowBackgroundGuides)
+	{
+		return;
+	}
+
+	const FVector BoundsCenter = BackgroundBounds->GetComponentLocation();
+	const FVector BoundsExtent = BackgroundBounds->GetScaledBoxExtent();
+
+	const float MinZ = BoundsCenter.Z - BoundsExtent.Z;
+	const float MaxZ = BoundsCenter.Z + BoundsExtent.Z;
+	const float HalfWidth = BoundsExtent.X;
+
+	const float DivisionHeight = (MaxZ - MinZ) / DivisionCount;
+
+	for (int32 Index = 1; Index < DivisionCount; ++Index)
+	{
+		const float Z = MinZ + DivisionHeight * Index;
+
+		const FVector LineStart(BoundsCenter.X - HalfWidth, BoundsCenter.Y, Z);
+		const FVector LineEnd(BoundsCenter.X + HalfWidth, BoundsCenter.Y, Z);
+
+		DrawDebugLine(GetWorld(), LineStart, LineEnd, FColor::Red, true, -1.0f, 0, 10.0f);
+	}
+}
+
 
