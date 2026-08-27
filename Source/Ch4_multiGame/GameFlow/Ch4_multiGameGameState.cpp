@@ -29,6 +29,20 @@ float ACh4_multiGameGameState::GetCargoSurvivalRate() const
 	return FMath::Clamp(static_cast<float>(RemainingCargoCount) / static_cast<float>(InitialCargoCount), 0.0f, 1.0f);
 }
 
+FCh4GameResult ACh4_multiGameGameState::GetGameResult() const
+{
+	FCh4GameResult Result;
+	Result.GamePhase = CurrentGamePhase;
+	Result.InitialCargoCount = InitialCargoCount;
+	Result.RemainingCargoCount = RemainingCargoCount;
+	Result.LostCargoCount = GetLostCargoCount();
+	Result.CargoSurvivalRate = GetCargoSurvivalRate();
+	Result.bGameEnded = CurrentGamePhase == ECh4GamePhase::Cleared
+		|| CurrentGamePhase == ECh4GamePhase::GameOver;
+	Result.bSucceeded = CurrentGamePhase == ECh4GamePhase::Cleared;
+	return Result;
+}
+
 bool ACh4_multiGameGameState::SetCurrentGamePhase(const ECh4GamePhase NewGamePhase)
 {
 	if (!HasAuthority())

@@ -3,14 +3,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFlow/GameFlowRuleInterface.h"
 #include "GameFramework/GameModeBase.h"
 #include "Ch4_multiGameGameMode.generated.h"
 
 /**
  * Authoritative rules owner for the shared game flow.
  */
-UCLASS(abstract)
-class ACh4_multiGameGameMode : public AGameModeBase
+UCLASS()
+class ACh4_multiGameGameMode : public AGameModeBase, public IGameFlowRuleInterface
 {
 	GENERATED_BODY()
 
@@ -35,6 +36,12 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow")
 	bool TryCompleteGame();
 
+	// IGameFlowRuleInterface
+	virtual bool RequestCargoInitialization(int32 InitialCargoCount) override;
+	virtual bool RequestGameStart() override;
+	virtual bool NotifyCargoLost(int32 LostCargoCount = 1) override;
+	virtual bool NotifyGoalReached(AActor* ReachingActor) override;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -48,6 +55,7 @@ protected:
 
 private:
 	class ACh4_multiGameGameState* GetGameFlowGameState() const;
+	bool ApplyRemainingCargoCount(int32 NewRemainingCargo);
 	void EndGameAsClear();
 	void EndGameAsGameOver();
 };

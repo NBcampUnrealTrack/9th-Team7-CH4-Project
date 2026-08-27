@@ -8,6 +8,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
+#include "GameFlow/GameFlowRuleInterface.h"
 
 namespace Ch4GameFlowTests
 {
@@ -16,6 +17,7 @@ namespace Ch4GameFlowTests
 		UWorld* World = nullptr;
 		ACh4_multiGameGameMode* GameMode = nullptr;
 		ACh4_multiGameGameState* GameState = nullptr;
+		IGameFlowRuleInterface* GameRule = nullptr;
 
 		bool Initialize()
 		{
@@ -36,16 +38,10 @@ namespace Ch4GameFlowTests
 			GameState = World->SpawnActor<ACh4_multiGameGameState>();
 			World->SetGameState(GameState);
 
-			UClass* GameModeClass = LoadClass<ACh4_multiGameGameMode>(
-				nullptr,
-				TEXT("/Game/ThirdPerson/Blueprints/BP_ThirdPersonGameMode.BP_ThirdPersonGameMode_C"));
+			GameMode = World->SpawnActor<ACh4_multiGameGameMode>();
+			GameRule = Cast<IGameFlowRuleInterface>(GameMode);
 
-			if (GameModeClass)
-			{
-				GameMode = World->SpawnActor<ACh4_multiGameGameMode>(GameModeClass);
-			}
-
-			return GameMode && GameState;
+			return GameMode && GameState && GameRule;
 		}
 
 		~FGameFlowTestWorld()
@@ -78,16 +74,20 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 		}
 
 		TestEqual(TEXT("Initial phase is Waiting"), static_cast<uint8>(ClearFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Waiting));
-		TestFalse(TEXT("Game cannot start before cargo initialization"), ClearFlow.GameMode->StartGame());
-		TestTrue(TEXT("Cargo initializes to 20"), ClearFlow.GameMode->InitializeCargoCount(20));
-		TestTrue(TEXT("Game starts after cargo initialization"), ClearFlow.GameMode->StartGame());
-		TestTrue(TEXT("Cargo updates from 20 to 18"), ClearFlow.GameMode->UpdateRemainingCargo(18));
+		TestFalse(TEXT("Game cannot start before cargo initialization"), ClearFlow.GameRule->RequestGameStart());
+		TestTrue(TEXT("Cargo initializes to 20"), ClearFlow.GameRule->RequestCargoInitialization(20));
+		TestTrue(TEXT("Game starts after cargo initialization"), ClearFlow.GameRule->RequestGameStart());
+		TestTrue(TEXT("Cargo loss updates from 20 to 18"), ClearFlow.GameRule->NotifyCargoLost(2));
 		TestTrue(TEXT("Cargo updates from 18 to 13"), ClearFlow.GameMode->UpdateRemainingCargo(13));
-		TestTrue(TEXT("Final delivery succeeds with cargo remaining"), ClearFlow.GameMode->TryCompleteGame());
+		TestTrue(TEXT("Final delivery succeeds with cargo remaining"), ClearFlow.GameRule->NotifyGoalReached(nullptr));
 		TestEqual(TEXT("Clear flow ends as Cleared"), static_cast<uint8>(ClearFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Cleared));
 		TestEqual(TEXT("Clear flow keeps 13 cargo"), ClearFlow.GameState->GetRemainingCargoCount(), 13);
 		TestEqual(TEXT("Clear flow lost cargo is calculated"), ClearFlow.GameState->GetLostCargoCount(), 7);
 		TestTrue(TEXT("Clear flow survival rate is 65 percent"), FMath::IsNearlyEqual(ClearFlow.GameState->GetCargoSurvivalRate(), 0.65f));
+		const FCh4GameResult ClearResult = ClearFlow.GameState->GetGameResult();
+		TestTrue(TEXT("Clear result is complete"), ClearResult.bGameEnded);
+		TestTrue(TEXT("Clear result succeeds"), ClearResult.bSucceeded);
+		TestEqual(TEXT("Clear result contains lost cargo"), ClearResult.LostCargoCount, 7);
 		TestFalse(TEXT("Cargo changes are ignored after clear"), ClearFlow.GameMode->UpdateRemainingCargo(0));
 		TestEqual(TEXT("Cleared cannot become GameOver"), static_cast<uint8>(ClearFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Cleared));
 	}
@@ -100,13 +100,16 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 			return false;
 		}
 
-		TestTrue(TEXT("Game-over cargo initializes to 3"), GameOverFlow.GameMode->InitializeCargoCount(3));
-		TestTrue(TEXT("Game-over flow starts"), GameOverFlow.GameMode->StartGame());
-		TestTrue(TEXT("Cargo updates from 3 to 2"), GameOverFlow.GameMode->UpdateRemainingCargo(2));
-		TestTrue(TEXT("Cargo updates from 2 to 1"), GameOverFlow.GameMode->UpdateRemainingCargo(1));
-		TestTrue(TEXT("Cargo updates from 1 to 0"), GameOverFlow.GameMode->UpdateRemainingCargo(0));
+		TestTrue(TEXT("Game-over cargo initializes to 3"), GameOverFlow.GameRule->RequestCargoInitialization(3));
+		TestTrue(TEXT("Game-over flow starts"), GameOverFlow.GameRule->RequestGameStart());
+		TestTrue(TEXT("Cargo loss updates from 3 to 2"), GameOverFlow.GameRule->NotifyCargoLost(1));
+		TestTrue(TEXT("Cargo loss updates from 2 to 1"), GameOverFlow.GameRule->NotifyCargoLost(1));
+		TestTrue(TEXT("Cargo loss updates from 1 to 0"), GameOverFlow.GameRule->NotifyCargoLost(1));
 		TestEqual(TEXT("Zero cargo ends as GameOver"), static_cast<uint8>(GameOverFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::GameOver));
-		TestFalse(TEXT("Final delivery is ignored after GameOver"), GameOverFlow.GameMode->TryCompleteGame());
+		const FCh4GameResult GameOverResult = GameOverFlow.GameState->GetGameResult();
+		TestTrue(TEXT("Game-over result is complete"), GameOverResult.bGameEnded);
+		TestFalse(TEXT("Game-over result fails"), GameOverResult.bSucceeded);
+		TestFalse(TEXT("Final delivery is ignored after GameOver"), GameOverFlow.GameRule->NotifyGoalReached(nullptr));
 		TestEqual(TEXT("GameOver cannot become Cleared"), static_cast<uint8>(GameOverFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::GameOver));
 	}
 

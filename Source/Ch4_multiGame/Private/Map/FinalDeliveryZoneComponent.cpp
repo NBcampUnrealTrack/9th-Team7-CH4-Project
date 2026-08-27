@@ -1,7 +1,7 @@
 #include "Map/FinalDeliveryZoneComponent.h"
 #include "Ch4_multiGame.h"
-#include "Ch4_multiGameGameMode.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
+#include "GameFlow/GameFlowRuleInterface.h"
 #include "GameFlow/GameFlowTargetInterface.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -122,24 +122,17 @@ void UFinalDeliveryZoneComponent::EvaluateDeliveryTarget(AActor* OtherActor)
 		return;
 	}
 
-	if (ACh4_multiGameGameMode* GameMode =
-		GetWorld()->GetAuthGameMode<ACh4_multiGameGameMode>())
+	if (IGameFlowRuleInterface* GameRule =
+		Cast<IGameFlowRuleInterface>(GetWorld()->GetAuthGameMode()))
 	{
-		UE_LOG(
-			LogCh4_multiGame,
-			Log,
-			TEXT("[GameFlow] Final Delivery target entered the zone: %s"),
-			*GetNameSafe(OtherActor)
-		);
-
-		GameMode->TryCompleteGame();
+		GameRule->NotifyGoalReached(OtherActor);
 	}
 	else
 	{
 		UE_LOG(
 			LogCh4_multiGame,
 			Error,
-			TEXT("[GameFlow] FinalDeliveryZoneComponent requires ACh4_multiGameGameMode")
+			TEXT("[GameFlow] FinalDeliveryZoneComponent requires IGameFlowRuleInterface")
 		);
 	}
 }

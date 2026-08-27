@@ -16,18 +16,25 @@ void ACh4_multiGameGameMode::BeginPlay()
 
 	if (bAutoStartGame)
 	{
-		if (InitializeCargoCount(DebugInitialCargoCount))
+		// Compatibility path for the existing BP_ThirdPersonGameMode test setting.
+		// It uses the same public rule API as external gameplay and debug actors.
+		if (RequestCargoInitialization(DebugInitialCargoCount))
 		{
-			StartGame();
+			RequestGameStart();
 		}
 	}
 }
 
 bool ACh4_multiGameGameMode::InitializeCargoCount(const int32 CargoCount)
 {
+	return RequestCargoInitialization(CargoCount);
+}
+
+bool ACh4_multiGameGameMode::RequestCargoInitialization(const int32 InitialCargoCount)
+{
 	if (!HasAuthority())
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] InitializeCargoCount rejected without server authority"));
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo initialization rejected without server authority"));
 		return false;
 	}
 
@@ -38,22 +45,27 @@ bool ACh4_multiGameGameMode::InitializeCargoCount(const int32 CargoCount)
 		return false;
 	}
 
-	if (CargoCount <= 0)
+	if (InitialCargoCount <= 0)
 	{
 		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo initialization requires at least one item"));
 		return false;
 	}
 
-	GameFlowState->SetCargoCounts(CargoCount, CargoCount);
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Cargo Initialized: %d"), CargoCount);
+	GameFlowState->SetCargoCounts(InitialCargoCount, InitialCargoCount);
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Cargo Initialized: %d"), InitialCargoCount);
 	return true;
 }
 
 bool ACh4_multiGameGameMode::StartGame()
 {
+	return RequestGameStart();
+}
+
+bool ACh4_multiGameGameMode::RequestGameStart()
+{
 	if (!HasAuthority())
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] StartGame rejected without server authority"));
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Game start rejected without server authority"));
 		return false;
 	}
 
@@ -78,6 +90,35 @@ bool ACh4_multiGameGameMode::StartGame()
 }
 
 bool ACh4_multiGameGameMode::UpdateRemainingCargo(const int32 NewRemainingCargo)
+{
+	return ApplyRemainingCargoCount(NewRemainingCargo);
+}
+
+bool ACh4_multiGameGameMode::NotifyCargoLost(const int32 LostCargoCount)
+{
+	if (!HasAuthority())
+	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo loss rejected without server authority"));
+		return false;
+	}
+
+	if (LostCargoCount <= 0)
+	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo loss requires a positive count"));
+		return false;
+	}
+
+	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
+	if (!GameFlowState || GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Playing)
+	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo loss ignored outside the Playing phase"));
+		return false;
+	}
+
+	return ApplyRemainingCargoCount(GameFlowState->GetRemainingCargoCount() - LostCargoCount);
+}
+
+bool ACh4_multiGameGameMode::ApplyRemainingCargoCount(const int32 NewRemainingCargo)
 {
 	if (!HasAuthority())
 	{
@@ -120,13 +161,19 @@ bool ACh4_multiGameGameMode::UpdateRemainingCargo(const int32 NewRemainingCargo)
 
 bool ACh4_multiGameGameMode::TryCompleteGame()
 {
+	return NotifyGoalReached(nullptr);
+}
+
+bool ACh4_multiGameGameMode::NotifyGoalReached(AActor* ReachingActor)
+{
 	if (!HasAuthority())
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] TryCompleteGame rejected without server authority"));
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Goal notification rejected without server authority"));
 		return false;
 	}
 
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Final Delivery Zone Reached"));
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Final Delivery Zone Reached by %s"),
+		IsValid(ReachingActor) ? *GetNameSafe(ReachingActor) : TEXT("Unspecified Target"));
 
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
 	if (!GameFlowState || GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Playing)

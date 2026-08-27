@@ -46,6 +46,10 @@ public:
 	UFUNCTION(BlueprintPure, Category="Game Flow|Cargo")
 	float GetCargoSurvivalRate() const;
 
+	/** Returns a read-only snapshot built from the replicated phase and cargo counts. */
+	UFUNCTION(BlueprintPure, Category="Game Flow|Result")
+	FCh4GameResult GetGameResult() const;
+
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
