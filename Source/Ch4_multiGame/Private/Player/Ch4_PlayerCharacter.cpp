@@ -6,6 +6,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Net/UnrealNetwork.h"
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
@@ -38,6 +39,13 @@ void ACh4_PlayerCharacter::BeginPlay()
 			}
 		}
 	}
+}
+
+void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	
+	DOREPLIFETIME(ThisClass, bIsStunned);
 }
 
 void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -91,21 +99,22 @@ void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
 		return;
 	}
 	
+	if (GetCharacterMovement()->IsFalling())
+	{
+		return;
+    }
+    	
 	Jump();
 }
 
 void ACh4_PlayerCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
 {
-	Super::OnMovementModeChanged(
-		PrevMovementMode,
-		PreviousCustomMode);
+	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
 
 	// Falling 상태로 진입했을 때
 	if (GetCharacterMovement()->MovementMode == MOVE_Falling)
 	{
 		FallStartTime = GetWorld()->GetTimeSeconds();
-		
-		UE_LOG(LogTemp, Warning, TEXT("OnMovementModeChanged to Falling"));
 	}
 }
 
@@ -113,6 +122,11 @@ void ACh4_PlayerCharacter::Landed(const FHitResult& Hit)
 {
 	Super::Landed(Hit);
 
+	if (HasAuthority() == false)
+	{
+		return;
+	}
+	
 	const float CurrentTime = GetWorld()->GetTimeSeconds();
 
 	// 낙하한 시간 = 착지 시간 - 낙하 시작 시간
@@ -121,13 +135,17 @@ void ACh4_PlayerCharacter::Landed(const FHitResult& Hit)
 	// 설정한 시간 이상 낙하했다면 경직
 	if (FallDuration >= FallStunThreshold)
 	{
-		ApplyStun();
+		OnStun();
 	}
-	UE_LOG(LogTemp, Warning, TEXT("Landed"));
 }
 
-void ACh4_PlayerCharacter::ApplyStun()
+void ACh4_PlayerCharacter::OnStun()
 {
+	if (HasAuthority() == false)
+	{
+		return;
+	}
+	
 	if (bIsStunned)
 	{
 		return;
@@ -151,16 +169,22 @@ void ACh4_PlayerCharacter::ApplyStun()
 		&ACh4_PlayerCharacter::EndStun,
 		StunDuration,
 		false);
-	
-	UE_LOG(LogTemp, Warning, TEXT("Apply Stun"));
 }
 
 void ACh4_PlayerCharacter::EndStun()
 {
+	if (HasAuthority() == false)
+	{
+		return;
+	}
+	
 	bIsStunned = false;
 
 	// 다시 걷기 가능
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
-	
-	UE_LOG(LogTemp, Warning, TEXT("End Stun"));
+}
+
+void ACh4_PlayerCharacter::OnRep_IsStunned()
+{
+	UE_LOG(LogTemp,	Warning, TEXT("OnRep_IsStunned : %s"), bIsStunned ? TEXT("True") : TEXT("False"));
 }

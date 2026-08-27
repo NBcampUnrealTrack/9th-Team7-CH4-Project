@@ -15,13 +15,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	
-	// MovementMode가 변경될 때 호출
-	virtual void OnMovementModeChanged(
-		EMovementMode PrevMovementMode,
-		uint8 PreviousCustomMode) override;
-
-	// 착지했을 때 호출
-	virtual void Landed(const FHitResult& Hit) override;
+	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
 	
 public:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
@@ -59,7 +53,13 @@ protected:
 	void InputActionLook(const struct FInputActionValue& Value);
 	void InputActionJump(const struct FInputActionValue& Value);
 	
-	void ApplyStun();
+	// MovementMode가 변경될 때 호출
+	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
+
+	// 착지했을 때 호출
+	virtual void Landed(const FHitResult& Hit) override;
+	
+	void OnStun();
 
 	void EndStun();
 
@@ -67,8 +67,12 @@ protected:
 	float FallStartTime = 0.0f;
 
 	// 현재 경직 상태
+	UPROPERTY(ReplicatedUsing = OnRep_IsStunned)
 	bool bIsStunned = false;
 
+	UFUNCTION()
+	void OnRep_IsStunned();
+	
 	// 경직 종료 타이머
 	FTimerHandle StunTimerHandle;
 };
