@@ -8,6 +8,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
+#include "GameFlow/GameFlowDebugDriver.h"
 #include "GameFlow/GameFlowRuleInterface.h"
 
 namespace Ch4GameFlowTests
@@ -199,6 +200,108 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Disabled empty-cargo failure keeps Playing"), static_cast<uint8>(EmptyCargoAllowedFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Playing));
 		TestFalse(TEXT("Zero cargo still cannot satisfy the default clear requirement"), EmptyCargoAllowedFlow.GameRule->NotifyGoalReached(nullptr));
 	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCh4GameFlowDebugStartupTest,
+	"Ch4_multiGame.GameFlow.DebugStartup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCh4GameFlowDebugStartupTest::RunTest(const FString& Parameters)
+{
+	using namespace Ch4GameFlowTests;
+
+	{
+		FGameFlowTestWorld NoDriverFlow;
+		if (!NoDriverFlow.Initialize())
+		{
+			AddError(TEXT("Failed to initialize the no-driver test world."));
+			return false;
+		}
+
+		TestEqual(TEXT("No debug driver leaves the game Waiting"),
+			static_cast<uint8>(NoDriverFlow.GameState->GetCurrentGamePhase()),
+			static_cast<uint8>(ECh4GamePhase::Waiting));
+		TestEqual(TEXT("No debug driver leaves Cargo uninitialized"),
+			NoDriverFlow.GameState->GetInitialCargoCount(), 0);
+	}
+
+	{
+		FGameFlowTestWorld DisabledDriverFlow;
+		if (!DisabledDriverFlow.Initialize())
+		{
+			AddError(TEXT("Failed to initialize the disabled-driver test world."));
+			return false;
+		}
+
+		AGameFlowDebugDriver* DebugDriver = DisabledDriverFlow.World->SpawnActor<AGameFlowDebugDriver>();
+		if (!DebugDriver)
+		{
+			AddError(TEXT("Failed to spawn the disabled debug driver."));
+			return false;
+		}
+
+		DebugDriver->ConfigureForTesting(false, 20);
+		TestFalse(TEXT("Disabled debug startup makes no request"), DebugDriver->RunDebugStartupForTesting());
+		TestEqual(TEXT("Disabled debug startup leaves the game Waiting"),
+			static_cast<uint8>(DisabledDriverFlow.GameState->GetCurrentGamePhase()),
+			static_cast<uint8>(ECh4GamePhase::Waiting));
+	}
+
+	{
+		FGameFlowTestWorld EnabledDriverFlow;
+		if (!EnabledDriverFlow.Initialize())
+		{
+			AddError(TEXT("Failed to initialize the enabled-driver test world."));
+			return false;
+		}
+
+		AGameFlowDebugDriver* DebugDriver = EnabledDriverFlow.World->SpawnActor<AGameFlowDebugDriver>();
+		if (!DebugDriver)
+		{
+			AddError(TEXT("Failed to spawn the enabled debug driver."));
+			return false;
+		}
+
+		DebugDriver->ConfigureForTesting(true, 20, EnabledDriverFlow.GameRule);
+		TestTrue(TEXT("Enabled server debug startup succeeds"), DebugDriver->RunDebugStartupForTesting());
+		TestEqual(TEXT("Enabled debug startup enters Playing"),
+			static_cast<uint8>(EnabledDriverFlow.GameState->GetCurrentGamePhase()),
+			static_cast<uint8>(ECh4GamePhase::Playing));
+		TestEqual(TEXT("Enabled debug startup initializes 20 Cargo"),
+			EnabledDriverFlow.GameState->GetInitialCargoCount(), 20);
+		TestEqual(TEXT("Enabled debug startup keeps 20 Cargo"),
+			EnabledDriverFlow.GameState->GetRemainingCargoCount(), 20);
+	}
+
+	{
+		FGameFlowTestWorld InvalidCargoFlow;
+		if (!InvalidCargoFlow.Initialize())
+		{
+			AddError(TEXT("Failed to initialize the invalid-cargo test world."));
+			return false;
+		}
+
+		AGameFlowDebugDriver* DebugDriver = InvalidCargoFlow.World->SpawnActor<AGameFlowDebugDriver>();
+		if (!DebugDriver)
+		{
+			AddError(TEXT("Failed to spawn the invalid-cargo debug driver."));
+			return false;
+		}
+
+		DebugDriver->ConfigureForTesting(true, 0);
+		TestFalse(TEXT("Zero debug Cargo cannot start the game"), DebugDriver->RunDebugStartupForTesting());
+		TestEqual(TEXT("Invalid debug Cargo leaves the game Waiting"),
+			static_cast<uint8>(InvalidCargoFlow.GameState->GetCurrentGamePhase()),
+			static_cast<uint8>(ECh4GamePhase::Waiting));
+	}
+
+	TestFalse(TEXT("A client cannot attempt debug startup"),
+		AGameFlowDebugDriver::CanAttemptDebugStartupForTesting(true, false, 20));
+	TestTrue(TEXT("An enabled server can attempt valid debug startup"),
+		AGameFlowDebugDriver::CanAttemptDebugStartupForTesting(true, true, 20));
 
 	return true;
 }

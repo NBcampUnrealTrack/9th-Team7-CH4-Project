@@ -17,21 +17,6 @@ void ACh4_multiGameGameMode::SetGameRuleConfigForTesting(const FCh4GameRuleConfi
 }
 #endif
 
-void ACh4_multiGameGameMode::BeginPlay()
-{
-	Super::BeginPlay();
-
-	if (bAutoStartGame)
-	{
-		// Compatibility path for the existing BP_ThirdPersonGameMode test setting.
-		// It uses the same public rule API as external gameplay and debug actors.
-		if (RequestCargoInitialization(DebugInitialCargoCount))
-		{
-			RequestGameStart();
-		}
-	}
-}
-
 bool ACh4_multiGameGameMode::InitializeCargoCount(const int32 CargoCount)
 {
 	return RequestCargoInitialization(CargoCount);

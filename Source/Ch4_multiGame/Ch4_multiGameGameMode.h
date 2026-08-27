@@ -53,18 +53,19 @@ public:
 #endif
 
 protected:
-	virtual void BeginPlay() override;
-
 	/** Authoritative success/failure policy, separate from runtime state and debug settings. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Rules")
 	FCh4GameRuleConfig GameRuleConfig;
 
-	/** Test-only convenience. Production flow should call StartGame explicitly. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Debug")
+	/** Legacy serialized setting. Debug startup is now owned by AGameFlowDebugDriver. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Legacy Debug",
+		meta=(DeprecatedProperty, DeprecationMessage="Use AGameFlowDebugDriver instead."))
 	bool bAutoStartGame = false;
 
-	/** Test-only initial count used when bAutoStartGame is enabled. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Debug", meta=(EditCondition="bAutoStartGame", ClampMin="1"))
+	/** Legacy serialized setting. It is intentionally inactive in the production GameMode. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Legacy Debug",
+		meta=(DeprecatedProperty, DeprecationMessage="Use AGameFlowDebugDriver.DebugInitialCargoCount instead.",
+			EditCondition="bAutoStartGame", ClampMin="1"))
 	int32 DebugInitialCargoCount = 20;
 
 private:
