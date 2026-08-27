@@ -76,6 +76,8 @@ void AFinalDeliveryZone::OnGamePhaseChanged(const ECh4GamePhase NewGamePhase)
 		return;
 	}
 
+	NotifiedDeliveryTargets.Reset();
+
 	// Overlap state can finish registering later in the same frame as BeginPlay.
 	GetWorldTimerManager().SetTimerForNextTick(this, &AFinalDeliveryZone::EvaluateOverlappingTargets);
 }
@@ -94,8 +96,15 @@ void AFinalDeliveryZone::EvaluateDeliveryTarget(AActor* OtherActor)
 		return;
 	}
 
+	const TWeakObjectPtr<AActor> TargetKey(OtherActor);
+	if (NotifiedDeliveryTargets.Contains(TargetKey))
+	{
+		return;
+	}
+
 	if (IGameFlowRuleInterface* GameRule = Cast<IGameFlowRuleInterface>(GetWorld()->GetAuthGameMode()))
 	{
+		NotifiedDeliveryTargets.Add(TargetKey);
 		GameRule->NotifyGoalReached(OtherActor);
 	}
 	else

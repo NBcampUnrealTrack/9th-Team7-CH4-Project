@@ -95,6 +95,8 @@ void UFinalDeliveryZoneComponent::OnGamePhaseChanged(
 		return;
 	}
 
+	NotifiedDeliveryTargets.Reset();
+
 	GetWorld()->GetTimerManager().SetTimerForNextTick(
 		this,
 		&UFinalDeliveryZoneComponent::EvaluateOverlappingTargets
@@ -122,9 +124,16 @@ void UFinalDeliveryZoneComponent::EvaluateDeliveryTarget(AActor* OtherActor)
 		return;
 	}
 
+	const TWeakObjectPtr<AActor> TargetKey(OtherActor);
+	if (NotifiedDeliveryTargets.Contains(TargetKey))
+	{
+		return;
+	}
+
 	if (IGameFlowRuleInterface* GameRule =
 		Cast<IGameFlowRuleInterface>(GetWorld()->GetAuthGameMode()))
 	{
+		NotifiedDeliveryTargets.Add(TargetKey);
 		GameRule->NotifyGoalReached(OtherActor);
 	}
 	else
