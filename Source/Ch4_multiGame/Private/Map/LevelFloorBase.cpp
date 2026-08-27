@@ -1,8 +1,7 @@
 #include "Public/Map/LevelFloorBase.h"
 #include "Components/BoxComponent.h"
-#include "Components/SplineComponent.h"
-#include "Components/SplineMeshComponent.h"
 #include "GameFramework/Character.h"
+#include "DrawDebugHelpers.h"
 
 ALevelFloorBase::ALevelFloorBase()
 {
@@ -11,29 +10,30 @@ ALevelFloorBase::ALevelFloorBase()
 	bReplicates = true;
 	SetReplicateMovement(true);
 
-	// 루트 컴포넌트 생성
+	// 루트 컴포넌트
 	USceneComponent* RootComp = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 	SetRootComponent(RootComp);
 
-	// 시작점 생성
+	// 환경 시작점
 	StartPoint = CreateDefaultSubobject<USceneComponent>(TEXT("StartPoint"));
 	StartPoint->SetupAttachment(RootComponent);
 
-	// 끝점 생성
+	// 환경 끝점
 	EndPoint = CreateDefaultSubobject<USceneComponent>(TEXT("EndPoint"));
 	EndPoint->SetupAttachment(RootComponent);
 
-	// 충돌 박스 생성
+	// 환경 충돌 영역
 	CollisionBox = CreateDefaultSubobject<UBoxComponent>(TEXT("CollisionBox"));
 	CollisionBox->SetupAttachment(RootComponent);
 	CollisionBox->SetCollisionObjectType(ECC_WorldStatic);
 
-	// 스플라인 생성
-	SplineComponent = CreateDefaultSubobject<USplineComponent>(TEXT("FloorSplineComponent"));
-	SplineComponent->SetupAttachment(RootComponent);
+	// 배경 배치 영역 가이드
+	BackgroundBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("BackgroundBounds"));
+	BackgroundBounds->SetupAttachment(RootComponent);
+	BackgroundBounds->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-	// 스플라인 메시의 진행 방향
-	ForwardAxis = ESplineMeshAxis::X;
+	// 모든 환경에서 사용할 기본 배경 영역
+	BackgroundBounds->SetBoxExtent(FVector(7000.0f, 7000.0f, 17500.0f));
 }
 
 void ALevelFloorBase::BeginPlay()
@@ -42,8 +42,9 @@ void ALevelFloorBase::BeginPlay()
 
 	CollisionBox->OnComponentBeginOverlap.AddDynamic(
 		this,
-		&ALevelFloorBase::OnCollisionBoxBeginOverlap
-	);
+		&ALevelFloorBase::OnCollisionBoxBeginOverlap);
+	
+	DrawBackgroundGuides();
 }
 
 void ALevelFloorBase::OnCollisionBoxBeginOverlap(
@@ -59,7 +60,8 @@ void ALevelFloorBase::OnCollisionBoxBeginOverlap(
 		return;
 	}
 
-	ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor);
+	ACharacter* PlayerCharacter =
+		Cast<ACharacter>(OtherActor);
 
 	if (!PlayerCharacter)
 	{
@@ -69,104 +71,38 @@ void ALevelFloorBase::OnCollisionBoxBeginOverlap(
 
 void ALevelFloorBase::OnConstruction(const FTransform& Transform)
 {
-    Super::OnConstruction(Transform);
+	Super::OnConstruction(Transform);
+	
+	DrawBackgroundGuides();
+}
 
-    if (!SplineComponent)
-    {
-       return;
-    }
+void ALevelFloorBase::DrawBackgroundGuides()
+{
+	if (!BackgroundBounds || DivisionCount <= 1)
+	{
+		return;
+	}
 
-    // 스플라인 내부 데이터 갱신
-    SplineComponent->UpdateSpline();
+	FlushPersistentDebugLines(GetWorld());
 
-    // 1. 기존에 생성된 스플라인 메시 제거
-    for (USplineMeshComponent* Comp : SplineMeshComponents)
-    {
-       if (Comp)
-       {
-          Comp->UnregisterComponent();
-          Comp->DestroyComponent();
-       }
-    }
-    SplineMeshComponents.Empty();
+	const FVector BoundsCenter = BackgroundBounds->GetComponentLocation();
+	const FVector BoundsExtent = BackgroundBounds->GetScaledBoxExtent();
 
-    // 사용할 메시가 없거나 MeshLength가 0 이하이면 종료 (0 나누기 예방)
-    if (!MeshToUse || MeshLength <= 0.0f)
-    {
-       return;
-    }
+	const float MinZ = BoundsCenter.Z - BoundsExtent.Z;
+	const float MaxZ = BoundsCenter.Z + BoundsExtent.Z;
+	const float HalfWidth = BoundsExtent.X;
 
-    // 2. [Get Spline Length] 스플라인 전체 길이 가져오기
-    const float SplineLength = SplineComponent->GetSplineLength();
+	// 전체 높이를 DivisionCount만큼 정확하게 나눔
+	const float DivisionHeight = (MaxZ - MinZ) / DivisionCount;
 
-    // 3. [Get Spline Length / Mesh Length -> Truncate - 1] 생성할 메시 개수 계산
-    const int32 NumberOfMeshes = FMath::TruncToInt(SplineLength / MeshLength);
-    const int32 LastIndex = NumberOfMeshes - 1;
+	// 양 끝 경계선은 그리지 않고 내부 구분선만 그림
+	for (int32 Index = 1; Index < DivisionCount; ++Index)
+	{
+		const float Z = MinZ + DivisionHeight * Index;
 
-    // 생성할 메시가 없으면 종료
-    if (LastIndex < 0)
-    {
-       return;
-    }
+		const FVector LineStart(BoundsCenter.X - HalfWidth, BoundsCenter.Y, Z);
+		const FVector LineEnd(BoundsCenter.X + HalfWidth, BoundsCenter.Y, Z);
 
-    // 4. [For Loop] (Index: 0 ~ LastIndex)
-    for (int32 Index = 0; Index <= LastIndex; ++Index)
-    {
-       // [Add Spline Mesh Component]
-       USplineMeshComponent* SplineMeshComp = NewObject<USplineMeshComponent>(this);
-
-       if (!SplineMeshComp)
-       {
-          continue;
-       }
-
-       SplineMeshComp->CreationMethod = EComponentCreationMethod::UserConstructionScript;
-       SplineMeshComp->SetMobility(EComponentMobility::Movable);
-    	
-    	// 1. 충돌 프로필 설정 (BlockAll / WorldStatic / BlockAllDynamic 등)
-    	SplineMeshComp->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
-
-    	// 2. 복잡한 메쉬 구조를 단순 충돌체로 연산하도록 설정 (선택 사항)
-    	SplineMeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-
-       SplineMeshComp->AttachToComponent(
-          SplineComponent,
-          FAttachmentTransformRules::KeepRelativeTransform
-       );
-
-       // [Set Static Mesh]
-       SplineMeshComp->SetStaticMesh(MeshToUse);
-       SplineMeshComp->SetForwardAxis(ForwardAxis);
-
-       // --- 거리 계산 (Start / End Distance) ---
-       // Start Distance = Index * MeshLength
-       const float StartDistance = Index * MeshLength;
-       // End Distance = (Index + 1) * MeshLength
-       const float EndDistance = (Index + 1) * MeshLength;
-
-       // --- [Get Location and Tangent at Distance Along Spline] ---
-       // 시작 지점 위치 & 탄젠트 (Local 공간)
-       FVector StartPos = SplineComponent->GetLocationAtDistanceAlongSpline(StartDistance, ESplineCoordinateSpace::Local);
-       FVector StartTangent = SplineComponent->GetTangentAtDistanceAlongSpline(StartDistance, ESplineCoordinateSpace::Local);
-
-       // 끝 지점 위치 & 탄젠트 (Local 공간)
-       FVector EndPos = SplineComponent->GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::Local);
-       FVector EndTangent = SplineComponent->GetTangentAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::Local);
-
-       // --- [Clamp Vector Size] 탄젠트 벡터 크기를 MeshLength로 제한 ---
-       StartTangent = StartTangent.GetClampedToMaxSize(MeshLength);
-       EndTangent = EndTangent.GetClampedToMaxSize(MeshLength);
-
-       // [Set Start and End]
-       SplineMeshComp->SetStartAndEnd(
-          StartPos,
-          StartTangent,
-          EndPos,
-          EndTangent,
-          true
-       );
-
-       SplineMeshComp->RegisterComponent();
-       SplineMeshComponents.Add(SplineMeshComp);
-    }
+		DrawDebugLine(GetWorld(), LineStart, LineEnd, FColor::Red, true, -1.0f, 0, 10.0f);
+	}
 }
