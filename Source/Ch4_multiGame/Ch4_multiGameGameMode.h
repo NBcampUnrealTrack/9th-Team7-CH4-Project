@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFlow/Ch4GameFlowTypes.h"
 #include "GameFlow/GameFlowRuleInterface.h"
 #include "GameFramework/GameModeBase.h"
 #include "Ch4_multiGameGameMode.generated.h"
@@ -42,8 +43,21 @@ public:
 	virtual bool NotifyCargoLost(int32 LostCargoCount = 1) override;
 	virtual bool NotifyGoalReached(AActor* ReachingActor) override;
 
+	/** Returns the active rule policy. Runtime cargo values live in GameState instead. */
+	UFUNCTION(BlueprintPure, Category="Game Flow|Rules")
+	FCh4GameRuleConfig GetGameRuleConfig() const { return GameRuleConfig; }
+
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Test-only configuration injection used before a test session starts. */
+	void SetGameRuleConfigForTesting(const FCh4GameRuleConfig& NewGameRuleConfig);
+#endif
+
 protected:
 	virtual void BeginPlay() override;
+
+	/** Authoritative success/failure policy, separate from runtime state and debug settings. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Rules")
+	FCh4GameRuleConfig GameRuleConfig;
 
 	/** Test-only convenience. Production flow should call StartGame explicitly. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Debug")
@@ -54,10 +68,24 @@ protected:
 	int32 DebugInitialCargoCount = 20;
 
 private:
+	enum class EGameRuleEvaluationEvent : uint8
+	{
+		CargoChanged,
+		GoalReached
+	};
+
 	class ACh4_multiGameGameState* GetGameFlowGameState() const;
+	bool CanInitializeCargo(int32 InitialCargoCount, const ACh4_multiGameGameState& GameFlowState) const;
+	bool CanStartGame(const ACh4_multiGameGameState& GameFlowState) const;
+	bool CanProcessCargoChange(const ACh4_multiGameGameState& GameFlowState) const;
+	bool ShouldFailGame(const ACh4_multiGameGameState& GameFlowState) const;
+	bool CanCompleteGame(const ACh4_multiGameGameState& GameFlowState) const;
+	bool EvaluateGameOutcome(EGameRuleEvaluationEvent EvaluationEvent);
+	bool IsGamePhaseTransitionAllowed(ECh4GamePhase CurrentPhase, ECh4GamePhase NewPhase) const;
+	bool TryTransitionGamePhase(ECh4GamePhase NewPhase, ECh4GameEndReason EndReason);
 	bool ApplyRemainingCargoCount(int32 NewRemainingCargo);
-	void EndGameAsClear();
-	void EndGameAsGameOver();
+	void EndGameAsClear(ECh4GameEndReason EndReason);
+	void EndGameAsGameOver(ECh4GameEndReason EndReason);
 };
 
 

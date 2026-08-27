@@ -10,6 +10,13 @@ ACh4_multiGameGameMode::ACh4_multiGameGameMode()
 	GameStateClass = ACh4_multiGameGameState::StaticClass();
 }
 
+#if WITH_DEV_AUTOMATION_TESTS
+void ACh4_multiGameGameMode::SetGameRuleConfigForTesting(const FCh4GameRuleConfig& NewGameRuleConfig)
+{
+	GameRuleConfig = NewGameRuleConfig;
+}
+#endif
+
 void ACh4_multiGameGameMode::BeginPlay()
 {
 	Super::BeginPlay();
@@ -39,19 +46,19 @@ bool ACh4_multiGameGameMode::RequestCargoInitialization(const int32 InitialCargo
 	}
 
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
-	if (!GameFlowState || GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Waiting)
+	if (!GameFlowState || !CanInitializeCargo(InitialCargoCount, *GameFlowState))
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo can only be initialized while Waiting"));
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Cargo initialization requires Waiting phase and a positive count: %d"),
+			InitialCargoCount);
 		return false;
 	}
 
-	if (InitialCargoCount <= 0)
+	if (!GameFlowState->SetCargoCounts(InitialCargoCount, InitialCargoCount))
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo initialization requires at least one item"));
 		return false;
 	}
 
-	GameFlowState->SetCargoCounts(InitialCargoCount, InitialCargoCount);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Cargo Initialized: %d"), InitialCargoCount);
 	return true;
 }
@@ -70,19 +77,18 @@ bool ACh4_multiGameGameMode::RequestGameStart()
 	}
 
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
-	if (!GameFlowState || GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Waiting)
+	if (!GameFlowState || !CanStartGame(*GameFlowState))
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] StartGame requires the Waiting phase"));
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] StartGame requires Waiting phase and initialized cargo"));
 		return false;
 	}
 
-	if (GameFlowState->GetInitialCargoCount() <= 0 || GameFlowState->GetRemainingCargoCount() <= 0)
+	if (!TryTransitionGamePhase(ECh4GamePhase::Playing, ECh4GameEndReason::None))
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] StartGame requires initialized cargo"));
 		return false;
 	}
 
-	GameFlowState->SetCurrentGamePhase(ECh4GamePhase::Playing);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Game Started"));
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Remaining Cargo: %d / %d"),
 		GameFlowState->GetRemainingCargoCount(), GameFlowState->GetInitialCargoCount());
@@ -91,7 +97,13 @@ bool ACh4_multiGameGameMode::RequestGameStart()
 
 bool ACh4_multiGameGameMode::UpdateRemainingCargo(const int32 NewRemainingCargo)
 {
-	return ApplyRemainingCargoCount(NewRemainingCargo);
+	if (!ApplyRemainingCargoCount(NewRemainingCargo))
+	{
+		return false;
+	}
+
+	EvaluateGameOutcome(EGameRuleEvaluationEvent::CargoChanged);
+	return true;
 }
 
 bool ACh4_multiGameGameMode::NotifyCargoLost(const int32 LostCargoCount)
@@ -109,13 +121,19 @@ bool ACh4_multiGameGameMode::NotifyCargoLost(const int32 LostCargoCount)
 	}
 
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
-	if (!GameFlowState || GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Playing)
+	if (!GameFlowState || !CanProcessCargoChange(*GameFlowState))
 	{
 		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo loss ignored outside the Playing phase"));
 		return false;
 	}
 
-	return ApplyRemainingCargoCount(GameFlowState->GetRemainingCargoCount() - LostCargoCount);
+	if (!ApplyRemainingCargoCount(GameFlowState->GetRemainingCargoCount() - LostCargoCount))
+	{
+		return false;
+	}
+
+	EvaluateGameOutcome(EGameRuleEvaluationEvent::CargoChanged);
+	return true;
 }
 
 bool ACh4_multiGameGameMode::ApplyRemainingCargoCount(const int32 NewRemainingCargo)
@@ -127,7 +145,7 @@ bool ACh4_multiGameGameMode::ApplyRemainingCargoCount(const int32 NewRemainingCa
 	}
 
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
-	if (!GameFlowState || GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Playing)
+	if (!GameFlowState || !CanProcessCargoChange(*GameFlowState))
 	{
 		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo change ignored outside the Playing phase"));
 		return false;
@@ -149,12 +167,6 @@ bool ACh4_multiGameGameMode::ApplyRemainingCargoCount(const int32 NewRemainingCa
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Cargo Changed: %d -> %d"), PreviousCargoCount, ValidatedCargoCount);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Remaining Cargo: %d / %d"),
 		ValidatedCargoCount, GameFlowState->GetInitialCargoCount());
-
-	if (ValidatedCargoCount <= 0)
-	{
-		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] No Cargo Remaining"));
-		EndGameAsGameOver();
-	}
 
 	return true;
 }
@@ -182,14 +194,7 @@ bool ACh4_multiGameGameMode::NotifyGoalReached(AActor* ReachingActor)
 		return false;
 	}
 
-	if (GameFlowState->GetRemainingCargoCount() <= 0)
-	{
-		EndGameAsGameOver();
-		return false;
-	}
-
-	EndGameAsClear();
-	return true;
+	return EvaluateGameOutcome(EGameRuleEvaluationEvent::GoalReached);
 }
 
 ACh4_multiGameGameState* ACh4_multiGameGameMode::GetGameFlowGameState() const
@@ -205,28 +210,156 @@ ACh4_multiGameGameState* ACh4_multiGameGameMode::GetGameFlowGameState() const
 	return GameFlowState;
 }
 
-void ACh4_multiGameGameMode::EndGameAsClear()
+bool ACh4_multiGameGameMode::CanInitializeCargo(
+	const int32 InitialCargoCount,
+	const ACh4_multiGameGameState& GameFlowState) const
 {
-	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
-	if (!GameFlowState || GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Playing)
-	{
-		return;
-	}
-
-	GameFlowState->SetCurrentGamePhase(ECh4GamePhase::Cleared);
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] GAME CLEARED"));
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Remaining Cargo: %d / %d"),
-		GameFlowState->GetRemainingCargoCount(), GameFlowState->GetInitialCargoCount());
+	return GameFlowState.GetCurrentGamePhase() == ECh4GamePhase::Waiting
+		&& InitialCargoCount > 0;
 }
 
-void ACh4_multiGameGameMode::EndGameAsGameOver()
+bool ACh4_multiGameGameMode::CanStartGame(const ACh4_multiGameGameState& GameFlowState) const
+{
+	return GameFlowState.GetCurrentGamePhase() == ECh4GamePhase::Waiting
+		&& GameFlowState.GetInitialCargoCount() > 0
+		&& GameFlowState.GetRemainingCargoCount() > 0;
+}
+
+bool ACh4_multiGameGameMode::CanProcessCargoChange(const ACh4_multiGameGameState& GameFlowState) const
+{
+	return GameFlowState.GetCurrentGamePhase() == ECh4GamePhase::Playing;
+}
+
+bool ACh4_multiGameGameMode::ShouldFailGame(const ACh4_multiGameGameState& GameFlowState) const
+{
+	const bool bCargoEmptyFailure = GameRuleConfig.bFailWhenCargoEmpty
+		&& GameFlowState.GetRemainingCargoCount() <= 0;
+	const bool bAnyCargoLostFailure = GameRuleConfig.bFailOnAnyCargoLost
+		&& GameFlowState.GetLostCargoCount() > 0;
+	return bCargoEmptyFailure || bAnyCargoLostFailure;
+}
+
+bool ACh4_multiGameGameMode::CanCompleteGame(const ACh4_multiGameGameState& GameFlowState) const
+{
+	if (GameFlowState.GetCurrentGamePhase() != ECh4GamePhase::Playing)
+	{
+		return false;
+	}
+
+	const int32 RequiredCargoCount = FMath::Max(GameRuleConfig.MinimumCargoCountToClear, 0);
+	const float RequiredSurvivalRate = FMath::Clamp(
+		GameRuleConfig.MinimumCargoSurvivalRateToClear,
+		0.0f,
+		1.0f);
+	return GameFlowState.GetRemainingCargoCount() >= RequiredCargoCount
+		&& GameFlowState.GetCargoSurvivalRate() + UE_KINDA_SMALL_NUMBER >= RequiredSurvivalRate;
+}
+
+bool ACh4_multiGameGameMode::EvaluateGameOutcome(const EGameRuleEvaluationEvent EvaluationEvent)
 {
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
 	if (!GameFlowState || GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Playing)
 	{
+		return false;
+	}
+
+	if (ShouldFailGame(*GameFlowState))
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[GameFlow] Cargo rule failed: Remaining=%d, Lost=%d"),
+			GameFlowState->GetRemainingCargoCount(),
+			GameFlowState->GetLostCargoCount());
+		EndGameAsGameOver(ECh4GameEndReason::CargoRuleFailed);
+		return false;
+	}
+
+	if (EvaluationEvent != EGameRuleEvaluationEvent::GoalReached)
+	{
+		return false;
+	}
+
+	if (!CanCompleteGame(*GameFlowState))
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[GameFlow] Goal reached but clear requirements were not met: Cargo=%d/%d, Survival=%.3f/%.3f"),
+			GameFlowState->GetRemainingCargoCount(),
+			FMath::Max(GameRuleConfig.MinimumCargoCountToClear, 0),
+			GameFlowState->GetCargoSurvivalRate(),
+			FMath::Clamp(GameRuleConfig.MinimumCargoSurvivalRateToClear, 0.0f, 1.0f));
+		return false;
+	}
+
+	EndGameAsClear(ECh4GameEndReason::GoalReached);
+	return true;
+}
+
+bool ACh4_multiGameGameMode::IsGamePhaseTransitionAllowed(
+	const ECh4GamePhase CurrentPhase,
+	const ECh4GamePhase NewPhase) const
+{
+	return (CurrentPhase == ECh4GamePhase::Waiting && NewPhase == ECh4GamePhase::Playing)
+		|| (CurrentPhase == ECh4GamePhase::Playing
+			&& (NewPhase == ECh4GamePhase::Cleared || NewPhase == ECh4GamePhase::GameOver));
+}
+
+bool ACh4_multiGameGameMode::TryTransitionGamePhase(
+	const ECh4GamePhase NewPhase,
+	const ECh4GameEndReason EndReason)
+{
+	if (!HasAuthority())
+	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Phase transition rejected without server authority"));
+		return false;
+	}
+
+	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
+	if (!GameFlowState)
+	{
+		return false;
+	}
+
+	const ECh4GamePhase CurrentPhase = GameFlowState->GetCurrentGamePhase();
+	if (!IsGamePhaseTransitionAllowed(CurrentPhase, NewPhase))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Invalid phase transition rejected: %d -> %d"),
+			static_cast<int32>(CurrentPhase),
+			static_cast<int32>(NewPhase));
+		return false;
+	}
+
+	const bool bTerminalPhase = NewPhase == ECh4GamePhase::Cleared
+		|| NewPhase == ECh4GamePhase::GameOver;
+	if ((bTerminalPhase && EndReason == ECh4GameEndReason::None)
+		|| (!bTerminalPhase && EndReason != ECh4GameEndReason::None))
+	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Phase transition rejected because its end reason is inconsistent"));
+		return false;
+	}
+
+	return GameFlowState->SetGamePhaseState(NewPhase, EndReason);
+}
+
+void ACh4_multiGameGameMode::EndGameAsClear(const ECh4GameEndReason EndReason)
+{
+	if (!TryTransitionGamePhase(ECh4GamePhase::Cleared, EndReason))
+	{
 		return;
 	}
 
-	GameFlowState->SetCurrentGamePhase(ECh4GamePhase::GameOver);
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] GAME OVER"));
+	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] GAME CLEARED"));
+	if (GameFlowState)
+	{
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Remaining Cargo: %d / %d"),
+			GameFlowState->GetRemainingCargoCount(), GameFlowState->GetInitialCargoCount());
+	}
+}
+
+void ACh4_multiGameGameMode::EndGameAsGameOver(const ECh4GameEndReason EndReason)
+{
+	if (TryTransitionGamePhase(ECh4GamePhase::GameOver, EndReason))
+	{
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] GAME OVER"));
+	}
 }

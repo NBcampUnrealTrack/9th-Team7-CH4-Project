@@ -11,6 +11,7 @@ void ACh4_multiGameGameState::GetLifetimeReplicatedProps(TArray<FLifetimePropert
 
 	DOREPLIFETIME(ACh4_multiGameGameState, InitialCargoCount);
 	DOREPLIFETIME(ACh4_multiGameGameState, RemainingCargoCount);
+	DOREPLIFETIME(ACh4_multiGameGameState, GameEndReason);
 	DOREPLIFETIME(ACh4_multiGameGameState, CurrentGamePhase);
 }
 
@@ -33,6 +34,7 @@ FCh4GameResult ACh4_multiGameGameState::GetGameResult() const
 {
 	FCh4GameResult Result;
 	Result.GamePhase = CurrentGamePhase;
+	Result.GameEndReason = GameEndReason;
 	Result.InitialCargoCount = InitialCargoCount;
 	Result.RemainingCargoCount = RemainingCargoCount;
 	Result.LostCargoCount = GetLostCargoCount();
@@ -43,7 +45,9 @@ FCh4GameResult ACh4_multiGameGameState::GetGameResult() const
 	return Result;
 }
 
-bool ACh4_multiGameGameState::SetCurrentGamePhase(const ECh4GamePhase NewGamePhase)
+bool ACh4_multiGameGameState::SetGamePhaseState(
+	const ECh4GamePhase NewGamePhase,
+	const ECh4GameEndReason NewEndReason)
 {
 	if (!HasAuthority())
 	{
@@ -51,11 +55,12 @@ bool ACh4_multiGameGameState::SetCurrentGamePhase(const ECh4GamePhase NewGamePha
 		return false;
 	}
 
-	if (CurrentGamePhase == NewGamePhase)
+	if (CurrentGamePhase == NewGamePhase && GameEndReason == NewEndReason)
 	{
 		return false;
 	}
 
+	GameEndReason = NewEndReason;
 	CurrentGamePhase = NewGamePhase;
 	OnGamePhaseChanged.Broadcast(CurrentGamePhase);
 	ForceNetUpdate();
