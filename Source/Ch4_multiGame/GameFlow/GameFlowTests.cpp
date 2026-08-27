@@ -49,6 +49,11 @@ namespace Ch4GameFlowTests
 			return GameMode && GameState && GameRule;
 		}
 
+		AActor* SpawnGoalActor() const
+		{
+			return World ? World->SpawnActor<AActor>() : nullptr;
+		}
+
 		~FGameFlowTestWorld()
 		{
 			if (World)
@@ -59,6 +64,37 @@ namespace Ch4GameFlowTests
 			}
 		}
 	};
+
+	void TestStateInvariants(
+		FAutomationTestBase& Test,
+		const FString& Context,
+		const ACh4_multiGameGameState& GameState)
+	{
+		const int32 InitialCargoCount = GameState.GetInitialCargoCount();
+		const int32 RemainingCargoCount = GameState.GetRemainingCargoCount();
+		const int32 LostCargoCount = GameState.GetLostCargoCount();
+		const float SurvivalRate = GameState.GetCargoSurvivalRate();
+
+		Test.TestTrue(Context + TEXT(": Initial Cargo is non-negative"), InitialCargoCount >= 0);
+		Test.TestTrue(Context + TEXT(": Remaining Cargo is non-negative"), RemainingCargoCount >= 0);
+		Test.TestTrue(Context + TEXT(": Remaining Cargo does not exceed Initial Cargo"), RemainingCargoCount <= InitialCargoCount);
+		Test.TestTrue(Context + TEXT(": Lost Cargo is non-negative"), LostCargoCount >= 0);
+		Test.TestTrue(Context + TEXT(": Lost Cargo does not exceed Initial Cargo"), LostCargoCount <= InitialCargoCount);
+		Test.TestEqual(Context + TEXT(": Lost Cargo equals Initial minus Remaining"), LostCargoCount, InitialCargoCount - RemainingCargoCount);
+		Test.TestTrue(Context + TEXT(": Survival Rate is at least zero"), SurvivalRate >= 0.0f);
+		Test.TestTrue(Context + TEXT(": Survival Rate is at most one"), SurvivalRate <= 1.0f);
+
+		const ECh4GamePhase GamePhase = GameState.GetCurrentGamePhase();
+		const ECh4GameEndReason EndReason = GameState.GetGameEndReason();
+		const bool bEndReasonMatchesPhase =
+			((GamePhase == ECh4GamePhase::Waiting || GamePhase == ECh4GamePhase::Playing)
+				&& EndReason == ECh4GameEndReason::None)
+			|| (GamePhase == ECh4GamePhase::Cleared
+				&& EndReason == ECh4GameEndReason::GoalReached)
+			|| (GamePhase == ECh4GamePhase::GameOver
+				&& EndReason == ECh4GameEndReason::CargoRuleFailed);
+		Test.TestTrue(Context + TEXT(": Phase and End Reason are consistent"), bEndReasonMatchesPhase);
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -77,6 +113,8 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 			AddError(TEXT("Failed to initialize the clear-flow test world."));
 			return false;
 		}
+		AActor* GoalActor = ClearFlow.SpawnGoalActor();
+		TestNotNull(TEXT("Clear-flow goal Actor is valid"), GoalActor);
 
 		TestEqual(TEXT("Initial phase is Waiting"), static_cast<uint8>(ClearFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Waiting));
 		TestEqual(TEXT("Initial end reason is None"), static_cast<uint8>(ClearFlow.GameState->GetGameEndReason()), static_cast<uint8>(ECh4GameEndReason::None));
@@ -84,12 +122,12 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("Zero cargo cannot be initialized"), ClearFlow.GameRule->RequestCargoInitialization(0));
 		TestFalse(TEXT("Negative cargo cannot be initialized"), ClearFlow.GameRule->RequestCargoInitialization(-3));
 		TestFalse(TEXT("Negative cargo loss is rejected"), ClearFlow.GameRule->NotifyCargoLost(-1));
-		TestFalse(TEXT("Goal is ignored while Waiting"), ClearFlow.GameRule->NotifyGoalReached(nullptr));
+		TestFalse(TEXT("Goal is ignored while Waiting"), ClearFlow.GameRule->NotifyGoalReached(GoalActor));
 		TestTrue(TEXT("Cargo initializes to 20"), ClearFlow.GameRule->RequestCargoInitialization(20));
 		TestTrue(TEXT("Game starts after cargo initialization"), ClearFlow.GameRule->RequestGameStart());
 		TestTrue(TEXT("Cargo loss updates from 20 to 18"), ClearFlow.GameRule->NotifyCargoLost(2));
 		TestTrue(TEXT("Cargo updates from 18 to 13"), ClearFlow.GameMode->UpdateRemainingCargo(13));
-		TestTrue(TEXT("Final delivery succeeds with cargo remaining"), ClearFlow.GameRule->NotifyGoalReached(nullptr));
+		TestTrue(TEXT("Final delivery succeeds with cargo remaining"), ClearFlow.GameRule->NotifyGoalReached(GoalActor));
 		TestEqual(TEXT("Clear flow ends as Cleared"), static_cast<uint8>(ClearFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Cleared));
 		TestEqual(TEXT("Clear flow keeps 13 cargo"), ClearFlow.GameState->GetRemainingCargoCount(), 13);
 		TestEqual(TEXT("Clear flow lost cargo is calculated"), ClearFlow.GameState->GetLostCargoCount(), 7);
@@ -101,7 +139,7 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Clear result contains lost cargo"), ClearResult.LostCargoCount, 7);
 		TestFalse(TEXT("Cargo changes are ignored after clear"), ClearFlow.GameMode->UpdateRemainingCargo(0));
 		TestFalse(TEXT("Cargo loss is ignored after clear"), ClearFlow.GameRule->NotifyCargoLost(1));
-		TestFalse(TEXT("Goal is ignored after clear"), ClearFlow.GameRule->NotifyGoalReached(nullptr));
+		TestFalse(TEXT("Goal is ignored after clear"), ClearFlow.GameRule->NotifyGoalReached(GoalActor));
 		TestEqual(TEXT("Cleared cannot become GameOver"), static_cast<uint8>(ClearFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Cleared));
 	}
 
@@ -112,6 +150,8 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 			AddError(TEXT("Failed to initialize the game-over test world."));
 			return false;
 		}
+		AActor* GoalActor = GameOverFlow.SpawnGoalActor();
+		TestNotNull(TEXT("Game-over goal Actor is valid"), GoalActor);
 
 		TestTrue(TEXT("Game-over cargo initializes to 3"), GameOverFlow.GameRule->RequestCargoInitialization(3));
 		TestTrue(TEXT("Game-over flow starts"), GameOverFlow.GameRule->RequestGameStart());
@@ -124,7 +164,7 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("Game-over result fails"), GameOverResult.bSucceeded);
 		TestEqual(TEXT("Game-over result records CargoRuleFailed"), static_cast<uint8>(GameOverResult.GameEndReason), static_cast<uint8>(ECh4GameEndReason::CargoRuleFailed));
 		TestFalse(TEXT("Cargo loss is ignored after GameOver"), GameOverFlow.GameRule->NotifyCargoLost(1));
-		TestFalse(TEXT("Final delivery is ignored after GameOver"), GameOverFlow.GameRule->NotifyGoalReached(nullptr));
+		TestFalse(TEXT("Final delivery is ignored after GameOver"), GameOverFlow.GameRule->NotifyGoalReached(GoalActor));
 		TestEqual(TEXT("GameOver cannot become Cleared"), static_cast<uint8>(GameOverFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::GameOver));
 	}
 
@@ -138,11 +178,13 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 			AddError(TEXT("Failed to initialize the minimum-count test world."));
 			return false;
 		}
+		AActor* GoalActor = MinimumCountFlow.SpawnGoalActor();
+		TestNotNull(TEXT("Minimum-count goal Actor is valid"), GoalActor);
 
 		TestTrue(TEXT("Minimum-count cargo initializes to 10"), MinimumCountFlow.GameRule->RequestCargoInitialization(10));
 		TestTrue(TEXT("Minimum-count flow starts"), MinimumCountFlow.GameRule->RequestGameStart());
 		TestTrue(TEXT("Minimum-count flow loses 6 cargo"), MinimumCountFlow.GameRule->NotifyCargoLost(6));
-		TestFalse(TEXT("Goal does not clear below minimum cargo count"), MinimumCountFlow.GameRule->NotifyGoalReached(nullptr));
+		TestFalse(TEXT("Goal does not clear below minimum cargo count"), MinimumCountFlow.GameRule->NotifyGoalReached(GoalActor));
 		TestEqual(TEXT("Insufficient cargo keeps the game Playing"), static_cast<uint8>(MinimumCountFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Playing));
 		TestEqual(TEXT("Insufficient cargo has no end reason"), static_cast<uint8>(MinimumCountFlow.GameState->GetGameEndReason()), static_cast<uint8>(ECh4GameEndReason::None));
 	}
@@ -157,11 +199,13 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 			AddError(TEXT("Failed to initialize the survival-rate test world."));
 			return false;
 		}
+		AActor* GoalActor = SurvivalRateFlow.SpawnGoalActor();
+		TestNotNull(TEXT("Survival-rate goal Actor is valid"), GoalActor);
 
 		TestTrue(TEXT("Survival-rate cargo initializes to 10"), SurvivalRateFlow.GameRule->RequestCargoInitialization(10));
 		TestTrue(TEXT("Survival-rate flow starts"), SurvivalRateFlow.GameRule->RequestGameStart());
 		TestTrue(TEXT("Survival-rate flow loses 3 cargo"), SurvivalRateFlow.GameRule->NotifyCargoLost(3));
-		TestFalse(TEXT("Goal does not clear below minimum survival rate"), SurvivalRateFlow.GameRule->NotifyGoalReached(nullptr));
+		TestFalse(TEXT("Goal does not clear below minimum survival rate"), SurvivalRateFlow.GameRule->NotifyGoalReached(GoalActor));
 		TestEqual(TEXT("Insufficient survival rate keeps the game Playing"), static_cast<uint8>(SurvivalRateFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Playing));
 	}
 
@@ -193,12 +237,141 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 			AddError(TEXT("Failed to initialize the empty-cargo policy test world."));
 			return false;
 		}
+		AActor* GoalActor = EmptyCargoAllowedFlow.SpawnGoalActor();
+		TestNotNull(TEXT("Empty-policy goal Actor is valid"), GoalActor);
 
 		TestTrue(TEXT("Empty-policy cargo initializes to 1"), EmptyCargoAllowedFlow.GameRule->RequestCargoInitialization(1));
 		TestTrue(TEXT("Empty-policy flow starts"), EmptyCargoAllowedFlow.GameRule->RequestGameStart());
 		TestTrue(TEXT("Empty-policy flow processes the final cargo loss"), EmptyCargoAllowedFlow.GameRule->NotifyCargoLost(1));
 		TestEqual(TEXT("Disabled empty-cargo failure keeps Playing"), static_cast<uint8>(EmptyCargoAllowedFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Playing));
-		TestFalse(TEXT("Zero cargo still cannot satisfy the default clear requirement"), EmptyCargoAllowedFlow.GameRule->NotifyGoalReached(nullptr));
+		TestFalse(TEXT("Zero cargo still cannot satisfy the default clear requirement"), EmptyCargoAllowedFlow.GameRule->NotifyGoalReached(GoalActor));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCh4GameFlowContractInvariantsTest,
+	"Ch4_multiGame.GameFlow.ContractInvariants",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCh4GameFlowContractInvariantsTest::RunTest(const FString& Parameters)
+{
+	using namespace Ch4GameFlowTests;
+
+	{
+		FGameFlowTestWorld ClearContractFlow;
+		if (!ClearContractFlow.Initialize())
+		{
+			AddError(TEXT("Failed to initialize the clear contract test world."));
+			return false;
+		}
+
+		AActor* GoalActor = ClearContractFlow.SpawnGoalActor();
+		TestNotNull(TEXT("Contract goal Actor is valid"), GoalActor);
+		TestStateInvariants(*this, TEXT("Initial Waiting state"), *ClearContractFlow.GameState);
+
+		TestFalse(TEXT("Start before initialization is rejected"), ClearContractFlow.GameRule->RequestGameStart());
+		TestFalse(TEXT("Valid Goal is rejected while Waiting"), ClearContractFlow.GameRule->NotifyGoalReached(GoalActor));
+		TestFalse(TEXT("Null Goal Actor is rejected"), ClearContractFlow.GameRule->NotifyGoalReached(nullptr));
+		TestFalse(TEXT("Zero Cargo initialization is rejected"), ClearContractFlow.GameRule->RequestCargoInitialization(0));
+		TestFalse(TEXT("Negative Cargo initialization is rejected"), ClearContractFlow.GameRule->RequestCargoInitialization(-1));
+
+		TestTrue(TEXT("Valid Cargo initialization succeeds once"), ClearContractFlow.GameRule->RequestCargoInitialization(20));
+		TestFalse(TEXT("Same-count duplicate initialization is rejected"), ClearContractFlow.GameRule->RequestCargoInitialization(20));
+		TestFalse(TEXT("Different-count duplicate initialization is rejected"), ClearContractFlow.GameRule->RequestCargoInitialization(30));
+		TestEqual(TEXT("Duplicate initialization preserves Initial Cargo"), ClearContractFlow.GameState->GetInitialCargoCount(), 20);
+		TestEqual(TEXT("Duplicate initialization preserves Remaining Cargo"), ClearContractFlow.GameState->GetRemainingCargoCount(), 20);
+		TestStateInvariants(*this, TEXT("Initialized Waiting state"), *ClearContractFlow.GameState);
+
+		TestTrue(TEXT("Valid start succeeds"), ClearContractFlow.GameRule->RequestGameStart());
+		TestFalse(TEXT("Duplicate start is rejected"), ClearContractFlow.GameRule->RequestGameStart());
+		TestFalse(TEXT("Legacy duplicate start is rejected"), ClearContractFlow.GameMode->StartGame());
+		TestStateInvariants(*this, TEXT("Playing state before Cargo loss"), *ClearContractFlow.GameState);
+
+		TestFalse(TEXT("Zero Cargo loss Delta is rejected"), ClearContractFlow.GameRule->NotifyCargoLost(0));
+		TestFalse(TEXT("Negative Cargo loss Delta is rejected"), ClearContractFlow.GameRule->NotifyCargoLost(-1));
+		TestFalse(TEXT("Cargo loss Delta above Remaining is rejected"), ClearContractFlow.GameRule->NotifyCargoLost(21));
+		TestEqual(TEXT("Rejected Cargo loss preserves Remaining Cargo"), ClearContractFlow.GameState->GetRemainingCargoCount(), 20);
+		TestFalse(TEXT("Negative legacy absolute Cargo update is rejected"), ClearContractFlow.GameMode->UpdateRemainingCargo(-1));
+		TestFalse(TEXT("Legacy absolute Cargo above Initial is rejected"), ClearContractFlow.GameMode->UpdateRemainingCargo(21));
+		TestFalse(TEXT("Unchanged legacy absolute Cargo update is rejected"), ClearContractFlow.GameMode->UpdateRemainingCargo(20));
+		TestEqual(TEXT("Rejected legacy updates preserve Remaining Cargo"), ClearContractFlow.GameState->GetRemainingCargoCount(), 20);
+
+		AActor* DestroyedGoalActor = ClearContractFlow.SpawnGoalActor();
+		TestNotNull(TEXT("Destroyed-goal test Actor was spawned"), DestroyedGoalActor);
+		if (DestroyedGoalActor)
+		{
+			TestTrue(TEXT("Goal test Actor can be destroyed"), DestroyedGoalActor->Destroy());
+			TestFalse(TEXT("Destroyed Goal Actor is rejected"), ClearContractFlow.GameRule->NotifyGoalReached(DestroyedGoalActor));
+		}
+
+		TestTrue(TEXT("Positive Cargo loss Delta is processed"), ClearContractFlow.GameRule->NotifyCargoLost(2));
+		TestEqual(TEXT("Positive Cargo loss updates Remaining Cargo"), ClearContractFlow.GameState->GetRemainingCargoCount(), 18);
+		TestFalse(TEXT("Same-value legacy update is rejected without rebroadcast"), ClearContractFlow.GameMode->UpdateRemainingCargo(18));
+		TestStateInvariants(*this, TEXT("Playing state after Cargo loss"), *ClearContractFlow.GameState);
+
+		TestTrue(TEXT("Valid Goal clears the Playing match"), ClearContractFlow.GameRule->NotifyGoalReached(GoalActor));
+		TestStateInvariants(*this, TEXT("Cleared terminal state"), *ClearContractFlow.GameState);
+		const int32 ClearedRemainingCargo = ClearContractFlow.GameState->GetRemainingCargoCount();
+
+		TestFalse(TEXT("Initialization is rejected after Cleared"), ClearContractFlow.GameRule->RequestCargoInitialization(99));
+		TestFalse(TEXT("Start is rejected after Cleared"), ClearContractFlow.GameRule->RequestGameStart());
+		TestFalse(TEXT("Cargo loss is rejected after Cleared"), ClearContractFlow.GameRule->NotifyCargoLost(1));
+		TestFalse(TEXT("Legacy Cargo update is rejected after Cleared"), ClearContractFlow.GameMode->UpdateRemainingCargo(0));
+		TestFalse(TEXT("Goal is rejected after Cleared"), ClearContractFlow.GameRule->NotifyGoalReached(GoalActor));
+		TestFalse(TEXT("Legacy clear request is rejected after Cleared"), ClearContractFlow.GameMode->TryCompleteGame());
+		TestEqual(TEXT("Cleared remains Cleared"), static_cast<uint8>(ClearContractFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Cleared));
+		TestEqual(TEXT("Cleared keeps GoalReached reason"), static_cast<uint8>(ClearContractFlow.GameState->GetGameEndReason()), static_cast<uint8>(ECh4GameEndReason::GoalReached));
+		TestEqual(TEXT("Cleared terminal Cargo is immutable"), ClearContractFlow.GameState->GetRemainingCargoCount(), ClearedRemainingCargo);
+		TestStateInvariants(*this, TEXT("Cleared state after rejected events"), *ClearContractFlow.GameState);
+	}
+
+	{
+		FGameFlowTestWorld GameOverContractFlow;
+		if (!GameOverContractFlow.Initialize())
+		{
+			AddError(TEXT("Failed to initialize the GameOver contract test world."));
+			return false;
+		}
+
+		AActor* GoalActor = GameOverContractFlow.SpawnGoalActor();
+		TestNotNull(TEXT("GameOver contract goal Actor is valid"), GoalActor);
+		TestTrue(TEXT("GameOver contract Cargo initializes"), GameOverContractFlow.GameRule->RequestCargoInitialization(3));
+		TestTrue(TEXT("GameOver contract flow starts"), GameOverContractFlow.GameRule->RequestGameStart());
+		TestFalse(TEXT("Oversized Delta is rejected before GameOver"), GameOverContractFlow.GameRule->NotifyCargoLost(4));
+		TestEqual(TEXT("Oversized Delta leaves Remaining Cargo unchanged"), GameOverContractFlow.GameState->GetRemainingCargoCount(), 3);
+		TestTrue(TEXT("Exact Remaining Delta reaches zero"), GameOverContractFlow.GameRule->NotifyCargoLost(3));
+		TestStateInvariants(*this, TEXT("GameOver terminal state"), *GameOverContractFlow.GameState);
+
+		TestFalse(TEXT("Initialization is rejected after GameOver"), GameOverContractFlow.GameRule->RequestCargoInitialization(5));
+		TestFalse(TEXT("Start is rejected after GameOver"), GameOverContractFlow.GameRule->RequestGameStart());
+		TestFalse(TEXT("Cargo loss is rejected after GameOver"), GameOverContractFlow.GameRule->NotifyCargoLost(1));
+		TestFalse(TEXT("Legacy Cargo update is rejected after GameOver"), GameOverContractFlow.GameMode->UpdateRemainingCargo(1));
+		TestFalse(TEXT("Goal is rejected after GameOver"), GameOverContractFlow.GameRule->NotifyGoalReached(GoalActor));
+		TestFalse(TEXT("Legacy clear request is rejected after GameOver"), GameOverContractFlow.GameMode->TryCompleteGame());
+		TestEqual(TEXT("GameOver remains GameOver"), static_cast<uint8>(GameOverContractFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::GameOver));
+		TestEqual(TEXT("GameOver keeps CargoRuleFailed reason"), static_cast<uint8>(GameOverContractFlow.GameState->GetGameEndReason()), static_cast<uint8>(ECh4GameEndReason::CargoRuleFailed));
+		TestEqual(TEXT("GameOver Remaining Cargo stays zero"), GameOverContractFlow.GameState->GetRemainingCargoCount(), 0);
+		TestStateInvariants(*this, TEXT("GameOver state after rejected events"), *GameOverContractFlow.GameState);
+	}
+
+	{
+		FGameFlowTestWorld LegacyContractFlow;
+		if (!LegacyContractFlow.Initialize())
+		{
+			AddError(TEXT("Failed to initialize the legacy contract test world."));
+			return false;
+		}
+
+		TestTrue(TEXT("Legacy initialization delegates to the valid rule path"), LegacyContractFlow.GameMode->InitializeCargoCount(4));
+		TestFalse(TEXT("Legacy duplicate initialization is rejected"), LegacyContractFlow.GameMode->InitializeCargoCount(6));
+		TestTrue(TEXT("Legacy start delegates to the valid rule path"), LegacyContractFlow.GameMode->StartGame());
+		TestFalse(TEXT("Legacy duplicate start is rejected"), LegacyContractFlow.GameMode->StartGame());
+		TestTrue(TEXT("Legacy absolute Cargo update accepts a valid count"), LegacyContractFlow.GameMode->UpdateRemainingCargo(2));
+		TestTrue(TEXT("Legacy clear request applies the same clear rules"), LegacyContractFlow.GameMode->TryCompleteGame());
+		TestEqual(TEXT("Legacy flow reaches Cleared"), static_cast<uint8>(LegacyContractFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Cleared));
+		TestStateInvariants(*this, TEXT("Legacy Cleared state"), *LegacyContractFlow.GameState);
 	}
 
 	return true;

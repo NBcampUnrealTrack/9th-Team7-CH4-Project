@@ -21,19 +21,19 @@ public:
 	/** Constructor */
 	ACh4_multiGameGameMode();
 
-	/** Registers the initial cargo count while the game is waiting to start. */
+	/** Legacy wrapper for the one-shot server-side Cargo initialization contract. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow|Cargo")
 	bool InitializeCargoCount(int32 CargoCount);
 
-	/** Transitions the game from Waiting to Playing after cargo is initialized. */
+	/** Legacy wrapper for the validated Waiting to Playing transition. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow")
 	bool StartGame();
 
-	/** Integration point called by the external Cargo system when its count changes. */
+	/** Legacy absolute-count update. Invalid or unchanged values are rejected without mutation. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow|Cargo")
 	bool UpdateRemainingCargo(int32 NewRemainingCargo);
 
-	/** Requests a clear after a valid Cart reaches the Final Delivery Zone. */
+	/** Legacy clear request without an Actor argument; still enforces authority, phase, and clear rules. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow")
 	bool TryCompleteGame();
 
@@ -81,8 +81,10 @@ private:
 	bool CanProcessCargoChange(const ACh4_multiGameGameState& GameFlowState) const;
 	bool ShouldFailGame(const ACh4_multiGameGameState& GameFlowState) const;
 	bool CanCompleteGame(const ACh4_multiGameGameState& GameFlowState) const;
+	bool ProcessGoalReached(AActor* ReachingActor, bool bRequireValidReachingActor);
 	bool EvaluateGameOutcome(EGameRuleEvaluationEvent EvaluationEvent);
 	bool IsGamePhaseTransitionAllowed(ECh4GamePhase CurrentPhase, ECh4GamePhase NewPhase) const;
+	bool IsGameEndReasonValidForPhase(ECh4GamePhase GamePhase, ECh4GameEndReason EndReason) const;
 	bool TryTransitionGamePhase(ECh4GamePhase NewPhase, ECh4GameEndReason EndReason);
 	bool ApplyRemainingCargoCount(int32 NewRemainingCargo);
 	void EndGameAsClear(ECh4GameEndReason EndReason);

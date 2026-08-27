@@ -31,11 +31,31 @@ bool ACh4_multiGameGameMode::RequestCargoInitialization(const int32 InitialCargo
 	}
 
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
-	if (!GameFlowState || !CanInitializeCargo(InitialCargoCount, *GameFlowState))
+	if (!GameFlowState)
 	{
-		UE_LOG(LogCh4_multiGame, Warning,
-			TEXT("[GameFlow] Cargo initialization requires Waiting phase and a positive count: %d"),
-			InitialCargoCount);
+		return false;
+	}
+
+	if (!CanInitializeCargo(InitialCargoCount, *GameFlowState))
+	{
+		if (InitialCargoCount <= 0)
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[GameFlow] Cargo initialization rejected: invalid count %d"),
+				InitialCargoCount);
+		}
+		else if (GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Waiting)
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[GameFlow] Cargo initialization rejected: current phase is %s"),
+				*UEnum::GetValueAsString(GameFlowState->GetCurrentGamePhase()));
+		}
+		else
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[GameFlow] Cargo initialization rejected: already initialized with %d Cargo"),
+				GameFlowState->GetInitialCargoCount());
+		}
 		return false;
 	}
 
@@ -62,10 +82,24 @@ bool ACh4_multiGameGameMode::RequestGameStart()
 	}
 
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
-	if (!GameFlowState || !CanStartGame(*GameFlowState))
+	if (!GameFlowState)
 	{
-		UE_LOG(LogCh4_multiGame, Warning,
-			TEXT("[GameFlow] StartGame requires Waiting phase and initialized cargo"));
+		return false;
+	}
+
+	if (!CanStartGame(*GameFlowState))
+	{
+		if (GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Waiting)
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[GameFlow] Game start rejected: current phase is %s"),
+				*UEnum::GetValueAsString(GameFlowState->GetCurrentGamePhase()));
+		}
+		else
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[GameFlow] Game start rejected: Cargo has not been initialized"));
+		}
 		return false;
 	}
 
@@ -101,14 +135,32 @@ bool ACh4_multiGameGameMode::NotifyCargoLost(const int32 LostCargoCount)
 
 	if (LostCargoCount <= 0)
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo loss requires a positive count"));
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Cargo loss rejected: invalid Delta %d"),
+			LostCargoCount);
 		return false;
 	}
 
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
-	if (!GameFlowState || !CanProcessCargoChange(*GameFlowState))
+	if (!GameFlowState)
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo loss ignored outside the Playing phase"));
+		return false;
+	}
+
+	if (!CanProcessCargoChange(*GameFlowState))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Cargo loss rejected: current phase is %s"),
+			*UEnum::GetValueAsString(GameFlowState->GetCurrentGamePhase()));
+		return false;
+	}
+
+	if (LostCargoCount > GameFlowState->GetRemainingCargoCount())
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Cargo loss rejected: Delta %d exceeds remaining Cargo %d"),
+			LostCargoCount,
+			GameFlowState->GetRemainingCargoCount());
 		return false;
 	}
 
@@ -130,38 +182,62 @@ bool ACh4_multiGameGameMode::ApplyRemainingCargoCount(const int32 NewRemainingCa
 	}
 
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
-	if (!GameFlowState || !CanProcessCargoChange(*GameFlowState))
+	if (!GameFlowState)
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo change ignored outside the Playing phase"));
+		return false;
+	}
+
+	if (!CanProcessCargoChange(*GameFlowState))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Cargo update rejected: current phase is %s"),
+			*UEnum::GetValueAsString(GameFlowState->GetCurrentGamePhase()));
 		return false;
 	}
 
 	const int32 PreviousCargoCount = GameFlowState->GetRemainingCargoCount();
-	const int32 ValidatedCargoCount = FMath::Clamp(NewRemainingCargo, 0, GameFlowState->GetInitialCargoCount());
-
-	if (ValidatedCargoCount != NewRemainingCargo)
+	if (NewRemainingCargo < 0 || NewRemainingCargo > GameFlowState->GetInitialCargoCount())
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Cargo count clamped from %d to %d"), NewRemainingCargo, ValidatedCargoCount);
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Cargo update rejected: count %d is outside [0, %d]"),
+			NewRemainingCargo,
+			GameFlowState->GetInitialCargoCount());
+		return false;
 	}
 
-	if (!GameFlowState->SetRemainingCargoCount(ValidatedCargoCount))
+	if (NewRemainingCargo == PreviousCargoCount)
+	{
+		UE_LOG(LogCh4_multiGame, Verbose,
+			TEXT("[GameFlow] Cargo update ignored: count is already %d"),
+			NewRemainingCargo);
+		return false;
+	}
+
+	if (!GameFlowState->SetRemainingCargoCount(NewRemainingCargo))
 	{
 		return false;
 	}
 
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Cargo Changed: %d -> %d"), PreviousCargoCount, ValidatedCargoCount);
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Cargo Changed: %d -> %d"), PreviousCargoCount, NewRemainingCargo);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Remaining Cargo: %d / %d"),
-		ValidatedCargoCount, GameFlowState->GetInitialCargoCount());
+		NewRemainingCargo, GameFlowState->GetInitialCargoCount());
 
 	return true;
 }
 
 bool ACh4_multiGameGameMode::TryCompleteGame()
 {
-	return NotifyGoalReached(nullptr);
+	return ProcessGoalReached(nullptr, false);
 }
 
 bool ACh4_multiGameGameMode::NotifyGoalReached(AActor* ReachingActor)
+{
+	return ProcessGoalReached(ReachingActor, true);
+}
+
+bool ACh4_multiGameGameMode::ProcessGoalReached(
+	AActor* ReachingActor,
+	const bool bRequireValidReachingActor)
 {
 	if (!HasAuthority())
 	{
@@ -169,15 +245,29 @@ bool ACh4_multiGameGameMode::NotifyGoalReached(AActor* ReachingActor)
 		return false;
 	}
 
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Final Delivery Zone Reached by %s"),
-		IsValid(ReachingActor) ? *GetNameSafe(ReachingActor) : TEXT("Unspecified Target"));
+	if (bRequireValidReachingActor
+		&& (!IsValid(ReachingActor)
+			|| ReachingActor->IsActorBeingDestroyed()
+			|| ReachingActor->GetWorld() != GetWorld()))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Goal notification rejected: reaching Actor is null, invalid, or belongs to another World"));
+		return false;
+	}
 
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
 	if (!GameFlowState || GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Playing)
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Clear request ignored outside the Playing phase"));
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Goal notification rejected: current phase is %s"),
+			GameFlowState
+				? *UEnum::GetValueAsString(GameFlowState->GetCurrentGamePhase())
+				: TEXT("Unavailable"));
 		return false;
 	}
+
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Final Delivery Zone Reached by %s"),
+		IsValid(ReachingActor) ? *GetNameSafe(ReachingActor) : TEXT("Legacy Compatibility Request"));
 
 	return EvaluateGameOutcome(EGameRuleEvaluationEvent::GoalReached);
 }
@@ -200,7 +290,9 @@ bool ACh4_multiGameGameMode::CanInitializeCargo(
 	const ACh4_multiGameGameState& GameFlowState) const
 {
 	return GameFlowState.GetCurrentGamePhase() == ECh4GamePhase::Waiting
-		&& InitialCargoCount > 0;
+		&& InitialCargoCount > 0
+		&& GameFlowState.GetInitialCargoCount() == 0
+		&& GameFlowState.GetRemainingCargoCount() == 0;
 }
 
 bool ACh4_multiGameGameMode::CanStartGame(const ACh4_multiGameGameState& GameFlowState) const
@@ -287,6 +379,24 @@ bool ACh4_multiGameGameMode::IsGamePhaseTransitionAllowed(
 			&& (NewPhase == ECh4GamePhase::Cleared || NewPhase == ECh4GamePhase::GameOver));
 }
 
+bool ACh4_multiGameGameMode::IsGameEndReasonValidForPhase(
+	const ECh4GamePhase GamePhase,
+	const ECh4GameEndReason EndReason) const
+{
+	switch (GamePhase)
+	{
+	case ECh4GamePhase::Waiting:
+	case ECh4GamePhase::Playing:
+		return EndReason == ECh4GameEndReason::None;
+	case ECh4GamePhase::Cleared:
+		return EndReason == ECh4GameEndReason::GoalReached;
+	case ECh4GamePhase::GameOver:
+		return EndReason == ECh4GameEndReason::CargoRuleFailed;
+	default:
+		return false;
+	}
+}
+
 bool ACh4_multiGameGameMode::TryTransitionGamePhase(
 	const ECh4GamePhase NewPhase,
 	const ECh4GameEndReason EndReason)
@@ -313,12 +423,12 @@ bool ACh4_multiGameGameMode::TryTransitionGamePhase(
 		return false;
 	}
 
-	const bool bTerminalPhase = NewPhase == ECh4GamePhase::Cleared
-		|| NewPhase == ECh4GamePhase::GameOver;
-	if ((bTerminalPhase && EndReason == ECh4GameEndReason::None)
-		|| (!bTerminalPhase && EndReason != ECh4GameEndReason::None))
+	if (!IsGameEndReasonValidForPhase(NewPhase, EndReason))
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Phase transition rejected because its end reason is inconsistent"));
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Phase transition rejected: %s is inconsistent with %s"),
+			*UEnum::GetValueAsString(EndReason),
+			*UEnum::GetValueAsString(NewPhase));
 		return false;
 	}
 
