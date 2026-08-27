@@ -286,7 +286,6 @@ bool FCh4GameFlowContractInvariantsTest::RunTest(const FString& Parameters)
 
 		TestTrue(TEXT("Valid start succeeds"), ClearContractFlow.GameRule->RequestGameStart());
 		TestFalse(TEXT("Duplicate start is rejected"), ClearContractFlow.GameRule->RequestGameStart());
-		TestFalse(TEXT("Legacy duplicate start is rejected"), ClearContractFlow.GameMode->StartGame());
 		TestStateInvariants(*this, TEXT("Playing state before Cargo loss"), *ClearContractFlow.GameState);
 
 		TestFalse(TEXT("Zero Cargo loss Delta is rejected"), ClearContractFlow.GameRule->NotifyCargoLost(0));
@@ -308,6 +307,7 @@ bool FCh4GameFlowContractInvariantsTest::RunTest(const FString& Parameters)
 
 		TestTrue(TEXT("Positive Cargo loss Delta is processed"), ClearContractFlow.GameRule->NotifyCargoLost(2));
 		TestEqual(TEXT("Positive Cargo loss updates Remaining Cargo"), ClearContractFlow.GameState->GetRemainingCargoCount(), 18);
+		TestFalse(TEXT("Legacy absolute Cargo update cannot increase Cargo"), ClearContractFlow.GameMode->UpdateRemainingCargo(19));
 		TestFalse(TEXT("Same-value legacy update is rejected without rebroadcast"), ClearContractFlow.GameMode->UpdateRemainingCargo(18));
 		TestStateInvariants(*this, TEXT("Playing state after Cargo loss"), *ClearContractFlow.GameState);
 
@@ -320,7 +320,6 @@ bool FCh4GameFlowContractInvariantsTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("Cargo loss is rejected after Cleared"), ClearContractFlow.GameRule->NotifyCargoLost(1));
 		TestFalse(TEXT("Legacy Cargo update is rejected after Cleared"), ClearContractFlow.GameMode->UpdateRemainingCargo(0));
 		TestFalse(TEXT("Goal is rejected after Cleared"), ClearContractFlow.GameRule->NotifyGoalReached(GoalActor));
-		TestFalse(TEXT("Legacy clear request is rejected after Cleared"), ClearContractFlow.GameMode->TryCompleteGame());
 		TestEqual(TEXT("Cleared remains Cleared"), static_cast<uint8>(ClearContractFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Cleared));
 		TestEqual(TEXT("Cleared keeps GoalReached reason"), static_cast<uint8>(ClearContractFlow.GameState->GetGameEndReason()), static_cast<uint8>(ECh4GameEndReason::GoalReached));
 		TestEqual(TEXT("Cleared terminal Cargo is immutable"), ClearContractFlow.GameState->GetRemainingCargoCount(), ClearedRemainingCargo);
@@ -349,29 +348,10 @@ bool FCh4GameFlowContractInvariantsTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("Cargo loss is rejected after GameOver"), GameOverContractFlow.GameRule->NotifyCargoLost(1));
 		TestFalse(TEXT("Legacy Cargo update is rejected after GameOver"), GameOverContractFlow.GameMode->UpdateRemainingCargo(1));
 		TestFalse(TEXT("Goal is rejected after GameOver"), GameOverContractFlow.GameRule->NotifyGoalReached(GoalActor));
-		TestFalse(TEXT("Legacy clear request is rejected after GameOver"), GameOverContractFlow.GameMode->TryCompleteGame());
 		TestEqual(TEXT("GameOver remains GameOver"), static_cast<uint8>(GameOverContractFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::GameOver));
 		TestEqual(TEXT("GameOver keeps CargoRuleFailed reason"), static_cast<uint8>(GameOverContractFlow.GameState->GetGameEndReason()), static_cast<uint8>(ECh4GameEndReason::CargoRuleFailed));
 		TestEqual(TEXT("GameOver Remaining Cargo stays zero"), GameOverContractFlow.GameState->GetRemainingCargoCount(), 0);
 		TestStateInvariants(*this, TEXT("GameOver state after rejected events"), *GameOverContractFlow.GameState);
-	}
-
-	{
-		FGameFlowTestWorld LegacyContractFlow;
-		if (!LegacyContractFlow.Initialize())
-		{
-			AddError(TEXT("Failed to initialize the legacy contract test world."));
-			return false;
-		}
-
-		TestTrue(TEXT("Legacy initialization delegates to the valid rule path"), LegacyContractFlow.GameMode->InitializeCargoCount(4));
-		TestFalse(TEXT("Legacy duplicate initialization is rejected"), LegacyContractFlow.GameMode->InitializeCargoCount(6));
-		TestTrue(TEXT("Legacy start delegates to the valid rule path"), LegacyContractFlow.GameMode->StartGame());
-		TestFalse(TEXT("Legacy duplicate start is rejected"), LegacyContractFlow.GameMode->StartGame());
-		TestTrue(TEXT("Legacy absolute Cargo update accepts a valid count"), LegacyContractFlow.GameMode->UpdateRemainingCargo(2));
-		TestTrue(TEXT("Legacy clear request applies the same clear rules"), LegacyContractFlow.GameMode->TryCompleteGame());
-		TestEqual(TEXT("Legacy flow reaches Cleared"), static_cast<uint8>(LegacyContractFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Cleared));
-		TestStateInvariants(*this, TEXT("Legacy Cleared state"), *LegacyContractFlow.GameState);
 	}
 
 	return true;

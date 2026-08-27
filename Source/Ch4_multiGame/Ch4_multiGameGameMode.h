@@ -21,21 +21,10 @@ public:
 	/** Constructor */
 	ACh4_multiGameGameMode();
 
-	/** Legacy wrapper for the one-shot server-side Cargo initialization contract. */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow|Cargo")
-	bool InitializeCargoCount(int32 CargoCount);
-
-	/** Legacy wrapper for the validated Waiting to Playing transition. */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow")
-	bool StartGame();
-
-	/** Legacy absolute-count update. Invalid or unchanged values are rejected without mutation. */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow|Cargo")
+	/** Deprecated Blueprint compatibility API that converts a lower absolute count into NotifyCargoLost. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow|Legacy",
+		meta=(DeprecatedFunction, DeprecationMessage="Use NotifyCargoLost for delta-based Cargo loss."))
 	bool UpdateRemainingCargo(int32 NewRemainingCargo);
-
-	/** Legacy clear request without an Actor argument; still enforces authority, phase, and clear rules. */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow")
-	bool TryCompleteGame();
 
 	// IGameFlowRuleInterface
 	virtual bool RequestCargoInitialization(int32 InitialCargoCount) override;
@@ -81,7 +70,6 @@ private:
 	bool CanProcessCargoChange(const ACh4_multiGameGameState& GameFlowState) const;
 	bool ShouldFailGame(const ACh4_multiGameGameState& GameFlowState) const;
 	bool CanCompleteGame(const ACh4_multiGameGameState& GameFlowState) const;
-	bool ProcessGoalReached(AActor* ReachingActor, bool bRequireValidReachingActor);
 	bool EvaluateGameOutcome(EGameRuleEvaluationEvent EvaluationEvent);
 	bool IsGamePhaseTransitionAllowed(ECh4GamePhase CurrentPhase, ECh4GamePhase NewPhase) const;
 	bool IsGameEndReasonValidForPhase(ECh4GamePhase GamePhase, ECh4GameEndReason EndReason) const;

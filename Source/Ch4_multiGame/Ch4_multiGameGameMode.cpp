@@ -17,11 +17,6 @@ void ACh4_multiGameGameMode::SetGameRuleConfigForTesting(const FCh4GameRuleConfi
 }
 #endif
 
-bool ACh4_multiGameGameMode::InitializeCargoCount(const int32 CargoCount)
-{
-	return RequestCargoInitialization(CargoCount);
-}
-
 bool ACh4_multiGameGameMode::RequestCargoInitialization(const int32 InitialCargoCount)
 {
 	if (!HasAuthority())
@@ -68,11 +63,6 @@ bool ACh4_multiGameGameMode::RequestCargoInitialization(const int32 InitialCargo
 	return true;
 }
 
-bool ACh4_multiGameGameMode::StartGame()
-{
-	return RequestGameStart();
-}
-
 bool ACh4_multiGameGameMode::RequestGameStart()
 {
 	if (!HasAuthority())
@@ -116,13 +106,30 @@ bool ACh4_multiGameGameMode::RequestGameStart()
 
 bool ACh4_multiGameGameMode::UpdateRemainingCargo(const int32 NewRemainingCargo)
 {
-	if (!ApplyRemainingCargoCount(NewRemainingCargo))
+	if (!HasAuthority())
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Legacy Cargo update rejected without server authority"));
+		return false;
+	}
+
+	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
+	if (!GameFlowState)
 	{
 		return false;
 	}
 
-	EvaluateGameOutcome(EGameRuleEvaluationEvent::CargoChanged);
-	return true;
+	const int32 CurrentCargoCount = GameFlowState->GetRemainingCargoCount();
+	if (NewRemainingCargo < 0 || NewRemainingCargo > CurrentCargoCount)
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Legacy Cargo update rejected: count %d is outside [0, %d]"),
+			NewRemainingCargo,
+			CurrentCargoCount);
+		return false;
+	}
+
+	return NotifyCargoLost(CurrentCargoCount - NewRemainingCargo);
 }
 
 bool ACh4_multiGameGameMode::NotifyCargoLost(const int32 LostCargoCount)
@@ -225,19 +232,7 @@ bool ACh4_multiGameGameMode::ApplyRemainingCargoCount(const int32 NewRemainingCa
 	return true;
 }
 
-bool ACh4_multiGameGameMode::TryCompleteGame()
-{
-	return ProcessGoalReached(nullptr, false);
-}
-
 bool ACh4_multiGameGameMode::NotifyGoalReached(AActor* ReachingActor)
-{
-	return ProcessGoalReached(ReachingActor, true);
-}
-
-bool ACh4_multiGameGameMode::ProcessGoalReached(
-	AActor* ReachingActor,
-	const bool bRequireValidReachingActor)
 {
 	if (!HasAuthority())
 	{
@@ -245,10 +240,9 @@ bool ACh4_multiGameGameMode::ProcessGoalReached(
 		return false;
 	}
 
-	if (bRequireValidReachingActor
-		&& (!IsValid(ReachingActor)
-			|| ReachingActor->IsActorBeingDestroyed()
-			|| ReachingActor->GetWorld() != GetWorld()))
+	if (!IsValid(ReachingActor)
+		|| ReachingActor->IsActorBeingDestroyed()
+		|| ReachingActor->GetWorld() != GetWorld())
 	{
 		UE_LOG(LogCh4_multiGame, Warning,
 			TEXT("[GameFlow] Goal notification rejected: reaching Actor is null, invalid, or belongs to another World"));
@@ -267,7 +261,7 @@ bool ACh4_multiGameGameMode::ProcessGoalReached(
 	}
 
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Final Delivery Zone Reached by %s"),
-		IsValid(ReachingActor) ? *GetNameSafe(ReachingActor) : TEXT("Legacy Compatibility Request"));
+		*GetNameSafe(ReachingActor));
 
 	return EvaluateGameOutcome(EGameRuleEvaluationEvent::GoalReached);
 }
