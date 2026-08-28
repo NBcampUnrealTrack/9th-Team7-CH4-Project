@@ -11,6 +11,7 @@ void ACh4_multiGameGameState::GetLifetimeReplicatedProps(TArray<FLifetimePropert
 
 	DOREPLIFETIME(ACh4_multiGameGameState, InitialCargoCount);
 	DOREPLIFETIME(ACh4_multiGameGameState, RemainingCargoCount);
+	DOREPLIFETIME(ACh4_multiGameGameState, GameEndReason);
 	DOREPLIFETIME(ACh4_multiGameGameState, CurrentGamePhase);
 }
 
@@ -29,7 +30,24 @@ float ACh4_multiGameGameState::GetCargoSurvivalRate() const
 	return FMath::Clamp(static_cast<float>(RemainingCargoCount) / static_cast<float>(InitialCargoCount), 0.0f, 1.0f);
 }
 
-bool ACh4_multiGameGameState::SetCurrentGamePhase(const ECh4GamePhase NewGamePhase)
+FCh4GameResult ACh4_multiGameGameState::GetGameResult() const
+{
+	FCh4GameResult Result;
+	Result.GamePhase = CurrentGamePhase;
+	Result.GameEndReason = GameEndReason;
+	Result.InitialCargoCount = InitialCargoCount;
+	Result.RemainingCargoCount = RemainingCargoCount;
+	Result.LostCargoCount = GetLostCargoCount();
+	Result.CargoSurvivalRate = GetCargoSurvivalRate();
+	Result.bGameEnded = CurrentGamePhase == ECh4GamePhase::Cleared
+		|| CurrentGamePhase == ECh4GamePhase::GameOver;
+	Result.bSucceeded = CurrentGamePhase == ECh4GamePhase::Cleared;
+	return Result;
+}
+
+bool ACh4_multiGameGameState::SetGamePhaseState(
+	const ECh4GamePhase NewGamePhase,
+	const ECh4GameEndReason NewEndReason)
 {
 	if (!HasAuthority())
 	{
@@ -37,11 +55,12 @@ bool ACh4_multiGameGameState::SetCurrentGamePhase(const ECh4GamePhase NewGamePha
 		return false;
 	}
 
-	if (CurrentGamePhase == NewGamePhase)
+	if (CurrentGamePhase == NewGamePhase && GameEndReason == NewEndReason)
 	{
 		return false;
 	}
 
+	GameEndReason = NewEndReason;
 	CurrentGamePhase = NewGamePhase;
 	OnGamePhaseChanged.Broadcast(CurrentGamePhase);
 	ForceNetUpdate();

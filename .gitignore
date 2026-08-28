@@ -20,3 +20,7 @@ Saved/
 # Local build products and crash artifacts
 *.pdb
 *.obj
+
+
+
+Content/LargeAssets/

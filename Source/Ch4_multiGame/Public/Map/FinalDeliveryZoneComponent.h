@@ -26,4 +26,7 @@ private:
 
 	void EvaluateDeliveryTarget(AActor* OtherActor);
 	void EvaluateOverlappingTargets();
+
+	/** Prevents one delivery target from reporting the same goal event through multiple overlaps. */
+	TSet<TWeakObjectPtr<AActor>> NotifiedDeliveryTargets;
 };

@@ -73,22 +73,14 @@ void ACh4_multiGameLobbyPlayerController::HandleReadyInput()
 		return;
 	}
 
-	if (const ACh4_multiGameLobbyPlayerState* LobbyPlayerState =
-		GetPlayerState<ACh4_multiGameLobbyPlayerState>();
-		IsValid(LobbyPlayerState) && LobbyPlayerState->IsReady())
-	{
-		UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Duplicate Ready input ignored locally"));
-		return;
-	}
-
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Ready requested by local player"));
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Ready toggle requested by local player"));
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(
 			-1,
 			5.0f,
 			FColor::Cyan,
-			TEXT("[LOBBY] Ready request sent"));
+			TEXT("[LOBBY] Ready toggle request sent"));
 	}
 
 	ServerSetReady();
