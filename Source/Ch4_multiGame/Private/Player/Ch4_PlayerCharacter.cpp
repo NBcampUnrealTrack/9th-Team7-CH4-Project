@@ -5,6 +5,9 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Net/UnrealNetwork.h"
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
@@ -39,6 +42,13 @@ void ACh4_PlayerCharacter::BeginPlay()
 	}
 }
 
+void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	
+	DOREPLIFETIME(ThisClass, bIsStunned);
+}
+
 void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
@@ -47,11 +57,17 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 	{
 		if (MoveAction) EIC->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ACh4_PlayerCharacter::InputActionMove);
 		if (LookAction) EIC->BindAction(LookAction, ETriggerEvent::Triggered, this, &ACh4_PlayerCharacter::InputActionLook);
+		if (JumpAction) EIC->BindAction(JumpAction, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionJump);
 	}
 }
 
 void ACh4_PlayerCharacter::InputActionMove(const struct FInputActionValue& Value)
 {
+	if (bIsStunned)
+	{
+		return;
+	}
+	
 	const FVector2D MoveVec = Value.Get<FVector2D>();
 	
 	if (Controller == nullptr)
@@ -75,4 +91,170 @@ void ACh4_PlayerCharacter::InputActionLook(const struct FInputActionValue& Value
 	
 	AddControllerYawInput(LookVec.X);
 	AddControllerPitchInput(LookVec.Y);
+}
+
+void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
+{
+	if (bIsStunned)
+	{
+		return;
+	}
+	
+	if (GetCharacterMovement()->IsFalling())
+	{
+		return;
+    }
+    	
+	Jump();
+}
+
+void ACh4_PlayerCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
+{
+	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
+
+	// Falling 상태로 진입했을 때
+	if (GetCharacterMovement()->MovementMode == MOVE_Falling)
+	{
+		FallStartTime = GetWorld()->GetTimeSeconds();
+	}
+}
+
+void ACh4_PlayerCharacter::Landed(const FHitResult& Hit)
+{
+	Super::Landed(Hit);
+
+	if (HasAuthority() == false)
+	{
+		return;
+	}
+	
+	const float CurrentTime = GetWorld()->GetTimeSeconds();
+
+	// 낙하한 시간 = 착지 시간 - 낙하 시작 시간
+	const float FallDuration = CurrentTime - FallStartTime;
+
+	// 설정한 시간 이상 낙하했다면 경직
+	if (FallDuration >= FallStunThreshold)
+	{
+		OnStun();
+	}
+}
+
+void ACh4_PlayerCharacter::OnStun()
+{
+	if (HasAuthority() == false)
+	{
+		return;
+	}
+	
+	if (bIsStunned)
+	{
+		return;
+	}
+	
+	bIsStunned = true;
+
+	// 즉시 Replication 갱신 요청
+	// ForceNetUpdate();
+	
+	// 현재 이동 중이었다면 즉시 정지
+	GetCharacterMovement()->StopMovementImmediately();
+
+	// 이동 비활성화
+	GetCharacterMovement()->DisableMovement();
+
+	// 기존 타이머 제거
+	GetWorldTimerManager().ClearTimer(StunTimerHandle);
+
+	// StunDuration 후 경직 종료
+	GetWorldTimerManager().SetTimer(
+		StunTimerHandle,
+		this,
+		&ACh4_PlayerCharacter::EndStun,
+		StunDuration,
+		false);
+}
+
+void ACh4_PlayerCharacter::EndStun()
+{
+	if (HasAuthority() == false)
+	{
+		return;
+	}
+	
+	bIsStunned = false;
+
+	// 즉시 Replication 갱신 요청
+	// ForceNetUpdate();
+	
+	// 다시 걷기 가능
+	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+}
+
+void ACh4_PlayerCharacter::OnRep_IsStunned()
+{
+	// 서버에서 복제된 bIsStunned 값이 클라이언트에 도착하는 순간 특별한 작업을 해야 할 때 사용
+	// 이펙트, 사운드, 애니메이션 등등
+	
+	if (bIsStunned)
+	{
+		// 모든 클라이언트에서 경직 애니메이션 재생
+		if (StunMontage)
+		{
+			PlayAnimMontage(StunMontage);
+		}
+
+		// 경직된 캐릭터를 직접 조작하는 클라이언트에서만 HitStop, CameraShake
+		if (IsLocallyControlled())
+		{
+			StartHitStop();
+			
+			if (APlayerController* PC =	Cast<APlayerController>(GetController()))
+			{
+				if (StunCameraShake)
+				{
+					PC->ClientStartCameraShake(StunCameraShake);
+				}
+			}
+		}
+	}
+	else
+	{
+		// HitStop 중이었다면 자신의 클라이언트에서만 복구
+		if (IsLocallyControlled())
+		{
+			GetWorldTimerManager().ClearTimer(HitStopTimerHandle);
+
+			CustomTimeDilation = 1.0f;
+		}
+
+		if (StunMontage)
+		{
+			StopAnimMontage(StunMontage);
+		}
+	}
+}
+
+void ACh4_PlayerCharacter::StartHitStop()
+{
+	// 경직 캐릭터의 시간만 살짝 지연
+	CustomTimeDilation = HitStopTimeDilation;
+	
+	// 기존 HitStop 타이머가 있다면 제거
+	GetWorldTimerManager().ClearTimer(HitStopTimerHandle);
+
+	// HitStop 종료 타이머
+	GetWorldTimerManager().SetTimer(
+		HitStopTimerHandle,
+		this,
+		&ACh4_PlayerCharacter::EndHitStop,
+		HitStopDuration,
+		false
+	);
+}
+
+void ACh4_PlayerCharacter::EndHitStop()
+{
+	// 시간 속도를 원래대로 복구
+	CustomTimeDilation = 1.0f;
 }

@@ -29,3 +29,4 @@ void UCh4_AnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	&& (3.f < GroundSpeed);
 	bIsFalling = OwnerCharacterMovementComponent->IsFalling();
 }
+
