@@ -6,8 +6,8 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
+#include "Player/EmotionDataAsset.h"
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
@@ -58,6 +58,10 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		if (MoveAction) EIC->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ACh4_PlayerCharacter::InputActionMove);
 		if (LookAction) EIC->BindAction(LookAction, ETriggerEvent::Triggered, this, &ACh4_PlayerCharacter::InputActionLook);
 		if (JumpAction) EIC->BindAction(JumpAction, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionJump);
+		if (Emote1Action) EIC->BindAction(Emote1Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote1);
+		if (Emote2Action) EIC->BindAction(Emote2Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote2);
+		if (Emote3Action) EIC->BindAction(Emote3Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote3);
+		if (Emote4Action) EIC->BindAction(Emote4Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote4);
 	}
 }
 
@@ -106,6 +110,26 @@ void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
     }
     	
 	Jump();
+}
+
+void ACh4_PlayerCharacter::InputActionEmote1(const struct FInputActionValue& Value)
+{
+	PlayEmotion(EEmotionType::Emote1);
+}
+
+void ACh4_PlayerCharacter::InputActionEmote2(const struct FInputActionValue& Value)
+{
+	PlayEmotion(EEmotionType::Emote2);
+}
+
+void ACh4_PlayerCharacter::InputActionEmote3(const struct FInputActionValue& Value)
+{
+	PlayEmotion(EEmotionType::Emote3);
+}
+
+void ACh4_PlayerCharacter::InputActionEmote4(const struct FInputActionValue& Value)
+{
+	PlayEmotion(EEmotionType::Emote4);
 }
 
 void ACh4_PlayerCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -257,4 +281,51 @@ void ACh4_PlayerCharacter::EndHitStop()
 {
 	// 시간 속도를 원래대로 복구
 	CustomTimeDilation = 1.0f;
+}
+
+UAnimMontage* ACh4_PlayerCharacter::FindEmotionMontage(EEmotionType EmotionType) const
+{
+	if (EmotionDataAsset == nullptr)
+	{
+		return nullptr;
+	}
+
+	for (const FEmotionData& EmotionData : EmotionDataAsset->EmotionDataList)
+	{
+		if (EmotionData.EmotionType == EmotionType)
+		{
+			return EmotionData.EmoteMontage;
+		}
+	}
+
+	return nullptr;
+}
+
+void ACh4_PlayerCharacter::PlayEmotion(EEmotionType EmotionType)
+{
+	if (HasAuthority())
+	{
+		MulticastRPC_PlayEmotion(EmotionType);
+	}
+	else
+	{
+		ServerRPC_PlayEmotion(EmotionType);
+	}
+}
+
+void ACh4_PlayerCharacter::ServerRPC_PlayEmotion_Implementation(EEmotionType EmotionType)
+{
+	MulticastRPC_PlayEmotion(EmotionType);
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_PlayEmotion_Implementation(EEmotionType EmotionType)
+{
+	UAnimMontage* EmotionMontage = FindEmotionMontage(EmotionType);
+
+	if (EmotionMontage == nullptr)
+	{
+		return;
+	}
+
+	PlayAnimMontage(EmotionMontage);
 }
