@@ -32,7 +32,4 @@ protected:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	bool bIsFalling;
-	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
-	bool bIsStunned;
 };

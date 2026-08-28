@@ -186,5 +186,32 @@ void ACh4_PlayerCharacter::EndStun()
 
 void ACh4_PlayerCharacter::OnRep_IsStunned()
 {
-	UE_LOG(LogTemp,	Warning, TEXT("OnRep_IsStunned : %s"), bIsStunned ? TEXT("True") : TEXT("False"));
+	// 서버에서 복제된 값이 클라이언트에 도착하는 순간 특별한 작업을 해야 할 때 사용
+	// 이펙트, 사운드, 애니메이션 등등
+	
+	if (bIsStunned)
+	{
+		if (StunMontage)
+		{
+			PlayAnimMontage(StunMontage);
+		}
+
+		if (IsLocallyControlled())
+		{
+			if (APlayerController* PC =	Cast<APlayerController>(GetController()))
+			{
+				if (StunCameraShake)
+				{
+					PC->ClientStartCameraShake(StunCameraShake);
+				}
+			}
+		}
+	}
+	else
+	{
+		if (StunMontage)
+		{
+			StopAnimMontage(StunMontage);
+		}
+	}
 }

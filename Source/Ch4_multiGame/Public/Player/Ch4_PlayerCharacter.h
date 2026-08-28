@@ -38,13 +38,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Input")
 	class UInputAction* JumpAction;
 	
-	// 이 시간 이상 낙하하면 경직
-	UPROPERTY(EditDefaultsOnly, Category="Fall|Stun")
-	float FallStunThreshold = 2.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "Stun")
+	TObjectPtr<class UAnimMontage> StunMontage;
 
-	// 경직 지속 시간
-	UPROPERTY(EditDefaultsOnly, Category="Fall|Stun")
-	float StunDuration = 1.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "Stun")
+	TSubclassOf<class UCameraShakeBase> StunCameraShake;
 	
 	bool IsStunned() const { return bIsStunned; }
 	
@@ -63,15 +61,23 @@ protected:
 
 	void EndStun();
 
+	UFUNCTION()
+	void OnRep_IsStunned();
+	
 	// 낙하 시작 시간
 	float FallStartTime = 0.0f;
 
+	// 이 시간 이상 낙하하면 경직
+	UPROPERTY(EditDefaultsOnly, Category="Fall|Stun")
+	float FallStunThreshold = 2.0f;
+
+	// 경직 지속 시간
+	UPROPERTY(EditDefaultsOnly, Category="Fall|Stun")
+	float StunDuration = 1.0f;
+	
 	// 현재 경직 상태
 	UPROPERTY(ReplicatedUsing = OnRep_IsStunned)
 	bool bIsStunned = false;
-
-	UFUNCTION()
-	void OnRep_IsStunned();
 	
 	// 경직 종료 타이머
 	FTimerHandle StunTimerHandle;
