@@ -97,14 +97,6 @@ ACh4_multiGamePlayerController::ACh4_multiGamePlayerController()
 	{
 		PauseAction = PauseActionFinder.Object;
 	}
-
-	// WBP_PauseMenu 기본값 로드
-	static ConstructorHelpers::FClassFinder<UUserWidget> PauseMenuClassFinder(
-		TEXT("/Game/UI/WBP_PauseMenu.WBP_PauseMenu_C"));
-	if (PauseMenuClassFinder.Succeeded())
-	{
-		PauseMenuWidgetClass = PauseMenuClassFinder.Class;
-	}
 }
 
 void ACh4_multiGamePlayerController::JoinHamachi(FString HostIPv4)
@@ -268,6 +260,12 @@ void ACh4_multiGamePlayerController::ShowPauseMenu()
 
 	if (!PauseMenuWidgetClass)
 	{
+		// C++ 생성자 대신 필요할 때 안전하게 지연 로드 (에디터 부팅 시점 MVVM 충돌 완전 방지)
+		PauseMenuWidgetClass = StaticLoadClass(UUserWidget::StaticClass(), nullptr, TEXT("/Game/UI/WBP_PauseMenu.WBP_PauseMenu_C"));
+	}
+
+	if (!PauseMenuWidgetClass)
+	{
 		if (GEngine)
 		{
 			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("[PauseMenu ERROR] PauseMenuWidgetClass is None!"));
@@ -369,4 +367,30 @@ void ACh4_multiGamePlayerController::QuitGame()
 	if (!IsLocalPlayerController()) return;
 	
 	UKismetSystemLibrary::QuitGame(GetWorld(), this, EQuitPreference::Quit, false);
+}
+
+void ACh4_multiGamePlayerController::AddPitchInput(float Val)
+{
+	// Settings에 저장된 마우스 감도와 Y축 반전 불러오기
+	float Sensitivity = 1.0f;
+	bool bInvertY = false;
+	GConfig->GetFloat(TEXT("Ch4_multiGame.Settings"), TEXT("MouseSensitivity"), Sensitivity, GGameIni);
+	GConfig->GetBool(TEXT("Ch4_multiGame.Settings"), TEXT("InvertY"), bInvertY, GGameIni);
+
+	float FinalVal = Val * Sensitivity;
+	if (bInvertY)
+	{
+		FinalVal = -FinalVal; // Y축 반전
+	}
+
+	Super::AddPitchInput(FinalVal);
+}
+
+void ACh4_multiGamePlayerController::AddYawInput(float Val)
+{
+	// Settings에 저장된 마우스 감도 불러오기
+	float Sensitivity = 1.0f;
+	GConfig->GetFloat(TEXT("Ch4_multiGame.Settings"), TEXT("MouseSensitivity"), Sensitivity, GGameIni);
+
+	Super::AddYawInput(Val * Sensitivity);
 }
