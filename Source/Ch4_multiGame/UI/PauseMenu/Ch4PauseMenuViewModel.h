@@ -16,9 +16,9 @@ public:
 	// [State] View Binding용 데이터 속성
 	// ----------------------------------------------------------------
 
-	// Settings 패널이 열려있는지 여부 (View Binding으로 위젯 Visibility와 연결)
+	// Settings 패널이 열려있는지 여부 (기본값 true로 하여 Settings 버튼이 활성화되도록 유지)
 	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "PauseMenu|State")
-	bool bIsSettingsVisible = false;
+	bool bIsSettingsVisible = true;
 
 	// bIsSettingsVisible Setter (FieldNotify 변경 알림 포함)
 	UFUNCTION(BlueprintCallable, Category = "PauseMenu|State")
