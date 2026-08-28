@@ -223,4 +223,9 @@ private:
 	
 	// Two-Way 바인딩 무한 루프(에코) 방지 가드 플래그
 	bool bIsInternalUpdating = false;
+
+	// 슬라이더 연속 조작 렉 방지용 스마트 디바운스 (지연 파일 쓰기)
+	void RequestDebouncedSave();
+	void FlushSaveToDisk();
+	FTimerHandle SaveTimerHandle;
 };

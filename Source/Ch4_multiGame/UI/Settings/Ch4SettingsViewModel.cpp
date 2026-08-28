@@ -142,7 +142,7 @@ void UCh4SettingsViewModel::LoadSettings()
 
 void UCh4SettingsViewModel::SaveSettings()
 {
-	// 1. 게임 전용 설정값 저장 (Game.ini)
+	// 메모리 세팅 즉시 동기화
 	GConfig->SetInt(ConfigSection, TEXT("FOV"), FOV, GGameIni);
 	GConfig->SetFloat(ConfigSection, TEXT("MouseSensitivity"), MouseSensitivity, GGameIni);
 	GConfig->SetBool(ConfigSection, TEXT("InvertY"), bInvertY, GGameIni);
@@ -151,9 +151,45 @@ void UCh4SettingsViewModel::SaveSettings()
 	GConfig->SetFloat(ConfigSection, TEXT("SFXVolume"), SFXVolume, GGameIni);
 	GConfig->SetInt(ConfigSection, TEXT("VoiceMode"), VoiceMode, GGameIni);
 	GConfig->SetFloat(ConfigSection, TEXT("MicSensitivity"), MicSensitivity, GGameIni);
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(SaveTimerHandle);
+	}
+	FlushSaveToDisk();
+}
+
+void UCh4SettingsViewModel::RequestDebouncedSave()
+{
+	// 1. 메모리(GConfig)에는 0ms 즉시 기록! (인게임 플레이어 컨트롤러는 즉각 새 감도로 반응)
+	GConfig->SetInt(ConfigSection, TEXT("FOV"), FOV, GGameIni);
+	GConfig->SetFloat(ConfigSection, TEXT("MouseSensitivity"), MouseSensitivity, GGameIni);
+	GConfig->SetBool(ConfigSection, TEXT("InvertY"), bInvertY, GGameIni);
+	GConfig->SetFloat(ConfigSection, TEXT("MasterVolume"), MasterVolume, GGameIni);
+	GConfig->SetFloat(ConfigSection, TEXT("BGMVolume"), BGMVolume, GGameIni);
+	GConfig->SetFloat(ConfigSection, TEXT("SFXVolume"), SFXVolume, GGameIni);
+	GConfig->SetInt(ConfigSection, TEXT("VoiceMode"), VoiceMode, GGameIni);
+	GConfig->SetFloat(ConfigSection, TEXT("MicSensitivity"), MicSensitivity, GGameIni);
+
+	// 2. 무거운 하드디스크 I/O Flush는 조작이 멈추고 0.3초 뒤 1회만 지연 실행 (슬라이더 렉 완전 방지)
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(SaveTimerHandle);
+		World->GetTimerManager().SetTimer(
+			SaveTimerHandle, this, &UCh4SettingsViewModel::FlushSaveToDisk, 0.3f, false);
+	}
+	else
+	{
+		FlushSaveToDisk();
+	}
+}
+
+void UCh4SettingsViewModel::FlushSaveToDisk()
+{
+	// 1. 게임 ini 디스크 파일 쓰기
 	GConfig->Flush(false, GGameIni);
 	
-	// 2. 그래픽 설정 저장 (GameUserSettings.ini)
+	// 2. 그래픽 설정 ini 파일 쓰기
 	if (UGameUserSettings* GUS = GEngine ? GEngine->GetGameUserSettings() : nullptr)
 	{
 		GUS->ApplySettings(false);
@@ -210,7 +246,7 @@ void UCh4SettingsViewModel::SetFOVSliderValue(float NewValue)
 		bIsInternalUpdating = false;
 
 		ApplyFOV(static_cast<float>(FOV));
-		SaveSettings();
+		RequestDebouncedSave();
 	}
 }
 
@@ -291,7 +327,7 @@ void UCh4SettingsViewModel::SetMouseSensitivity(float NewValue)
 		UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(MouseSensText);
 		bIsInternalUpdating = false;
 
-		SaveSettings();
+		RequestDebouncedSave();
 	}
 }
 
@@ -527,7 +563,7 @@ void UCh4SettingsViewModel::SetMasterVolume(float NewValue)
 		bIsInternalUpdating = false;
 
 		ApplySoundVolume(SoundClass_Master, MasterVolume / 100.0f);
-		SaveSettings();
+		RequestDebouncedSave();
 	}
 }
 
@@ -554,7 +590,7 @@ void UCh4SettingsViewModel::SetBGMVolume(float NewValue)
 		bIsInternalUpdating = false;
 
 		ApplySoundVolume(SoundClass_BGM, BGMVolume / 100.0f);
-		SaveSettings();
+		RequestDebouncedSave();
 	}
 }
 
@@ -581,7 +617,7 @@ void UCh4SettingsViewModel::SetSFXVolume(float NewValue)
 		bIsInternalUpdating = false;
 
 		ApplySoundVolume(SoundClass_SFX, SFXVolume / 100.0f);
-		SaveSettings();
+		RequestDebouncedSave();
 	}
 }
 
@@ -622,6 +658,6 @@ void UCh4SettingsViewModel::SetMicSensitivity(float NewValue)
 		UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(MicSensText);
 		bIsInternalUpdating = false;
 
-		SaveSettings();
+		RequestDebouncedSave();
 	}
 }
