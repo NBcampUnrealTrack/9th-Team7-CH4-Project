@@ -44,8 +44,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Stun")
 	TSubclassOf<class UCameraShakeBase> StunCameraShake;
 	
-	bool IsStunned() const { return bIsStunned; }
-	
 protected:
 	void InputActionMove(const struct FInputActionValue& Value);
 	void InputActionLook(const struct FInputActionValue& Value);
@@ -68,11 +66,11 @@ protected:
 	float FallStartTime = 0.0f;
 
 	// 이 시간 이상 낙하하면 경직
-	UPROPERTY(EditDefaultsOnly, Category="Fall|Stun")
+	UPROPERTY(EditDefaultsOnly, Category="Stun")
 	float FallStunThreshold = 2.0f;
 
 	// 경직 지속 시간
-	UPROPERTY(EditDefaultsOnly, Category="Fall|Stun")
+	UPROPERTY(EditDefaultsOnly, Category="Stun")
 	float StunDuration = 1.0f;
 	
 	// 현재 경직 상태
@@ -81,4 +79,17 @@ protected:
 	
 	// 경직 종료 타이머
 	FTimerHandle StunTimerHandle;
+
+	// HitStop 지연 시간
+	UPROPERTY(EditDefaultsOnly, Category = "Stun")
+	float HitStopTimeDilation = 0.1f;
+
+	// HitStop 지속 시간
+	UPROPERTY(EditDefaultsOnly, Category = "Stun")
+	float HitStopDuration = 0.03f;
+
+	FTimerHandle HitStopTimerHandle;
+
+	void StartHitStop();
+	void EndHitStop();
 };
