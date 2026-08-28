@@ -13,14 +13,7 @@ ALevelFloorBase::ALevelFloorBase()
 	// 루트 컴포넌트
 	USceneComponent* RootComp = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 	SetRootComponent(RootComp);
-
-	// 환경 시작점
-	StartPoint = CreateDefaultSubobject<USceneComponent>(TEXT("StartPoint"));
-	StartPoint->SetupAttachment(RootComponent);
-
-	// 환경 끝점
-	EndPoint = CreateDefaultSubobject<USceneComponent>(TEXT("EndPoint"));
-	EndPoint->SetupAttachment(RootComponent);
+	
 
 	// 환경 충돌 영역
 	CollisionBox = CreateDefaultSubobject<UBoxComponent>(TEXT("CollisionBox"));
@@ -33,7 +26,7 @@ ALevelFloorBase::ALevelFloorBase()
 	BackgroundBounds->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	// 모든 환경에서 사용할 기본 배경 영역(지울예정)
-	BackgroundBounds->SetBoxExtent(FVector(20000.0f, 20000.0f, 21000.0f));
+	BackgroundBounds->SetBoxExtent(FVector(20000.0f, 20000.0f, 24000.0f));
 }
 
 void ALevelFloorBase::BeginPlay()
