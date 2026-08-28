@@ -19,7 +19,7 @@ class ACh4_multiGameLobbyPlayerState : public APlayerState
 	friend class ACh4_multiGameLobbyGameMode;
 
 public:
-	/** Fired on the server and clients when this player's Ready state becomes true. */
+	/** Fired on the server and clients whenever this player's Ready state changes. */
 	UPROPERTY(BlueprintAssignable, Category="Lobby|Ready|Events")
 	FCh4LobbyReadyStateChangedSignature OnReadyStateChanged;
 
@@ -30,8 +30,8 @@ protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
-	/** Server-only one-way transition. Returns false for duplicate Ready requests. */
-	bool SetReady();
+	/** Server-only state change. Returns false if the requested state is already active. */
+	bool SetReadyState(bool bNewReady);
 
 	UFUNCTION()
 	void OnRep_IsReady();

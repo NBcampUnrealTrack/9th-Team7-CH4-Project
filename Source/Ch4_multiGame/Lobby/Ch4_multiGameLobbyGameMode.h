@@ -26,7 +26,7 @@ public:
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual void Logout(AController* Exiting) override;
 
-	/** Accepts a Ready request from the owning lobby controller on the server. */
+	/** Accepts a Ready toggle request from the owning lobby controller on the server. */
 	void HandlePlayerReady(APlayerController* RequestingPlayer);
 
 	UFUNCTION(BlueprintPure, Category="Lobby")
@@ -41,15 +41,24 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Ready", meta=(ClampMin="2", UIMin="2"))
 	int32 MinPlayersToStart = 2;
 
-	/** Verified package path for the existing gameplay map. */
+	/** Gameplay map selected through the Unreal asset picker. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Travel")
-	FName GameplayMapPackage = TEXT("/Game/ThirdPerson/Lvl_ThirdPerson");
+	TSoftObjectPtr<UWorld> GameplayMap;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FCh4LobbyReadyTravelRulesTest;
+#endif
+
 	class ACh4_multiGameLobbyGameState* GetLobbyGameState() const;
 	void UpdateLobbyPlayerCount(int32 NewPlayerCount);
 	void CheckAllPlayersReady();
 	void GetReadyPlayerCounts(int32& OutReadyPlayers, int32& OutTotalPlayers) const;
+	static bool CanStartLobbyTravel(
+		int32 ReadyPlayers,
+		int32 TotalPlayers,
+		int32 MinimumPlayers,
+		bool bIsTravelInProgress);
 	void StartGameTravel();
 	void ShowServerDebugStatus(const FString& EventMessage, const FColor& Color, float Duration) const;
 	int32 GetListenPort() const;
