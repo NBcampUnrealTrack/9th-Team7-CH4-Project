@@ -1,5 +1,6 @@
 #include "Player/Ch4_PlayerCharacter.h"
 
+#include "Animation/AnimInstance.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "EnhancedInputComponent.h"
@@ -79,6 +80,11 @@ void ACh4_PlayerCharacter::InputActionMove(const struct FInputActionValue& Value
 		return;
 	}
 
+	if (MoveVec.IsNearlyZero() == false)
+	{
+		InterruptEmotionMontage();
+	}
+
 	const FRotator Rotation = Controller->GetControlRotation();
 	const FRotator YawRotation(0, Rotation.Yaw, 0);
 
@@ -108,6 +114,8 @@ void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
 	{
 		return;
     }
+
+	InterruptEmotionMontage();
     	
 	Jump();
 }
@@ -177,9 +185,6 @@ void ACh4_PlayerCharacter::OnStun()
 	}
 	
 	bIsStunned = true;
-
-	// 즉시 Replication 갱신 요청
-	// ForceNetUpdate();
 	
 	// 현재 이동 중이었다면 즉시 정지
 	GetCharacterMovement()->StopMovementImmediately();
@@ -328,4 +333,50 @@ void ACh4_PlayerCharacter::MulticastRPC_PlayEmotion_Implementation(EEmotionType 
 	}
 
 	PlayAnimMontage(EmotionMontage);
+}
+
+void ACh4_PlayerCharacter::InterruptEmotionMontage()
+{
+	StopEmotionMontages();
+
+	if (HasAuthority())
+	{
+		MulticastRPC_InterruptEmotionMontage();
+	}
+	else
+	{
+		ServerRPC_InterruptEmotionMontage();
+	}
+}
+
+void ACh4_PlayerCharacter::StopEmotionMontages(float BlendOutTime)
+{
+	if (EmotionDataAsset == nullptr)
+	{
+		return;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (AnimInstance == nullptr)
+	{
+		return;
+	}
+
+	for (const FEmotionData& EmotionData : EmotionDataAsset->EmotionDataList)
+	{
+		if (EmotionData.EmoteMontage)
+		{
+			AnimInstance->Montage_Stop(BlendOutTime, EmotionData.EmoteMontage);
+		}
+	}
+}
+
+void ACh4_PlayerCharacter::ServerRPC_InterruptEmotionMontage_Implementation()
+{
+	MulticastRPC_InterruptEmotionMontage();
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_InterruptEmotionMontage_Implementation()
+{
+	StopEmotionMontages();
 }

@@ -116,9 +116,19 @@ protected:
 	
 	void PlayEmotion(EEmotionType EmotionType);
 
+	void InterruptEmotionMontage();
+
+	void StopEmotionMontages(float BlendOutTime = 0.1f);
+
 	UFUNCTION(Server, Reliable)
 	void ServerRPC_PlayEmotion(EEmotionType EmotionType);
 
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastRPC_PlayEmotion(EEmotionType EmotionType);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRPC_InterruptEmotionMontage();
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastRPC_InterruptEmotionMontage();
 };
