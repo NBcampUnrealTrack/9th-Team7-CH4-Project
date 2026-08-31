@@ -23,6 +23,9 @@ public:
 	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Settings", meta = (EditCondition = "bUseAutoArrange"))
 	bool bShuffleMiddleZones = true;
 
+	UPROPERTY(ReplicatedUsing = OnRep_bArrangeComplete)
+	bool bArrangeComplete = false;
+
 	// 시작 Zone
 	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Start")
 	ARoadBase* StartRoadActor;
@@ -46,4 +49,16 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+
+private:
+	void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	UFUNCTION(Server, Reliable, WithValidation)
+	void Server_ArrangePlacedZones();
+
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_ArrangePlacedZones();
+
+	UFUNCTION()
+	void OnRep_bArrangeComplete();
 };
