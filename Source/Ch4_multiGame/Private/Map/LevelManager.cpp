@@ -5,194 +5,152 @@
 
 ALevelManager::ALevelManager()
 {
-	PrimaryActorTick.bCanEverTick = false;
-
-	bReplicates = true;
+    PrimaryActorTick.bCanEverTick = false;
+    bReplicates = true;
 }
 
 void ALevelManager::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
 
-	if (HasAuthority())
-	{
-		if (bUseAutoArrange)
-		{
-			Server_ArrangePlacedZones();
-		}
-	}
-	else
-	{
-		// 클라이언트에서도 포인터들이 유효하면 직접 배치 시도
-		if (bUseAutoArrange && StartRoadActor && StartEnvironmentActor)
-		{
-			ArrangePlacedZones();
-		}
-	}
+    if (!bUseAutoArrange)
+    {
+        return;
+    }
+
+    if (HasAuthority())
+    {
+        // 1. 서버: 기본 인덱스 배열 생성 (0, 1, 2...)
+        MiddleZoneOrder.Empty();
+        for (int32 i = 0; i < MiddleRoadActors.Num(); ++i)
+        {
+            MiddleZoneOrder.Add(i);
+        }
+
+        // 2. 서버: 셔플 옵션이 켜져 있다면 인덱스만 셔플
+        if (bShuffleMiddleZones)
+        {
+            for (int32 Index = 0; Index < MiddleZoneOrder.Num(); ++Index)
+            {
+                const int32 RandomIndex = FMath::RandRange(Index, MiddleZoneOrder.Num() - 1);
+                if (Index != RandomIndex)
+                {
+                    MiddleZoneOrder.Swap(Index, RandomIndex);
+                }
+            }
+        }
+        // 3. 서버 본인 레벨 배치 실행
+        ArrangePlacedZones();
+    }
+}
+
+void ALevelManager::OnRep_MiddleZoneOrder()
+{
+    // 클라이언트: 서버로부터 셔플 순서를 전달받으면 배치 실행
+    ArrangePlacedZones();
 }
 
 void ALevelManager::ArrangePlacedZones()
 {
-	FTransform NextAttachTransform = GetActorTransform();
+    FTransform NextAttachTransform = GetActorTransform();
 
-	// 최초 Start Environment의 Z를 전체 Environment의 기준 높이로 저장
-	float EnvironmentBaseZ = 0.0f;
+    // 최초 Start Environment의 Z를 전체 Environment의 기준 높이로 저장
+    float EnvironmentBaseZ = 0.0f;
 
-	if (StartEnvironmentActor)
-	{
-		EnvironmentBaseZ = StartEnvironmentActor->GetActorLocation().Z;
-	}
+    if (StartEnvironmentActor)
+    {
+        EnvironmentBaseZ = StartEnvironmentActor->GetActorLocation().Z;
+    }
 
-	// 시작 Zone
-	if (StartRoadActor && StartEnvironmentActor)
-	{
-		FTransform RoadStartRelative =
-			StartRoadActor->GetStartPointTransform()
-			.GetRelativeTransform(StartRoadActor->GetActorTransform());
+    // 시작 Zone
+    if (StartRoadActor && StartEnvironmentActor)
+    {
+        FTransform RoadStartRelative = StartRoadActor->GetStartPointTransform().GetRelativeTransform(StartRoadActor->GetActorTransform());
 
-		FTransform FinalRoadTransform =
-			RoadStartRelative.Inverse() * NextAttachTransform;
+        FTransform FinalRoadTransform = RoadStartRelative.Inverse() * NextAttachTransform;
 
-		// Start Road와 Start Environment는 함께 배치
-		StartRoadActor->SetActorTransform(FinalRoadTransform);
-		StartEnvironmentActor->SetActorTransform(FinalRoadTransform);
+        StartRoadActor->SetActorTransform(FinalRoadTransform);
+        StartEnvironmentActor->SetActorTransform(FinalRoadTransform);
 
-		// 다음 Road의 기준은 Start Road의 EndPoint
-		NextAttachTransform = StartRoadActor->GetEndPointTransform();
-	}
+        NextAttachTransform = StartRoadActor->GetEndPointTransform();
+    }
 
-	TArray<ARoadBase*> MiddleRoads = MiddleRoadActors;
-	TArray<ALevelFloorBase*> MiddleEnvironments = MiddleEnvironmentActors;
+    if (MiddleRoadActors.Num() != MiddleEnvironmentActors.Num())
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("중간 Road와 Environment의 개수가 다릅니다. Road: %d / Environment: %d"),
+            MiddleRoadActors.Num(),
+            MiddleEnvironmentActors.Num());
 
-	if (MiddleRoads.Num() != MiddleEnvironments.Num())
-	{
-		UE_LOG(
-			LogTemp,
-			Error,
-			TEXT("중간 Road와 Environment의 개수가 다릅니다. Road: %d / Environment: %d"),
-			MiddleRoads.Num(),
-			MiddleEnvironments.Num());
+        return;
+    }
 
-		return;
-	}
+    // 중간 Zone 배치 (서버에서 전송받은 MiddleZoneOrder 순서대로 배치)
+    for (int32 Index = 0; Index < MiddleZoneOrder.Num(); ++Index)
+    {
+        int32 TargetIndex = MiddleZoneOrder[Index];
 
-	// Road와 Environment의 순서를 함께 섞음
-	if (bShuffleMiddleZones)
-	{
-		for (int32 Index = 0; Index < MiddleRoads.Num(); ++Index)
-		{
-			const int32 RandomIndex =
-				FMath::RandRange(Index, MiddleRoads.Num() - 1);
+        if (!MiddleRoadActors.IsValidIndex(TargetIndex) || !MiddleEnvironmentActors.IsValidIndex(TargetIndex))
+        {
+            continue;
+        }
 
-			if (Index != RandomIndex)
-			{
-				MiddleRoads.Swap(Index, RandomIndex);
-				MiddleEnvironments.Swap(Index, RandomIndex);
-			}
-		}
-	}
+        ARoadBase* Road = MiddleRoadActors[TargetIndex];
+        ALevelFloorBase* Environment = MiddleEnvironmentActors[TargetIndex];
 
-	// 중간 Zone
-	for (int32 Index = 0; Index < MiddleRoads.Num(); ++Index)
-	{
-		ARoadBase* Road = MiddleRoads[Index];
-		ALevelFloorBase* Environment = MiddleEnvironments[Index];
+        if (!Road || !Environment)
+        {
+            continue;
+        }
 
-		if (!Road || !Environment)
-		{
-			continue;
-		}
+        // Road의 StartPoint를 이전 Road의 EndPoint에 연결
+        FTransform RoadStartRelative = Road->GetStartPointTransform().GetRelativeTransform(Road->GetActorTransform());
 
-		// Road의 StartPoint를 이전 Road의 EndPoint에 연결
-		FTransform RoadStartRelative =
-			Road->GetStartPointTransform()
-			.GetRelativeTransform(Road->GetActorTransform());
+        FTransform FinalRoadTransform = RoadStartRelative.Inverse() * NextAttachTransform;
 
-		FTransform FinalRoadTransform =
-			RoadStartRelative.Inverse() * NextAttachTransform;
+        Road->SetActorTransform(FinalRoadTransform);
 
-		// Road는 그대로 배치
-		Road->SetActorTransform(FinalRoadTransform);
+        // Environment는 Road의 X/Y만 사용하고 Z는 최초 Environment 높이 유지
+        FVector EnvironmentLocation = FinalRoadTransform.GetLocation();
+        EnvironmentLocation.Z = EnvironmentBaseZ;
 
-		// Environment는 Road의 X/Y만 사용하고 Z는 최초 Environment 높이 유지
-		FVector EnvironmentLocation = FinalRoadTransform.GetLocation();
-		EnvironmentLocation.Z = EnvironmentBaseZ;
+        FTransform EnvironmentTransform = Environment->GetActorTransform();
+        EnvironmentTransform.SetLocation(EnvironmentLocation);
 
-		FTransform EnvironmentTransform = Environment->GetActorTransform();
-		EnvironmentTransform.SetLocation(EnvironmentLocation);
+        Environment->SetActorTransform(EnvironmentTransform);
 
-		Environment->SetActorTransform(EnvironmentTransform);
+        // 다음 Road는 현재 Road의 EndPoint를 기준으로 연결
+        NextAttachTransform = Road->GetEndPointTransform();
+    }
 
-		// 다음 Road는 현재 Road의 EndPoint를 기준으로 연결
-		NextAttachTransform = Road->GetEndPointTransform();
-	}
+    // 끝 Zone
+    if (EndRoadActor && EndEnvironmentActor)
+    {
+        FTransform RoadStartRelative = EndRoadActor->GetStartPointTransform().GetRelativeTransform(EndRoadActor->GetActorTransform());
 
-	// 끝 Zone
-	if (EndRoadActor && EndEnvironmentActor)
-	{
-		FTransform RoadStartRelative =
-			EndRoadActor->GetStartPointTransform()
-			.GetRelativeTransform(EndRoadActor->GetActorTransform());
+        FTransform FinalRoadTransform = RoadStartRelative.Inverse() * NextAttachTransform;
 
-		FTransform FinalRoadTransform =
-			RoadStartRelative.Inverse() * NextAttachTransform;
+        EndRoadActor->SetActorTransform(FinalRoadTransform);
 
-		// End Road 배치
-		EndRoadActor->SetActorTransform(FinalRoadTransform);
+        FVector EnvironmentLocation = FinalRoadTransform.GetLocation();
+        EnvironmentLocation.Z = EnvironmentBaseZ;
 
-		// End Environment는 최초 Environment 높이 유지
-		FVector EnvironmentLocation = FinalRoadTransform.GetLocation();
-		EnvironmentLocation.Z = EnvironmentBaseZ;
+        FTransform EnvironmentTransform = EndEnvironmentActor->GetActorTransform();
+        EnvironmentTransform.SetLocation(EnvironmentLocation);
 
-		FTransform EnvironmentTransform = EndEnvironmentActor->GetActorTransform();
-		EnvironmentTransform.SetLocation(EnvironmentLocation);
+        EndEnvironmentActor->SetActorTransform(EnvironmentTransform);
+    }
 
-		EndEnvironmentActor->SetActorTransform(EnvironmentTransform);
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("Road + Environment 자동 배치 완료"));
-
-	// 클라이언트에 배치 완료 알림
-	if (!bArrangeComplete)
-	{
-		bArrangeComplete = true;
-	}
-}
-
-void ALevelManager::Server_ArrangePlacedZones_Implementation()
-{
-	ArrangePlacedZones();
-	Multicast_ArrangePlacedZones();
-}
-
-bool ALevelManager::Server_ArrangePlacedZones_Validate()
-{
-	return true;
-}
-
-void ALevelManager::Multicast_ArrangePlacedZones_Implementation()
-{
-	// 클라이언트에서만 배치 실행 (서버는 이미 실행됨)
-	if (GetLocalRole() < ROLE_Authority)
-	{
-		ArrangePlacedZones();
-	}
-}
-
-void ALevelManager::OnRep_bArrangeComplete()
-{
-	// 클라이언트에서만 배치 실행
-	if (GetLocalRole() < ROLE_Authority)
-	{
-		ArrangePlacedZones();
-	}
+    UE_LOG(LogTemp, Warning, TEXT("[%s] Road + Environment 자동 배치 완료"), HasAuthority() ? TEXT("Server") : TEXT("Client"));
 }
 
 void ALevelManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME(ALevelManager, bUseAutoArrange);
-	DOREPLIFETIME(ALevelManager, bShuffleMiddleZones);
-	DOREPLIFETIME(ALevelManager, bArrangeComplete);
+    DOREPLIFETIME(ALevelManager, bUseAutoArrange);
+    DOREPLIFETIME(ALevelManager, bShuffleMiddleZones);
+    DOREPLIFETIME(ALevelManager, MiddleZoneOrder); // 인덱스 배열 동기화
 }
