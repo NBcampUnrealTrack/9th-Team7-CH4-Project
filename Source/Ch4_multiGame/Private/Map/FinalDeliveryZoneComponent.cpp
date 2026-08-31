@@ -1,7 +1,7 @@
 #include "Map/FinalDeliveryZoneComponent.h"
 #include "Ch4_multiGame.h"
-#include "Ch4_multiGameGameMode.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
+#include "GameFlow/GameFlowRuleInterface.h"
 #include "GameFlow/GameFlowTargetInterface.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -95,6 +95,8 @@ void UFinalDeliveryZoneComponent::OnGamePhaseChanged(
 		return;
 	}
 
+	NotifiedDeliveryTargets.Reset();
+
 	GetWorld()->GetTimerManager().SetTimerForNextTick(
 		this,
 		&UFinalDeliveryZoneComponent::EvaluateOverlappingTargets
@@ -122,24 +124,24 @@ void UFinalDeliveryZoneComponent::EvaluateDeliveryTarget(AActor* OtherActor)
 		return;
 	}
 
-	if (ACh4_multiGameGameMode* GameMode =
-		GetWorld()->GetAuthGameMode<ACh4_multiGameGameMode>())
+	const TWeakObjectPtr<AActor> TargetKey(OtherActor);
+	if (NotifiedDeliveryTargets.Contains(TargetKey))
 	{
-		UE_LOG(
-			LogCh4_multiGame,
-			Log,
-			TEXT("[GameFlow] Final Delivery target entered the zone: %s"),
-			*GetNameSafe(OtherActor)
-		);
+		return;
+	}
 
-		GameMode->TryCompleteGame();
+	if (IGameFlowRuleInterface* GameRule =
+		Cast<IGameFlowRuleInterface>(GetWorld()->GetAuthGameMode()))
+	{
+		NotifiedDeliveryTargets.Add(TargetKey);
+		GameRule->NotifyGoalReached(OtherActor);
 	}
 	else
 	{
 		UE_LOG(
 			LogCh4_multiGame,
 			Error,
-			TEXT("[GameFlow] FinalDeliveryZoneComponent requires ACh4_multiGameGameMode")
+			TEXT("[GameFlow] FinalDeliveryZoneComponent requires IGameFlowRuleInterface")
 		);
 	}
 }

@@ -1,4 +1,6 @@
 #include "Map/RoadBase.h"
+
+#include "Components/BoxComponent.h"
 #include "Components/SplineComponent.h"
 #include "Components/SplineMeshComponent.h"
 
@@ -27,11 +29,32 @@ ARoadBase::ARoadBase()
 
 	// Spline Mesh 진행 방향
 	ForwardAxis = ESplineMeshAxis::X;
+
+	// 배경 배치 영역 가이드(지울예정)
+	BackgroundBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("BackgroundBounds"));
+	BackgroundBounds->SetupAttachment(RootComponent);
+	BackgroundBounds->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	// 모든 환경에서 사용할 기본 배경 영역(지울예정)
+	BackgroundBounds->SetBoxExtent(FVector(20000.0f, 20000.0f, 24000.0f));
+}
+
+void ARoadBase::BeginPlay()
+{
+	Super::BeginPlay();
+
+	//(지울예정)
+	DrawBackgroundGuides();
 }
 
 void ARoadBase::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+
+	BackgroundBounds->SetVisibility(bShowBackgroundBounds);
+
+	//(지울예정)
+	DrawBackgroundGuides();
 
 	if (!SplineComponent)
 	{
@@ -63,7 +86,9 @@ void ARoadBase::OnConstruction(const FTransform& Transform)
 	const float SplineLength = SplineComponent->GetSplineLength();
 
 	// 생성할 Mesh 개수
-	const int32 NumberOfMeshes = FMath::TruncToInt(SplineLength / MeshLength);
+	// 기존 TruncToInt는 남는 구간을 버리기 때문에
+	// CeilToInt로 올림하여 마지막 남는 구간도 생성
+	const int32 NumberOfMeshes = FMath::CeilToInt(SplineLength / MeshLength);
 
 	const int32 LastIndex = NumberOfMeshes - 1;
 
@@ -92,7 +117,9 @@ void ARoadBase::OnConstruction(const FTransform& Transform)
 		SplineMeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
 		// Spline에 부착
-		SplineMeshComp->AttachToComponent(SplineComponent,FAttachmentTransformRules::KeepRelativeTransform);
+		SplineMeshComp->AttachToComponent(
+			SplineComponent,
+			FAttachmentTransformRules::KeepRelativeTransform);
 
 		// 메시 설정
 		SplineMeshComp->SetStaticMesh(MeshToUse);
@@ -100,7 +127,11 @@ void ARoadBase::OnConstruction(const FTransform& Transform)
 
 		// 시작 / 끝 거리
 		const float StartDistance = Index * MeshLength;
-		const float EndDistance = (Index + 1) * MeshLength;
+
+		// 마지막 Mesh가 Spline을 넘어가지 않도록
+		// Spline의 실제 길이를 최대값으로 사용
+		const float EndDistance =
+			FMath::Min((Index + 1) * MeshLength, SplineLength);
 
 		// 시작 위치
 		FVector StartPos =
@@ -147,3 +178,46 @@ void ARoadBase::OnConstruction(const FTransform& Transform)
 	}
 }
 
+void ARoadBase::DrawBackgroundGuides()
+{
+	FlushPersistentDebugLines(GetWorld());
+
+	if (!BackgroundBounds || DivisionCount <= 1 || !bShowBackgroundGuides)
+	{
+		return;
+	}
+
+	const FVector BoundsCenter = BackgroundBounds->GetComponentLocation();
+	const FVector BoundsExtent = BackgroundBounds->GetScaledBoxExtent();
+
+	const float MinZ = BoundsCenter.Z - BoundsExtent.Z;
+	const float MaxZ = BoundsCenter.Z + BoundsExtent.Z;
+	const float HalfWidth = BoundsExtent.X;
+
+	const float DivisionHeight = (MaxZ - MinZ) / DivisionCount;
+
+	for (int32 Index = 1; Index < DivisionCount; ++Index)
+	{
+		const float Z = MinZ + DivisionHeight * Index;
+
+		const FVector LineStart(
+			BoundsCenter.X - HalfWidth,
+			BoundsCenter.Y,
+			Z);
+
+		const FVector LineEnd(
+			BoundsCenter.X + HalfWidth,
+			BoundsCenter.Y,
+			Z);
+
+		DrawDebugLine(
+			GetWorld(),
+			LineStart,
+			LineEnd,
+			FColor::Red,
+			true,
+			-1.0f,
+			0,
+			10.0f);
+	}
+}

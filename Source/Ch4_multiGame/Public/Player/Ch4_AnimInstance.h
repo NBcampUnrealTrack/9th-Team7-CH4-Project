@@ -4,9 +4,6 @@
 #include "Animation/AnimInstance.h"
 #include "Ch4_AnimInstance.generated.h"
 
-/**
- * 
- */
 UCLASS()
 class CH4_MULTIGAME_API UCh4_AnimInstance : public UAnimInstance
 {

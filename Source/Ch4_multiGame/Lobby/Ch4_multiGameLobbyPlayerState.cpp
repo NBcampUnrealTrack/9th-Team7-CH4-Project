@@ -15,14 +15,14 @@ void ACh4_multiGameLobbyPlayerState::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ACh4_multiGameLobbyPlayerState, bIsReady);
 }
 
-bool ACh4_multiGameLobbyPlayerState::SetReady()
+bool ACh4_multiGameLobbyPlayerState::SetReadyState(const bool bNewReady)
 {
-	if (!HasAuthority() || bIsReady)
+	if (!HasAuthority() || bIsReady == bNewReady)
 	{
 		return false;
 	}
 
-	bIsReady = true;
+	bIsReady = bNewReady;
 	OnReadyStateChanged.Broadcast(bIsReady);
 	ForceNetUpdate();
 	return true;
@@ -38,12 +38,14 @@ void ACh4_multiGameLobbyPlayerState::OnRep_IsReady()
 		bIsReady ? TEXT("READY") : TEXT("NOT READY"));
 
 	const APawn* PlayerPawn = GetPawn();
-	if (bIsReady && IsValid(PlayerPawn) && PlayerPawn->IsLocallyControlled() && GEngine)
+	if (IsValid(PlayerPawn) && PlayerPawn->IsLocallyControlled() && GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(
 			-1,
 			8.0f,
-			FColor::Green,
-			TEXT("[LOBBY] READY confirmed by server"));
+			bIsReady ? FColor::Green : FColor::Yellow,
+			bIsReady
+				? TEXT("[LOBBY] READY confirmed by server")
+				: TEXT("[LOBBY] NOT READY confirmed by server"));
 	}
 }

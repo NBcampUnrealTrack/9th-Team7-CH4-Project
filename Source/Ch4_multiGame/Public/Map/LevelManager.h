@@ -17,11 +17,15 @@ public:
 
 	void ArrangePlacedZones();
 
-	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Settings")
+	UPROPERTY(Replicated, EditInstanceOnly, Category = "Zone Setup|Settings")
 	bool bUseAutoArrange = true;
 
-	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Settings", meta = (EditCondition = "bUseAutoArrange"))
+	UPROPERTY(Replicated, EditInstanceOnly, Category = "Zone Setup|Settings", meta = (EditCondition = "bUseAutoArrange"))
 	bool bShuffleMiddleZones = true;
+
+	// 서버에서 셔플된 중간 구역의 인덱스 순서 (클라이언트에 동기화)
+	UPROPERTY(ReplicatedUsing = OnRep_MiddleZoneOrder)
+	TArray<int32> MiddleZoneOrder;
 
 	// 시작 Zone
 	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Start")
@@ -46,4 +50,11 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+
+private:
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	// 셔플 인덱스가 서버에서 클라이언트로 넘어왔을 때 실행
+	UFUNCTION()
+	void OnRep_MiddleZoneOrder();
 };

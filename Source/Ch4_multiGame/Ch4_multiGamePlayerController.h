@@ -22,6 +22,10 @@ class ACh4_multiGamePlayerController : public APlayerController
 public:
 	ACh4_multiGamePlayerController();
 
+	// 마우스 회전 입력 가로채기 (마우스 감도 및 Y축 반전 적용)
+	virtual void AddPitchInput(float Val) override;
+	virtual void AddYawInput(float Val) override;
+
 	/**
 	 * Safe development command for Hamachi direct-IP tests.
 	 * Usage: JoinHamachi 25.x.x.x (an optional :7777 suffix is accepted).

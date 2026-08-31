@@ -33,6 +33,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="Game Flow")
 	ECh4GamePhase GetCurrentGamePhase() const { return CurrentGamePhase; }
 
+	UFUNCTION(BlueprintPure, Category="Game Flow|Result")
+	ECh4GameEndReason GetGameEndReason() const { return GameEndReason; }
+
 	UFUNCTION(BlueprintPure, Category="Game Flow|Cargo")
 	int32 GetInitialCargoCount() const { return InitialCargoCount; }
 
@@ -46,11 +49,15 @@ public:
 	UFUNCTION(BlueprintPure, Category="Game Flow|Cargo")
 	float GetCargoSurvivalRate() const;
 
+	/** Returns a read-only snapshot built from the replicated phase and cargo counts. */
+	UFUNCTION(BlueprintPure, Category="Game Flow|Result")
+	FCh4GameResult GetGameResult() const;
+
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
-	bool SetCurrentGamePhase(ECh4GamePhase NewGamePhase);
+	bool SetGamePhaseState(ECh4GamePhase NewGamePhase, ECh4GameEndReason NewEndReason);
 	bool SetCargoCounts(int32 NewInitialCargoCount, int32 NewRemainingCargoCount);
 	bool SetRemainingCargoCount(int32 NewRemainingCargoCount);
 
@@ -68,6 +75,10 @@ private:
 
 	UPROPERTY(ReplicatedUsing=OnRep_CargoCounts, BlueprintReadOnly, Category="Game Flow|Cargo", meta=(AllowPrivateAccess="true"))
 	int32 RemainingCargoCount = 0;
+
+	/** Replicated before CurrentGamePhase so phase listeners can read the matching terminal reason. */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category="Game Flow|Result", meta=(AllowPrivateAccess="true"))
+	ECh4GameEndReason GameEndReason = ECh4GameEndReason::None;
 
 	UPROPERTY(ReplicatedUsing=OnRep_CurrentGamePhase, BlueprintReadOnly, Category="Game Flow", meta=(AllowPrivateAccess="true"))
 	ECh4GamePhase CurrentGamePhase = ECh4GamePhase::Waiting;

@@ -3,10 +3,10 @@
 #include "GameFlow/FinalDeliveryZone.h"
 
 #include "Ch4_multiGame.h"
-#include "Ch4_multiGameGameMode.h"
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
+#include "GameFlow/GameFlowRuleInterface.h"
 #include "GameFlow/GameFlowTargetInterface.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -76,6 +76,8 @@ void AFinalDeliveryZone::OnGamePhaseChanged(const ECh4GamePhase NewGamePhase)
 		return;
 	}
 
+	NotifiedDeliveryTargets.Reset();
+
 	// Overlap state can finish registering later in the same frame as BeginPlay.
 	GetWorldTimerManager().SetTimerForNextTick(this, &AFinalDeliveryZone::EvaluateOverlappingTargets);
 }
@@ -94,14 +96,20 @@ void AFinalDeliveryZone::EvaluateDeliveryTarget(AActor* OtherActor)
 		return;
 	}
 
-	if (ACh4_multiGameGameMode* GameMode = GetWorld()->GetAuthGameMode<ACh4_multiGameGameMode>())
+	const TWeakObjectPtr<AActor> TargetKey(OtherActor);
+	if (NotifiedDeliveryTargets.Contains(TargetKey))
 	{
-		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Final Delivery target entered the zone: %s"), *GetNameSafe(OtherActor));
-		GameMode->TryCompleteGame();
+		return;
+	}
+
+	if (IGameFlowRuleInterface* GameRule = Cast<IGameFlowRuleInterface>(GetWorld()->GetAuthGameMode()))
+	{
+		NotifiedDeliveryTargets.Add(TargetKey);
+		GameRule->NotifyGoalReached(OtherActor);
 	}
 	else
 	{
-		UE_LOG(LogCh4_multiGame, Error, TEXT("[GameFlow] FinalDeliveryZone requires ACh4_multiGameGameMode"));
+		UE_LOG(LogCh4_multiGame, Error, TEXT("[GameFlow] FinalDeliveryZone requires IGameFlowRuleInterface"));
 	}
 }
 

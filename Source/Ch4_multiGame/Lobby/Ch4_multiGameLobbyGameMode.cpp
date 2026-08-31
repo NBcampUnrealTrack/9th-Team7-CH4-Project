@@ -24,6 +24,8 @@ ACh4_multiGameLobbyGameMode::ACh4_multiGameLobbyGameMode()
 	PlayerStateClass = ACh4_multiGameLobbyPlayerState::StaticClass();
 	PlayerControllerClass = ACh4_multiGameLobbyPlayerController::StaticClass();
 	bUseSeamlessTravel = false;
+	GameplayMap = TSoftObjectPtr<UWorld>(
+		FSoftObjectPath(TEXT("/Game/ThirdPerson/Lvl_ThirdPerson.Lvl_ThirdPerson")));
 
 	static ConstructorHelpers::FClassFinder<APawn> ThirdPersonPawnClass(
 		TEXT("/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter"));
@@ -231,16 +233,18 @@ void ACh4_multiGameLobbyGameMode::HandlePlayerReady(APlayerController* Requestin
 		return;
 	}
 
-	if (!LobbyPlayerState->SetReady())
+	const bool bNewReadyState = !LobbyPlayerState->IsReady();
+	if (!LobbyPlayerState->SetReadyState(bNewReadyState))
 	{
-		UE_LOG(LogCh4_multiGame, Log,
-			TEXT("[Lobby] Duplicate Ready request ignored: %s"),
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[Lobby] Ready state change rejected: %s"),
 			*GetPlayerLogLabel(RequestingPlayer));
 		return;
 	}
 
 	UE_LOG(LogCh4_multiGame, Log,
-		TEXT("[Lobby] Player Ready: %s"),
+		TEXT("[Lobby] Player %s: %s"),
+		bNewReadyState ? TEXT("Ready") : TEXT("Not Ready"),
 		*GetPlayerLogLabel(RequestingPlayer));
 	CheckAllPlayersReady();
 }
@@ -293,11 +297,28 @@ void ACh4_multiGameLobbyGameMode::CheckAllPlayersReady()
 		return;
 	}
 
-	if (ReadyPlayers == TotalPlayers)
+	if (CanStartLobbyTravel(
+		ReadyPlayers,
+		TotalPlayers,
+		MinPlayersToStart,
+		bTravelStarted))
 	{
 		UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] All Players Ready"));
 		StartGameTravel();
 	}
+}
+
+bool ACh4_multiGameLobbyGameMode::CanStartLobbyTravel(
+	const int32 ReadyPlayers,
+	const int32 TotalPlayers,
+	const int32 MinimumPlayers,
+	const bool bIsTravelInProgress)
+{
+	return !bIsTravelInProgress
+		&& MinimumPlayers > 0
+		&& TotalPlayers >= MinimumPlayers
+		&& ReadyPlayers >= 0
+		&& ReadyPlayers == TotalPlayers;
 }
 
 void ACh4_multiGameLobbyGameMode::GetReadyPlayerCounts(
@@ -337,7 +358,7 @@ void ACh4_multiGameLobbyGameMode::StartGameTravel()
 		return;
 	}
 
-	const FString MapPackage = GameplayMapPackage.ToString();
+	const FString MapPackage = GameplayMap.ToSoftObjectPath().GetLongPackageName();
 	if (!FPackageName::IsValidLongPackageName(MapPackage) ||
 		!FPackageName::DoesPackageExist(MapPackage))
 	{
