@@ -1,10 +1,13 @@
 #include "Public/Map/LevelManager.h"
 #include "Public/Map/RoadBase.h"
 #include "Public/Map/LevelFloorBase.h"
+#include "Net/UnrealNetwork.h"
 
 ALevelManager::ALevelManager()
 {
 	PrimaryActorTick.bCanEverTick = false;
+
+	bReplicates = true;
 }
 
 void ALevelManager::BeginPlay()
@@ -15,11 +18,15 @@ void ALevelManager::BeginPlay()
 	{
 		if (bUseAutoArrange)
 		{
-			ArrangePlacedZones();
+			Server_ArrangePlacedZones();
 		}
-		else
+	}
+	else
+	{
+		// 클라이언트에서도 포인터들이 유효하면 직접 배치 시도
+		if (bUseAutoArrange && StartRoadActor && StartEnvironmentActor)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("자동 배치 OFF - 에디터 레벨 내 배치를 사용합니다"));
+			ArrangePlacedZones();
 		}
 	}
 }
@@ -144,4 +151,48 @@ void ALevelManager::ArrangePlacedZones()
 	}
 
 	UE_LOG(LogTemp, Warning, TEXT("Road + Environment 자동 배치 완료"));
+
+	// 클라이언트에 배치 완료 알림
+	if (!bArrangeComplete)
+	{
+		bArrangeComplete = true;
+	}
+}
+
+void ALevelManager::Server_ArrangePlacedZones_Implementation()
+{
+	ArrangePlacedZones();
+	Multicast_ArrangePlacedZones();
+}
+
+bool ALevelManager::Server_ArrangePlacedZones_Validate()
+{
+	return true;
+}
+
+void ALevelManager::Multicast_ArrangePlacedZones_Implementation()
+{
+	// 클라이언트에서만 배치 실행 (서버는 이미 실행됨)
+	if (GetLocalRole() < ROLE_Authority)
+	{
+		ArrangePlacedZones();
+	}
+}
+
+void ALevelManager::OnRep_bArrangeComplete()
+{
+	// 클라이언트에서만 배치 실행
+	if (GetLocalRole() < ROLE_Authority)
+	{
+		ArrangePlacedZones();
+	}
+}
+
+void ALevelManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(ALevelManager, bUseAutoArrange);
+	DOREPLIFETIME(ALevelManager, bShuffleMiddleZones);
+	DOREPLIFETIME(ALevelManager, bArrangeComplete);
 }
