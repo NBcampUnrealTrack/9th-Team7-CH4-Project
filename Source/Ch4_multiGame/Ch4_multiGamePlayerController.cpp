@@ -16,6 +16,7 @@
 #include "OnlineSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "UI/PauseMenu/Ch4PauseMenuViewModel.h"
+#include "UI/HUD/Ch4HUDViewModel.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -151,6 +152,22 @@ void ACh4_multiGamePlayerController::BeginPlay()
 	// only execute on local player controllers
 	if (IsLocalPlayerController())
 	{
+		// ── HUD ViewModel 및 위젯 생성 ──────────────────────────────────
+		HUDViewModel = NewObject<UCh4HUDViewModel>(this);
+		if (HUDViewModel)
+		{
+			HUDViewModel->InitializeWithWorld(GetWorld());
+		}
+
+		if (HUDWidgetClass)
+		{
+			HUDWidget = CreateWidget<UUserWidget>(this, HUDWidgetClass);
+			if (HUDWidget)
+			{
+				HUDWidget->AddToViewport(0); // ZOrder 0 (PauseMenu: 100 아래)
+			}
+		}
+
 		// 1. Enhanced Input Subsystem에 Mapping Context 등록 보장
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 		{
