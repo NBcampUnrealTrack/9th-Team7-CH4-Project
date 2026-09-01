@@ -6,6 +6,7 @@
 
 class ARoadBase;
 class ALevelFloorBase;
+class AFinalDeliveryZone;
 
 UCLASS()
 class CH4_MULTIGAME_API ALevelManager : public AActor
@@ -47,6 +48,9 @@ public:
 
 	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|End")
 	ALevelFloorBase* EndEnvironmentActor;
+	
+	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|End")
+	AFinalDeliveryZone* FinalDeliveryZoneActor;
 
 protected:
 	virtual void BeginPlay() override;

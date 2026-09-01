@@ -2,6 +2,7 @@
 #include "Public/Map/RoadBase.h"
 #include "Public/Map/LevelFloorBase.h"
 #include "Net/UnrealNetwork.h"
+#include "GameFlow/FinalDeliveryZone.h"
 
 ALevelManager::ALevelManager()
 {
@@ -91,12 +92,17 @@ void ALevelManager::ArrangePlacedZones()
     // End Road의 EndPoint를 LevelManager 위치에 맞춤
     if (EndRoadActor && EndEnvironmentActor)
     {
-        FTransform RoadEndRelative =
-            EndRoadActor->GetEndPointTransform().GetRelativeTransform(
-                EndRoadActor->GetActorTransform());
+        const FTransform OriginalEndRoadTransform = EndRoadActor->GetActorTransform();
 
-        FTransform FinalRoadTransform =
-            RoadEndRelative.Inverse() * NextAttachTransform;
+        FTransform FinalDeliveryRelativeTransform;
+
+        if (FinalDeliveryZoneActor)
+        {
+            FinalDeliveryRelativeTransform = FinalDeliveryZoneActor->GetActorTransform().GetRelativeTransform(OriginalEndRoadTransform);
+        }
+
+        FTransform RoadEndRelative = EndRoadActor->GetEndPointTransform().GetRelativeTransform(EndRoadActor->GetActorTransform());
+        FTransform FinalRoadTransform = RoadEndRelative.Inverse() * NextAttachTransform;
 
         EndRoadActor->SetActorTransform(FinalRoadTransform);
 
@@ -104,12 +110,17 @@ void ALevelManager::ArrangePlacedZones()
         FVector EnvironmentLocation = FinalRoadTransform.GetLocation();
         EnvironmentLocation.Z = EnvironmentBaseZ;
 
-        FTransform EnvironmentTransform =
-            EndEnvironmentActor->GetActorTransform();
-
+        FTransform EnvironmentTransform = EndEnvironmentActor->GetActorTransform();
         EnvironmentTransform.SetLocation(EnvironmentLocation);
 
         EndEnvironmentActor->SetActorTransform(EnvironmentTransform);
+
+        // FinalDeliveryZone도 End Road와 동일한 상대 위치를 유지하며 이동
+        if (FinalDeliveryZoneActor)
+        {
+            const FTransform FinalDeliveryTransform = FinalDeliveryRelativeTransform * FinalRoadTransform;
+            FinalDeliveryZoneActor->SetActorTransform(FinalDeliveryTransform);
+        }
 
         // End Road의 StartPoint를 다음 연결 기준으로 사용
         NextAttachTransform = EndRoadActor->GetStartPointTransform();
@@ -121,8 +132,7 @@ void ALevelManager::ArrangePlacedZones()
     {
         const int32 TargetIndex = MiddleZoneOrder[Index];
 
-        if (!MiddleRoadActors.IsValidIndex(TargetIndex) ||
-            !MiddleEnvironmentActors.IsValidIndex(TargetIndex))
+        if (!MiddleRoadActors.IsValidIndex(TargetIndex) || !MiddleEnvironmentActors.IsValidIndex(TargetIndex))
         {
             continue;
         }
@@ -136,12 +146,9 @@ void ALevelManager::ArrangePlacedZones()
         }
 
         // 현재 Road의 EndPoint를 이전 Road의 StartPoint에 맞춤
-        FTransform RoadEndRelative =
-            Road->GetEndPointTransform().GetRelativeTransform(
-                Road->GetActorTransform());
+        FTransform RoadEndRelative = Road->GetEndPointTransform().GetRelativeTransform(Road->GetActorTransform());
 
-        FTransform FinalRoadTransform =
-            RoadEndRelative.Inverse() * NextAttachTransform;
+        FTransform FinalRoadTransform = RoadEndRelative.Inverse() * NextAttachTransform;
 
         Road->SetActorTransform(FinalRoadTransform);
 
@@ -149,8 +156,7 @@ void ALevelManager::ArrangePlacedZones()
         FVector EnvironmentLocation = FinalRoadTransform.GetLocation();
         EnvironmentLocation.Z = EnvironmentBaseZ;
 
-        FTransform EnvironmentTransform =
-            Environment->GetActorTransform();
+        FTransform EnvironmentTransform = Environment->GetActorTransform();
 
         EnvironmentTransform.SetLocation(EnvironmentLocation);
 
@@ -164,12 +170,9 @@ void ALevelManager::ArrangePlacedZones()
     if (StartRoadActor && StartEnvironmentActor)
     {
         // Start Road의 EndPoint를 마지막 Middle의 StartPoint에 맞춤
-        FTransform RoadEndRelative =
-            StartRoadActor->GetEndPointTransform().GetRelativeTransform(
-                StartRoadActor->GetActorTransform());
+        FTransform RoadEndRelative = StartRoadActor->GetEndPointTransform().GetRelativeTransform(StartRoadActor->GetActorTransform());
 
-        FTransform FinalRoadTransform =
-            RoadEndRelative.Inverse() * NextAttachTransform;
+        FTransform FinalRoadTransform = RoadEndRelative.Inverse() * NextAttachTransform;
 
         StartRoadActor->SetActorTransform(FinalRoadTransform);
 
@@ -177,8 +180,7 @@ void ALevelManager::ArrangePlacedZones()
         FVector EnvironmentLocation = FinalRoadTransform.GetLocation();
         EnvironmentLocation.Z = EnvironmentBaseZ;
 
-        FTransform EnvironmentTransform =
-            StartEnvironmentActor->GetActorTransform();
+        FTransform EnvironmentTransform = StartEnvironmentActor->GetActorTransform();
 
         EnvironmentTransform.SetLocation(EnvironmentLocation);
 
