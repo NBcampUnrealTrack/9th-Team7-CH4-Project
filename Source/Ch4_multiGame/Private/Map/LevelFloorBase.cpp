@@ -26,7 +26,7 @@ ALevelFloorBase::ALevelFloorBase()
 	BackgroundBounds->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	// 모든 환경에서 사용할 기본 배경 영역(지울예정)
-	BackgroundBounds->SetBoxExtent(FVector(20000.0f, 20000.0f, 24000.0f));
+	BackgroundBounds->SetBoxExtent(FVector(20000.0f, 20000.0f, 48000.0f));
 }
 
 void ALevelFloorBase::BeginPlay()

@@ -42,6 +42,19 @@ void ALevelManager::BeginPlay()
         // 3. 서버 본인 레벨 배치 실행
         ArrangePlacedZones();
     }
+    else
+    {
+        // 클라이언트: MiddleZoneOrder가 비어있으면 기본 순서로 초기화하고 배치 실행
+        if (MiddleZoneOrder.Num() == 0)
+        {
+            MiddleZoneOrder.Empty();
+            for (int32 i = 0; i < MiddleRoadActors.Num(); ++i)
+            {
+                MiddleZoneOrder.Add(i);
+            }
+            ArrangePlacedZones();
+        }
+    }
 }
 
 void ALevelManager::OnRep_MiddleZoneOrder()
@@ -52,27 +65,11 @@ void ALevelManager::OnRep_MiddleZoneOrder()
 
 void ALevelManager::ArrangePlacedZones()
 {
-    FTransform NextAttachTransform = GetActorTransform();
-
-    // 최초 Start Environment의 Z를 전체 Environment의 기준 높이로 저장
     float EnvironmentBaseZ = 0.0f;
 
     if (StartEnvironmentActor)
     {
         EnvironmentBaseZ = StartEnvironmentActor->GetActorLocation().Z;
-    }
-
-    // 시작 Zone
-    if (StartRoadActor && StartEnvironmentActor)
-    {
-        FTransform RoadStartRelative = StartRoadActor->GetStartPointTransform().GetRelativeTransform(StartRoadActor->GetActorTransform());
-
-        FTransform FinalRoadTransform = RoadStartRelative.Inverse() * NextAttachTransform;
-
-        StartRoadActor->SetActorTransform(FinalRoadTransform);
-        StartEnvironmentActor->SetActorTransform(FinalRoadTransform);
-
-        NextAttachTransform = StartRoadActor->GetEndPointTransform();
     }
 
     if (MiddleRoadActors.Num() != MiddleEnvironmentActors.Num())
@@ -87,12 +84,45 @@ void ALevelManager::ArrangePlacedZones()
         return;
     }
 
-    // 중간 Zone 배치 (서버에서 전송받은 MiddleZoneOrder 순서대로 배치)
-    for (int32 Index = 0; Index < MiddleZoneOrder.Num(); ++Index)
-    {
-        int32 TargetIndex = MiddleZoneOrder[Index];
+    // LevelManager 위치를 최초 기준점으로 사용
+    FTransform NextAttachTransform = GetActorTransform();
 
-        if (!MiddleRoadActors.IsValidIndex(TargetIndex) || !MiddleEnvironmentActors.IsValidIndex(TargetIndex))
+    // 1. End Zone
+    // End Road의 EndPoint를 LevelManager 위치에 맞춤
+    if (EndRoadActor && EndEnvironmentActor)
+    {
+        FTransform RoadEndRelative =
+            EndRoadActor->GetEndPointTransform().GetRelativeTransform(
+                EndRoadActor->GetActorTransform());
+
+        FTransform FinalRoadTransform =
+            RoadEndRelative.Inverse() * NextAttachTransform;
+
+        EndRoadActor->SetActorTransform(FinalRoadTransform);
+
+        // Environment는 Road의 X/Y만 따라가고 Z는 고정
+        FVector EnvironmentLocation = FinalRoadTransform.GetLocation();
+        EnvironmentLocation.Z = EnvironmentBaseZ;
+
+        FTransform EnvironmentTransform =
+            EndEnvironmentActor->GetActorTransform();
+
+        EnvironmentTransform.SetLocation(EnvironmentLocation);
+
+        EndEnvironmentActor->SetActorTransform(EnvironmentTransform);
+
+        // End Road의 StartPoint를 다음 연결 기준으로 사용
+        NextAttachTransform = EndRoadActor->GetStartPointTransform();
+    }
+
+    // 2. Middle Zone
+    // 기존 Zone 순서를 유지하기 위해 뒤에서부터 배치
+    for (int32 Index = MiddleZoneOrder.Num() - 1; Index >= 0; --Index)
+    {
+        const int32 TargetIndex = MiddleZoneOrder[Index];
+
+        if (!MiddleRoadActors.IsValidIndex(TargetIndex) ||
+            !MiddleEnvironmentActors.IsValidIndex(TargetIndex))
         {
             continue;
         }
@@ -105,45 +135,61 @@ void ALevelManager::ArrangePlacedZones()
             continue;
         }
 
-        // Road의 StartPoint를 이전 Road의 EndPoint에 연결
-        FTransform RoadStartRelative = Road->GetStartPointTransform().GetRelativeTransform(Road->GetActorTransform());
+        // 현재 Road의 EndPoint를 이전 Road의 StartPoint에 맞춤
+        FTransform RoadEndRelative =
+            Road->GetEndPointTransform().GetRelativeTransform(
+                Road->GetActorTransform());
 
-        FTransform FinalRoadTransform = RoadStartRelative.Inverse() * NextAttachTransform;
+        FTransform FinalRoadTransform =
+            RoadEndRelative.Inverse() * NextAttachTransform;
 
         Road->SetActorTransform(FinalRoadTransform);
 
-        // Environment는 Road의 X/Y만 사용하고 Z는 최초 Environment 높이 유지
+        // Environment는 Road의 X/Y만 따라가고 Z는 고정
         FVector EnvironmentLocation = FinalRoadTransform.GetLocation();
         EnvironmentLocation.Z = EnvironmentBaseZ;
 
-        FTransform EnvironmentTransform = Environment->GetActorTransform();
+        FTransform EnvironmentTransform =
+            Environment->GetActorTransform();
+
         EnvironmentTransform.SetLocation(EnvironmentLocation);
 
         Environment->SetActorTransform(EnvironmentTransform);
 
-        // 다음 Road는 현재 Road의 EndPoint를 기준으로 연결
-        NextAttachTransform = Road->GetEndPointTransform();
+        // 현재 Road의 StartPoint를 다음 연결 기준으로 사용
+        NextAttachTransform = Road->GetStartPointTransform();
     }
 
-    // 끝 Zone
-    if (EndRoadActor && EndEnvironmentActor)
+    // 3. Start Zone
+    if (StartRoadActor && StartEnvironmentActor)
     {
-        FTransform RoadStartRelative = EndRoadActor->GetStartPointTransform().GetRelativeTransform(EndRoadActor->GetActorTransform());
+        // Start Road의 EndPoint를 마지막 Middle의 StartPoint에 맞춤
+        FTransform RoadEndRelative =
+            StartRoadActor->GetEndPointTransform().GetRelativeTransform(
+                StartRoadActor->GetActorTransform());
 
-        FTransform FinalRoadTransform = RoadStartRelative.Inverse() * NextAttachTransform;
+        FTransform FinalRoadTransform =
+            RoadEndRelative.Inverse() * NextAttachTransform;
 
-        EndRoadActor->SetActorTransform(FinalRoadTransform);
+        StartRoadActor->SetActorTransform(FinalRoadTransform);
 
+        // Environment는 Road의 X/Y만 따라가고 Z는 고정
         FVector EnvironmentLocation = FinalRoadTransform.GetLocation();
         EnvironmentLocation.Z = EnvironmentBaseZ;
 
-        FTransform EnvironmentTransform = EndEnvironmentActor->GetActorTransform();
+        FTransform EnvironmentTransform =
+            StartEnvironmentActor->GetActorTransform();
+
         EnvironmentTransform.SetLocation(EnvironmentLocation);
 
-        EndEnvironmentActor->SetActorTransform(EnvironmentTransform);
+        StartEnvironmentActor->SetActorTransform(EnvironmentTransform);
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("[%s] Road + Environment 자동 배치 완료"), HasAuthority() ? TEXT("Server") : TEXT("Client"));
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("[%s] End Zone 기준 자동 배치 완료"),
+        HasAuthority() ? TEXT("Server") : TEXT("Client"));
 }
 
 void ALevelManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
