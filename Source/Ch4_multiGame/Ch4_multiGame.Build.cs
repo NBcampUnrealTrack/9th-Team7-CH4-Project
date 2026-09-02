@@ -13,6 +13,7 @@ public class Ch4_multiGame : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"PhysicsCore",
+			"Niagara",
 			"InputCore",
 			"EnhancedInput",
 			"AIModule",

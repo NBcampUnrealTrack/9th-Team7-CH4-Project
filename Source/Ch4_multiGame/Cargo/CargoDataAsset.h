@@ -8,6 +8,7 @@
 
 class UPhysicalMaterial;
 class UStaticMesh;
+class UNiagaraSystem;
 
 /** Immutable design-time definition shared by Cargo actors of the same type. */
 UCLASS(BlueprintType)
@@ -44,4 +45,36 @@ public:
 	/** Lightweight identifier that does not introduce a Gameplay Tags dependency. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cargo|Definition")
 	FName CargoCategory = NAME_None;
+
+	/** Enables event-driven break damage from strong impacts against static ground. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cargo|Ground Impact")
+	bool bBreakableFromGroundImpact = true;
+
+	/** Number of accepted ground impacts required before this Cargo becomes Lost. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cargo|Ground Impact",
+		meta=(ClampMin="1", UIMin="1"))
+	int32 GroundImpactsToBreak = 3;
+
+	/** Minimum physics NormalImpulse magnitude required for a ground impact to count. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cargo|Ground Impact",
+		meta=(ClampMin="0.0", UIMin="0.0"))
+	float MinimumGroundImpactImpulse = 8000.0f;
+
+	/** Minimum game-time interval between accepted impacts from the same Cargo. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cargo|Ground Impact",
+		meta=(ClampMin="0.0", UIMin="0.0", Units="s"))
+	float GroundImpactCooldownSeconds = 0.4f;
+
+	/** Minimum upward-facing impact normal. Higher values require flatter ground. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cargo|Ground Impact",
+		meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="1.0"))
+	float MinimumGroundNormalZ = 0.6f;
+
+	/** Optional world-space Niagara effect spawned after MarkAsLost succeeds. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cargo|Ground Impact")
+	TObjectPtr<UNiagaraSystem> BreakEffect = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cargo|Ground Impact",
+		meta=(ClampMin="0.0", UIMin="0.0"))
+	FVector BreakEffectScale = FVector::OneVector;
 };

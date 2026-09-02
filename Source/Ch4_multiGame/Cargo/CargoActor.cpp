@@ -9,7 +9,10 @@
 #include "Engine/World.h"
 #include "GameFlow/GameFlowRuleInterface.h"
 #include "GameFramework/GameModeBase.h"
+#include "Math/RotationMatrix.h"
 #include "Net/UnrealNetwork.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 
 namespace
@@ -31,6 +34,8 @@ ACargoActor::ACargoActor()
 	CargoMesh->SetCollisionProfileName(UCollisionProfile::PhysicsActor_ProfileName);
 	CargoMesh->SetSimulatePhysics(true);
 	CargoMesh->SetEnableGravity(true);
+	CargoMesh->SetNotifyRigidBodyCollision(true);
+	CargoMesh->OnComponentHit.AddDynamic(this, &ACargoActor::OnCargoMeshHit);
 }
 
 void ACargoActor::OnConstruction(const FTransform& Transform)
@@ -84,6 +89,27 @@ bool ACargoActor::ApplyCargoData()
 
 	const float ValidatedLinearDamping = FMath::Max(CargoData->LinearDamping, 0.0f);
 	const float ValidatedAngularDamping = FMath::Max(CargoData->AngularDamping, 0.0f);
+	if (CargoData->bBreakableFromGroundImpact && bShouldLogWarnings)
+	{
+		if (CargoData->GroundImpactsToBreak <= 0)
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[Cargo] %s CargoData '%s' has invalid GroundImpactsToBreak %d; using 1"),
+				*GetNameSafe(this), *GetNameSafe(CargoData), CargoData->GroundImpactsToBreak);
+		}
+		if (CargoData->MinimumGroundImpactImpulse < 0.0f || CargoData->GroundImpactCooldownSeconds < 0.0f)
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[Cargo] %s CargoData '%s' has negative ground-impact values; using zero minimums"),
+				*GetNameSafe(this), *GetNameSafe(CargoData));
+		}
+		if (CargoData->MinimumGroundNormalZ < 0.0f || CargoData->MinimumGroundNormalZ > 1.0f)
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[Cargo] %s CargoData '%s' has invalid MinimumGroundNormalZ %.3f; clamping to [0, 1]"),
+				*GetNameSafe(this), *GetNameSafe(CargoData), CargoData->MinimumGroundNormalZ);
+		}
+	}
 
 	CargoMesh->SetMassOverrideInKg(NAME_None, ValidatedMassKg, true);
 	CargoMesh->SetLinearDamping(ValidatedLinearDamping);
@@ -94,6 +120,178 @@ bool ACargoActor::ApplyCargoData()
 	CargoMesh->SetEnableGravity(CargoData->bEnableGravity);
 
 	return bHasValidMesh;
+}
+
+void ACargoActor::OnCargoMeshHit(
+	UPrimitiveComponent* HitComponent,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComp,
+	FVector NormalImpulse,
+	const FHitResult& Hit)
+{
+	if (!HasAuthority() || !IsValid(OtherComp))
+	{
+		return;
+	}
+
+	const UWorld* const World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	ProcessGroundImpact(
+		OtherComp->GetCollisionObjectType(),
+		OtherComp->GetMobility() == EComponentMobility::Static,
+		Hit.ImpactNormal.Z,
+		NormalImpulse.Size(),
+		World->GetTimeSeconds(),
+		Hit.ImpactPoint,
+		Hit.ImpactNormal);
+}
+
+bool ACargoActor::ProcessGroundImpact(
+	const ECollisionChannel OtherObjectType,
+	const bool bOtherComponentIsStatic,
+	const float ImpactNormalZ,
+	const float NormalImpulseMagnitude,
+	const double CurrentTimeSeconds,
+	const FVector& ImpactPoint,
+	const FVector& ImpactNormal)
+{
+	if (!HasAuthority() || IsLost() || bBreakInProgress || !IsValid(CargoData)
+		|| !CargoData->bBreakableFromGroundImpact)
+	{
+		return false;
+	}
+
+	if (OtherObjectType != ECC_WorldStatic || !bOtherComponentIsStatic)
+	{
+		UE_LOG(LogCh4_multiGame, VeryVerbose,
+			TEXT("[Cargo] Ground impact ignored for %s: collision target is not static world ground"),
+			*GetNameSafe(this));
+		return false;
+	}
+
+	const float RequiredNormalZ = FMath::Clamp(CargoData->MinimumGroundNormalZ, 0.0f, 1.0f);
+	if (!FMath::IsFinite(ImpactNormalZ) || ImpactNormalZ < RequiredNormalZ)
+	{
+		UE_LOG(LogCh4_multiGame, VeryVerbose,
+			TEXT("[Cargo] Ground impact ignored for %s: normal Z %.3f is below %.3f"),
+			*GetNameSafe(this), ImpactNormalZ, RequiredNormalZ);
+		return false;
+	}
+
+	const float RequiredImpulse = FMath::Max(CargoData->MinimumGroundImpactImpulse, 0.0f);
+	if (!FMath::IsFinite(NormalImpulseMagnitude)
+		|| NormalImpulseMagnitude <= UE_SMALL_NUMBER
+		|| NormalImpulseMagnitude < RequiredImpulse)
+	{
+		UE_LOG(LogCh4_multiGame, VeryVerbose,
+			TEXT("[Cargo] Ground impact ignored for %s: impulse %.3f is below %.3f"),
+			*GetNameSafe(this), NormalImpulseMagnitude, RequiredImpulse);
+		return false;
+	}
+
+	if (!FMath::IsFinite(CurrentTimeSeconds) || CurrentTimeSeconds < NextAllowedGroundImpactTimeSeconds)
+	{
+		UE_LOG(LogCh4_multiGame, VeryVerbose,
+			TEXT("[Cargo] Ground impact ignored for %s: cooldown until %.3f"),
+			*GetNameSafe(this), NextAllowedGroundImpactTimeSeconds);
+		return false;
+	}
+
+	const float CooldownSeconds = FMath::Max(CargoData->GroundImpactCooldownSeconds, 0.0f);
+	NextAllowedGroundImpactTimeSeconds = CurrentTimeSeconds + CooldownSeconds;
+	++GroundImpactCount;
+
+	const int32 RequiredImpactCount = FMath::Max(CargoData->GroundImpactsToBreak, 1);
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[Cargo] Ground impact accepted for %s: %d / %d (impulse %.3f)"),
+		*GetNameSafe(this), GroundImpactCount, RequiredImpactCount, NormalImpulseMagnitude);
+
+	if (GroundImpactCount < RequiredImpactCount)
+	{
+		return true;
+	}
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[Cargo] Break threshold reached for %s"), *GetNameSafe(this));
+
+	if (!TryBreakCargo(ImpactPoint, ImpactNormal))
+	{
+		// The rejected hit is rolled back. Existing accepted wear remains, and a new
+		// strong impact is required after GameFlow enters a phase that accepts loss.
+		GroundImpactCount = FMath::Max(RequiredImpactCount - 1, 0);
+		UE_LOG(LogCh4_multiGame, Verbose,
+			TEXT("[Cargo] Break rejected for %s; impact count restored to %d / %d"),
+			*GetNameSafe(this), GroundImpactCount, RequiredImpactCount);
+	}
+
+	return true;
+}
+
+bool ACargoActor::TryBreakCargo(const FVector& ImpactPoint, const FVector& ImpactNormal)
+{
+	if (!HasAuthority() || bBreakInProgress || IsLost())
+	{
+		return false;
+	}
+
+	bBreakInProgress = true;
+	if (!MarkAsLost())
+	{
+		bBreakInProgress = false;
+		return false;
+	}
+
+	if (IsValid(CargoData) && IsValid(CargoData->BreakEffect))
+	{
+		MulticastPlayBreakEffect(ImpactPoint, ImpactNormal.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector));
+	}
+
+	CargoMesh->SetNotifyRigidBodyCollision(false);
+	CargoMesh->SetSimulatePhysics(false);
+	CargoMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SetActorEnableCollision(false);
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[Cargo] Cargo destroyed after ground impacts: %s"), *GetNameSafe(this));
+
+	if (!Destroy())
+	{
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[Cargo] Failed to destroy Lost Cargo actor: %s"), *GetNameSafe(this));
+	}
+
+	return true;
+}
+
+void ACargoActor::MulticastPlayBreakEffect_Implementation(
+	const FVector_NetQuantize ImpactPoint,
+	const FVector_NetQuantizeNormal ImpactNormal)
+{
+	if (GetNetMode() == NM_DedicatedServer || !IsValid(CargoData) || !IsValid(CargoData->BreakEffect))
+	{
+		return;
+	}
+
+	const FVector SurfaceNormal = FVector(ImpactNormal).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+	const FVector EffectScale(
+		FMath::Max(CargoData->BreakEffectScale.X, 0.0f),
+		FMath::Max(CargoData->BreakEffectScale.Y, 0.0f),
+		FMath::Max(CargoData->BreakEffectScale.Z, 0.0f));
+
+	UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		this,
+		CargoData->BreakEffect,
+		ImpactPoint,
+		FRotationMatrix::MakeFromZ(SurfaceNormal).Rotator(),
+		EffectScale,
+		true,
+		true,
+		ENCPoolMethod::AutoRelease,
+		true);
 }
 
 bool ACargoActor::MarkAsLost()

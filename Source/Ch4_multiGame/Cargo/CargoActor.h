@@ -7,6 +7,7 @@
 #include "CargoActor.generated.h"
 
 class UCargoDataAsset;
+class UPrimitiveComponent;
 class UStaticMeshComponent;
 class IGameFlowRuleInterface;
 
@@ -40,6 +41,10 @@ public:
 	UFUNCTION(BlueprintPure, Category="Cargo|State")
 	bool IsLost() const { return CargoState == ECargoState::Lost; }
 
+	/** Server-only runtime count. It is intentionally not replicated or stored in CargoData. */
+	UFUNCTION(BlueprintPure, Category="Cargo|Ground Impact")
+	int32 GetGroundImpactCount() const { return GroundImpactCount; }
+
 	/**
 	 * Reports one Cargo loss through IGameFlowRuleInterface and changes state exactly once.
 	 * Client calls and rejected GameFlow notifications leave the Actor unchanged.
@@ -54,6 +59,22 @@ public:
 	{
 		GameFlowRuleOverrideForTesting = NewGameFlowRule;
 	}
+	bool ProcessGroundImpactForTesting(
+		ECollisionChannel OtherObjectType,
+		bool bOtherComponentIsStatic,
+		float ImpactNormalZ,
+		float NormalImpulseMagnitude,
+		double CurrentTimeSeconds)
+	{
+		return ProcessGroundImpact(
+			OtherObjectType,
+			bOtherComponentIsStatic,
+			ImpactNormalZ,
+			NormalImpulseMagnitude,
+			CurrentTimeSeconds,
+			FVector::ZeroVector,
+			FVector(0.0f, 0.0f, ImpactNormalZ));
+	}
 #endif
 
 protected:
@@ -63,6 +84,26 @@ protected:
 private:
 	/** Applies all static definition values through one editor-safe/runtime-safe path. */
 	bool ApplyCargoData();
+	bool ProcessGroundImpact(
+		ECollisionChannel OtherObjectType,
+		bool bOtherComponentIsStatic,
+		float ImpactNormalZ,
+		float NormalImpulseMagnitude,
+		double CurrentTimeSeconds,
+		const FVector& ImpactPoint,
+		const FVector& ImpactNormal);
+	bool TryBreakCargo(const FVector& ImpactPoint, const FVector& ImpactNormal);
+
+	UFUNCTION()
+	void OnCargoMeshHit(
+		UPrimitiveComponent* HitComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		FVector NormalImpulse,
+		const FHitResult& Hit);
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlayBreakEffect(FVector_NetQuantize ImpactPoint, FVector_NetQuantizeNormal ImpactNormal);
 
 	UFUNCTION()
 	void OnRep_CargoState();
@@ -78,6 +119,13 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_CargoState, VisibleInstanceOnly, BlueprintReadOnly, Transient,
 		Category="Cargo|State", meta=(AllowPrivateAccess="true"))
 	ECargoState CargoState = ECargoState::Active;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Cargo|Ground Impact",
+		meta=(AllowPrivateAccess="true"))
+	int32 GroundImpactCount = 0;
+
+	double NextAllowedGroundImpactTimeSeconds = 0.0;
+	bool bBreakInProgress = false;
 
 #if WITH_DEV_AUTOMATION_TESTS
 	IGameFlowRuleInterface* GameFlowRuleOverrideForTesting = nullptr;
