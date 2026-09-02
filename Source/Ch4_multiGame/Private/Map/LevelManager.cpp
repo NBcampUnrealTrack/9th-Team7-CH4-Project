@@ -1,4 +1,6 @@
 #include "Public/Map/LevelManager.h"
+
+#include "Landscape.h"
 #include "Public/Map/RoadBase.h"
 #include "Public/Map/LevelFloorBase.h"
 #include "Net/UnrealNetwork.h"
@@ -125,9 +127,28 @@ void ALevelManager::ArrangePlacedZones()
 
         FTransform EnvironmentTransform = EndEnvironmentActor->GetActorTransform();
         EnvironmentTransform.SetLocation(EnvironmentLocation);
-
         EndEnvironmentActor->SetActorTransform(EnvironmentTransform);
 
+        if (EndLandscapeActor)
+        {
+            if (EndLandscapeActor->GetRootComponent())
+            {
+                EndLandscapeActor->GetRootComponent()->SetMobility(EComponentMobility::Movable);
+            }
+            
+            FVector LandscapeLocation = FinalRoadTransform.GetLocation();
+            LandscapeLocation.Z = EndLandscapeActor->GetActorLocation().Z;
+            
+            FVector Origin, Extent;
+            EndLandscapeActor->GetActorBounds(false, Origin, Extent);
+            LandscapeLocation.X -= Extent.X;
+            LandscapeLocation.Y -= Extent.Y;
+
+            FTransform LandscapeTransform = EndLandscapeActor->GetActorTransform();
+            LandscapeTransform.SetLocation(LandscapeLocation);
+            EndLandscapeActor->SetActorTransform(LandscapeTransform);
+        }
+        
         // FinalDeliveryZone도 End Road와 동일한 상대 위치를 유지하며 이동
         if (FinalDeliveryZoneActor)
         {
@@ -159,6 +180,12 @@ void ALevelManager::ArrangePlacedZones()
 
         ARoadBase* Road = MiddleRoadActors[TargetIndex];
         ALevelFloorBase* Environment = MiddleEnvironmentActors[TargetIndex];
+        
+        ALandscape* Landscape = nullptr;
+        if (MiddleLandscapeActors.IsValidIndex(TargetIndex))
+        {
+            Landscape = MiddleLandscapeActors[TargetIndex];
+        }
         
         AZonePostProcessVolume* PostProcessVolume = nullptr;
 
@@ -195,6 +222,26 @@ void ALevelManager::ArrangePlacedZones()
         EnvironmentTransform.SetLocation(EnvironmentLocation);
 
         Environment->SetActorTransform(EnvironmentTransform);
+        
+        if (Landscape)
+        {
+            if (Landscape->GetRootComponent())
+            {
+                Landscape->GetRootComponent()->SetMobility(EComponentMobility::Movable);
+            }
+            
+            FVector LandscapeLocation = FinalRoadTransform.GetLocation();
+            LandscapeLocation.Z = Landscape->GetActorLocation().Z;
+            
+            FVector Origin, Extent;
+            Landscape->GetActorBounds(false, Origin, Extent);
+            LandscapeLocation.X -= Extent.X;
+            LandscapeLocation.Y -= Extent.Y;
+
+            FTransform LandscapeTransform = Landscape->GetActorTransform();
+            LandscapeTransform.SetLocation(LandscapeLocation);
+            Landscape->SetActorTransform(LandscapeTransform);
+        }
         
         if (PostProcessVolume)
         {
@@ -238,12 +285,30 @@ void ALevelManager::ArrangePlacedZones()
 
         StartEnvironmentActor->SetActorTransform(EnvironmentTransform);
         
-        // [추가] Start PostProcessVolume을 이동한 Road 기준으로 같이 이동
+        if (StartLandscapeActor)
+        {
+            if (StartLandscapeActor->GetRootComponent())
+            {
+                StartLandscapeActor->GetRootComponent()->SetMobility(EComponentMobility::Movable);
+            }
+            
+            FVector LandscapeLocation = FinalRoadTransform.GetLocation();
+            LandscapeLocation.Z = StartLandscapeActor->GetActorLocation().Z;
+            
+            FVector Origin, Extent;
+            StartLandscapeActor->GetActorBounds(false, Origin, Extent);
+            LandscapeLocation.X -= Extent.X;
+            LandscapeLocation.Y -= Extent.Y;
+
+            FTransform LandscapeTransform = StartLandscapeActor->GetActorTransform();
+            LandscapeTransform.SetLocation(LandscapeLocation);
+            StartLandscapeActor->SetActorTransform(LandscapeTransform);
+        }
+        
+        //Start PostProcessVolume을 이동한 Road 기준으로 같이 이동
         if (StartPostProcessVolume)
         {
             const FTransform FinalPostProcessTransform = StartPostProcessRelativeTransform * FinalRoadTransform;
-
-            // [추가]
             StartPostProcessVolume->SetActorTransform(FinalPostProcessTransform);
         }
     }

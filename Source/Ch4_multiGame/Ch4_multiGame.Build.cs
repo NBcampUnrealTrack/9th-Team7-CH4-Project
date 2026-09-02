@@ -23,6 +23,7 @@ public class Ch4_multiGame : ModuleRules
 			"ModelViewViewModel",
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",
+			"Landscape"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
