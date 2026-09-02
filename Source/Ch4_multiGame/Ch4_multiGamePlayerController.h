@@ -90,6 +90,13 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "UI|HUD")
 	TObjectPtr<class UCh4HUDViewModel> HUDViewModel;
 
+	// ── Voice Mute Toggle (V Key) ──────────────────────────────────────
+	UPROPERTY(EditAnywhere, Category = "Input|Voice")
+	TObjectPtr<UInputAction> VoiceToggleAction;
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Voice")
+	void ToggleVoice();
+
 	/** Input Mapping Contexts */
 	UPROPERTY(EditAnywhere, Category ="Input|Input Mappings")
 	TArray<UInputMappingContext*> DefaultMappingContexts;
