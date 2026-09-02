@@ -38,16 +38,35 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Input")
 	class UInputAction* JumpAction;
 	
+	UPROPERTY(EditDefaultsOnly, Category="Input")
+	class UInputAction* Emote1Action;
+	
+	UPROPERTY(EditDefaultsOnly, Category="Input")
+	class UInputAction* Emote2Action;
+	
+	UPROPERTY(EditDefaultsOnly, Category="Input")
+	class UInputAction* Emote3Action;
+	
+	UPROPERTY(EditDefaultsOnly, Category="Input")
+	class UInputAction* Emote4Action;
+	
 	UPROPERTY(EditDefaultsOnly, Category = "Stun")
 	TObjectPtr<class UAnimMontage> StunMontage;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Stun")
 	TSubclassOf<class UCameraShakeBase> StunCameraShake;
 	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Emotion")
+	TObjectPtr<class UEmotionDataAsset> EmotionDataAsset;
+	
 protected:
 	void InputActionMove(const struct FInputActionValue& Value);
 	void InputActionLook(const struct FInputActionValue& Value);
 	void InputActionJump(const struct FInputActionValue& Value);
+	void InputActionEmote1(const struct FInputActionValue& Value);
+	void InputActionEmote2(const struct FInputActionValue& Value);
+	void InputActionEmote3(const struct FInputActionValue& Value);
+	void InputActionEmote4(const struct FInputActionValue& Value);
 	
 	// MovementMode가 변경될 때 호출
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
@@ -92,4 +111,14 @@ protected:
 
 	void StartHitStop();
 	void EndHitStop();
+	
+	UAnimMontage* FindEmotionMontage(EEmotionType EmotionType) const;
+	
+	void PlayEmotion(EEmotionType EmotionType);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRPC_PlayEmotion(EEmotionType EmotionType);
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastRPC_PlayEmotion(EEmotionType EmotionType);
 };
