@@ -160,6 +160,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Grab")
 	FName GrabSocketName = TEXT("GrabSocket");
 	
+	UPROPERTY(EditDefaultsOnly, Category="Grab")
+	float GrabRadius = 50.0f;
+	
 	// 그랩/릴리즈 몽타주 재생 중 여부 (입력 잠금용)
 	bool bIsGrabActionInProgress = false;
 	
@@ -171,6 +174,12 @@ protected:
 
 	UFUNCTION(Server, Reliable)
 	void ServerRPC_ReleaseGrab();
+	
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastRPC_AttachGrab(UPrimitiveComponent* TargetComponent);
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastRPC_ReleaseGrab(UPrimitiveComponent* TargetComponent);
 	
 	UFUNCTION(Server, Reliable)
 	void ServerRPC_PlayGrabMontage();

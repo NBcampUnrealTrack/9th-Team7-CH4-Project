@@ -469,7 +469,7 @@ void ACh4_PlayerCharacter::OnGrabNotify()
 	
 	FVector SocketLoc = GetMesh()->GetSocketLocation(GrabSocketName);
 	TArray<FOverlapResult> Overlaps;
-	FCollisionShape Sphere = FCollisionShape::MakeSphere(50.0f);
+	FCollisionShape Sphere = FCollisionShape::MakeSphere(GrabRadius);
 	
 	bool bHit = GetWorld()->OverlapMultiByChannel(
 		Overlaps, SocketLoc, FQuat::Identity, ECC_PhysicsBody, Sphere);
@@ -498,15 +498,24 @@ void ACh4_PlayerCharacter::ServerRPC_AttachGrab_Implementation(UPrimitiveCompone
 		return;
 	}
 
+	GrabbedComponent = TargetComponent;
+	MulticastRPC_AttachGrab(TargetComponent);
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_AttachGrab_Implementation(UPrimitiveComponent* TargetComponent)
+{
+	if (TargetComponent == nullptr)
+	{
+		return;
+	}
+
 	TargetComponent->SetSimulatePhysics(false);
 	TargetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	TargetComponent->AttachToComponent(
-		GetMesh(),
-		FAttachmentTransformRules::SnapToTargetNotIncludingScale,
-		GrabSocketName);
-
-	GrabbedComponent = TargetComponent;
+	   GetMesh(),
+	   FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+	   GrabSocketName);
 }
 
 void ACh4_PlayerCharacter::ServerRPC_ReleaseGrab_Implementation()
@@ -515,12 +524,16 @@ void ACh4_PlayerCharacter::ServerRPC_ReleaseGrab_Implementation()
 	{
 		return;
 	}
-
-	GrabbedComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-	GrabbedComponent->SetSimulatePhysics(true);
-	GrabbedComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-
+	
+	MulticastRPC_ReleaseGrab(GrabbedComponent);
 	GrabbedComponent = nullptr;
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_ReleaseGrab_Implementation(UPrimitiveComponent* TargetComponent)
+{
+	TargetComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+	TargetComponent->SetSimulatePhysics(true);
+	TargetComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 }
 
 void ACh4_PlayerCharacter::ServerRPC_PlayGrabMontage_Implementation()
