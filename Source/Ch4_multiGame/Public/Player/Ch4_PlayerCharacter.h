@@ -53,6 +53,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Input")
 	class UInputAction* GrabAction;
 	
+	UPROPERTY(EditDefaultsOnly, Category="Input")
+    class UInputAction* SkinChangeAction;
+	
 	UPROPERTY(EditDefaultsOnly, Category="Anim")
 	TObjectPtr<class UAnimMontage> StunMontage;
 
@@ -89,6 +92,7 @@ protected:
 	void InputActionEmote3(const struct FInputActionValue& Value);
 	void InputActionEmote4(const struct FInputActionValue& Value);
 	void InputActionGrab(const struct FInputActionValue& Value);
+	void InputActionSkinChange(const struct FInputActionValue& Value);
 	
 	// MovementMode가 변경될 때 호출
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;

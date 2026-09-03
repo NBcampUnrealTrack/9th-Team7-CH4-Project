@@ -71,6 +71,7 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		if (Emote3Action) EIC->BindAction(Emote3Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote3);
 		if (Emote4Action) EIC->BindAction(Emote4Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote4);
 		if (GrabAction) EIC->BindAction(GrabAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionGrab);
+		if (SkinChangeAction) EIC->BindAction(SkinChangeAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionSkinChange);
 	}
 }
 
@@ -202,6 +203,11 @@ void ACh4_PlayerCharacter::InputActionGrab(const FInputActionValue& Value)
 	{
 		ServerRPC_PlayGrabMontage();
 	}
+}
+
+void ACh4_PlayerCharacter::InputActionSkinChange(const struct FInputActionValue& Value)
+{
+	
 }
 
 void ACh4_PlayerCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
