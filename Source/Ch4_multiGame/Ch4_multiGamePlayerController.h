@@ -76,7 +76,27 @@ protected:
 	// PauseMenu 전용 MVVM ViewModel 인스턴스
 	UPROPERTY(BlueprintReadOnly, Category = "UI|Pause Menu")
 	TObjectPtr<class UCh4PauseMenuViewModel> PauseMenuViewModel;
-	
+
+	// ── HUD ────────────────────────────────────────────────────────────
+	// 에디터에서 WBP_HUD 클래스를 지정할 변수
+	UPROPERTY(EditAnywhere, Category = "UI|HUD")
+	TSubclassOf<UUserWidget> HUDWidgetClass;
+
+	// 생성된 HUD 위젯 인스턴스
+	UPROPERTY()
+	TObjectPtr<UUserWidget> HUDWidget;
+
+	// HUD 전용 MVVM ViewModel 인스턴스
+	UPROPERTY(BlueprintReadOnly, Category = "UI|HUD")
+	TObjectPtr<class UCh4HUDViewModel> HUDViewModel;
+
+	// ── Voice Mute Toggle (V Key) ──────────────────────────────────────
+	UPROPERTY(EditAnywhere, Category = "Input|Voice")
+	TObjectPtr<UInputAction> VoiceToggleAction;
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Voice")
+	void ToggleVoice();
+
 	/** Input Mapping Contexts */
 	UPROPERTY(EditAnywhere, Category ="Input|Input Mappings")
 	TArray<UInputMappingContext*> DefaultMappingContexts;

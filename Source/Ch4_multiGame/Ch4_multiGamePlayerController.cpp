@@ -16,6 +16,9 @@
 #include "OnlineSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "UI/PauseMenu/Ch4PauseMenuViewModel.h"
+#include "UI/HUD/Ch4HUDViewModel.h"
+#include "View/MVVMView.h"
+#include "MVVMSubsystem.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -97,6 +100,14 @@ ACh4_multiGamePlayerController::ACh4_multiGamePlayerController()
 	{
 		PauseAction = PauseActionFinder.Object;
 	}
+
+	// IA_VoiceToggle 기본값 로드
+	static ConstructorHelpers::FObjectFinder<UInputAction> VoiceToggleActionFinder(
+		TEXT("/Game/Input/Actions/IA_VoiceToggle.IA_VoiceToggle"));
+	if (VoiceToggleActionFinder.Succeeded())
+	{
+		VoiceToggleAction = VoiceToggleActionFinder.Object;
+	}
 }
 
 void ACh4_multiGamePlayerController::JoinHamachi(FString HostIPv4)
@@ -151,6 +162,67 @@ void ACh4_multiGamePlayerController::BeginPlay()
 	// only execute on local player controllers
 	if (IsLocalPlayerController())
 	{
+		// 메인 메뉴(L_MainMenu)에서는 인게임 HUD를 생성하지 않고, 로비 및 실제 인게임 맵에서만 생성
+		const FString CurrentMapName = GetWorld() ? GetWorld()->GetMapName() : FString();
+		const bool bIsMainMenu = CurrentMapName.Contains(TEXT("MainMenu")) || CurrentMapName.Contains(TEXT("L_MainMenu"));
+
+		if (!bIsMainMenu)
+		{
+			// ── HUD ViewModel 및 위젯 생성 ──────────────────────────────────
+			HUDViewModel = NewObject<UCh4HUDViewModel>(this);
+			if (HUDViewModel)
+			{
+				HUDViewModel->InitializeWithWorld(GetWorld(), this);
+			}
+
+			if (!HUDWidgetClass)
+			{
+				HUDWidgetClass = StaticLoadClass(UUserWidget::StaticClass(), nullptr, TEXT("/Game/UI/WBP_HUD.WBP_HUD_C"));
+			}
+
+			if (HUDWidgetClass)
+			{
+				HUDWidget = CreateWidget<UUserWidget>(this, HUDWidgetClass);
+				if (HUDWidget)
+				{
+					// 1. 위젯을 먼저 뷰포트에 추가하여 UMVVMView의 Slate 및 LoadedProperties를 온전히 초기화
+					HUDWidget->AddToViewport(0); // ZOrder 0 (PauseMenu: 100 아래)
+
+					// 2. MVVM 공식 서브시스템을 통한 확실한 뷰모델 의존성 주입 (Dependency Injection)
+					if (UMVVMView* View = UMVVMSubsystem::GetViewFromUserWidget(HUDWidget))
+					{
+						View->SetViewModel(FName("Ch4HUDViewModel"), HUDViewModel);
+						View->SetViewModelByClass(HUDViewModel);
+						View->ExecuteViewModelBindings(FName("Ch4HUDViewModel"));
+					}
+
+					// 3. Fallback: Setter 함수 호출
+					if (UFunction* SetVMFunc = HUDWidget->FindFunction(FName("SetCh4HUDViewModel")))
+					{
+						struct FSetVMParams
+						{
+							UCh4HUDViewModel* InViewModel;
+						};
+						FSetVMParams Params;
+						Params.InViewModel = HUDViewModel;
+						HUDWidget->ProcessEvent(SetVMFunc, &Params);
+					}
+
+					// 4. 초기 마이크 상태(OFF) 위젯에 즉시 적용
+					if (UFunction* SetMicFunc = HUDWidget->FindFunction(FName("SetMicActive")))
+					{
+						struct FSetMicParams
+						{
+							bool bIsActive;
+						};
+						FSetMicParams Params;
+						Params.bIsActive = HUDViewModel ? HUDViewModel->bIsMicActive : false;
+						HUDWidget->ProcessEvent(SetMicFunc, &Params);
+					}
+				}
+			}
+		}
+
 		// 1. Enhanced Input Subsystem에 Mapping Context 등록 보장
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 		{
@@ -174,12 +246,17 @@ void ACh4_multiGamePlayerController::BeginPlay()
 			}
 		}
 
-		// 2. PauseAction 키 바인딩 (Started 1회만, 중복 방지)
+		// 2. PauseAction 및 VoiceToggleAction 키 바인딩
 		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
 		{
 			if (PauseAction)
 			{
 				EnhancedInputComponent->BindAction(PauseAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::TogglePauseMenu);
+			}
+
+			if (VoiceToggleAction)
+			{
+				EnhancedInputComponent->BindAction(VoiceToggleAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::ToggleVoice);
 			}
 		}
 
@@ -235,6 +312,31 @@ bool ACh4_multiGamePlayerController::ShouldUseTouchControls() const
 }
 
 // [추가]
+void ACh4_multiGamePlayerController::ToggleVoice()
+{
+	if (!IsLocalPlayerController()) return;
+
+	if (HUDViewModel)
+	{
+		HUDViewModel->ToggleMic();
+	}
+
+	// WBP_HUD 위젯의 SetMicActive 함수를 즉시 실행하여 아이콘 확실하게 전환
+	if (HUDWidget)
+	{
+		if (UFunction* SetMicFunc = HUDWidget->FindFunction(FName("SetMicActive")))
+		{
+			struct FSetMicParams
+			{
+				bool bIsActive;
+			};
+			FSetMicParams Params;
+			Params.bIsActive = HUDViewModel ? HUDViewModel->bIsMicActive : false;
+			HUDWidget->ProcessEvent(SetMicFunc, &Params);
+		}
+	}
+}
+
 void ACh4_multiGamePlayerController::TogglePauseMenu()
 {
 	if (!IsLocalPlayerController()) return;
