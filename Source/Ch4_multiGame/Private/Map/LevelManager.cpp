@@ -44,6 +44,7 @@ void ALevelManager::BeginPlay()
                 }
             }
         }
+
         // 3. 서버 본인 레벨 배치 실행
         ArrangePlacedZones();
     }
@@ -57,6 +58,7 @@ void ALevelManager::BeginPlay()
             {
                 MiddleZoneOrder.Add(i);
             }
+
             ArrangePlacedZones();
         }
     }
@@ -70,6 +72,46 @@ void ALevelManager::OnRep_MiddleZoneOrder()
 
 void ALevelManager::ArrangePlacedZones()
 {
+    // ============================================================
+    // 배치 전에 이동 대상 Actor들을 Movable로 변경
+    // ============================================================
+
+    auto SetRootMobility =
+        [](AActor* Actor, EComponentMobility::Type Mobility)
+    {
+        if (Actor && Actor->GetRootComponent())
+        {
+            Actor->GetRootComponent()->SetMobility(Mobility);
+        }
+    };
+
+    // End Zone
+    SetRootMobility(EndRoadActor, EComponentMobility::Movable);
+    SetRootMobility(EndEnvironmentActor, EComponentMobility::Movable);
+    SetRootMobility(EndPostProcessVolume, EComponentMobility::Movable);
+    SetRootMobility(FinalDeliveryZoneActor, EComponentMobility::Movable);
+
+    // Middle Zone
+    for (ARoadBase* Road : MiddleRoadActors)
+    {
+        SetRootMobility(Road, EComponentMobility::Movable);
+    }
+
+    for (ALevelFloorBase* Environment : MiddleEnvironmentActors)
+    {
+        SetRootMobility(Environment, EComponentMobility::Movable);
+    }
+
+    for (AZonePostProcessVolume* PostProcessVolume : MiddlePostProcessVolumes)
+    {
+        SetRootMobility(PostProcessVolume, EComponentMobility::Movable);
+    }
+
+    // Start Zone
+    SetRootMobility(StartRoadActor, EComponentMobility::Movable);
+    SetRootMobility(StartEnvironmentActor, EComponentMobility::Movable);
+    SetRootMobility(StartPostProcessVolume, EComponentMobility::Movable);
+
     float EnvironmentBaseZ = 0.0f;
 
     if (StartEnvironmentActor)
@@ -89,6 +131,8 @@ void ALevelManager::ArrangePlacedZones()
 
         return;
     }
+    
+    
 
     // LevelManager 위치를 최초 기준점으로 사용
     FTransform NextAttachTransform = GetActorTransform();
@@ -313,7 +357,25 @@ void ALevelManager::ArrangePlacedZones()
             StartPostProcessVolume->SetActorTransform(FinalPostProcessTransform);
         }
     }
+    
+    if (EndRoadActor)
+    {
+        EndRoadActor->SetRoadComponentsStatic();
+    }
 
+    for (ARoadBase* Road : MiddleRoadActors)
+    {
+        if (Road)
+        {
+            Road->SetRoadComponentsStatic();
+        }
+    }
+
+    if (StartRoadActor)
+    {
+        StartRoadActor->SetRoadComponentsStatic();
+    }
+    
     UE_LOG(
         LogTemp,
         Warning,

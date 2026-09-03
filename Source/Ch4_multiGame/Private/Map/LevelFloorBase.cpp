@@ -2,7 +2,10 @@
 #include "Components/BoxComponent.h"
 #include "GameFramework/Character.h"
 #include "DrawDebugHelpers.h"
+#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
+#include "InstancedFoliageActor.h"
+
 
 ALevelFloorBase::ALevelFloorBase()
 {
@@ -91,6 +94,46 @@ void ALevelFloorBase::OnCollisionBoxBeginOverlap(
 			}
 		}
 	}
+	
+	// 3. 진입 시 인스턴스 폴리지 컴포넌트 숨김 처리
+	if (!BeginHideComponentTag.IsNone())
+	{
+		for (TActorIterator<AInstancedFoliageActor> It(GetWorld()); It; ++It)
+		{
+			AInstancedFoliageActor* FoliageActor = *It;
+			if (FoliageActor)
+			{
+				TArray<UActorComponent*> Comps = FoliageActor->GetComponentsByTag(UPrimitiveComponent::StaticClass(), BeginHideComponentTag);
+				for (UActorComponent* Comp : Comps)
+				{
+					if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Comp))
+					{
+						PrimComp->SetVisibility(false, true);
+					}
+				}
+			}
+		}
+	}
+
+	// 4. 진입 시 인스턴스 폴리지 컴포넌트 표시 처리
+	if (!BeginShowComponentTag.IsNone())
+	{
+		for (TActorIterator<AInstancedFoliageActor> It(GetWorld()); It; ++It)
+		{
+			AInstancedFoliageActor* FoliageActor = *It;
+			if (FoliageActor)
+			{
+				TArray<UActorComponent*> Comps = FoliageActor->GetComponentsByTag(UPrimitiveComponent::StaticClass(), BeginShowComponentTag);
+				for (UActorComponent* Comp : Comps)
+				{
+					if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Comp))
+					{
+						PrimComp->SetVisibility(true, true);
+					}
+				}
+			}
+		}
+	}
 }
 
 void ALevelFloorBase::OnCollisionBoxEndOverlap(
@@ -140,6 +183,46 @@ void ALevelFloorBase::OnCollisionBoxEndOverlap(
 			if (Actor)
 			{
 				Actor->SetActorHiddenInGame(false);
+			}
+		}
+	}
+	
+	// 3. 이탈 시 인스턴스 폴리지 컴포넌트 숨김 처리
+	if (!EndHideComponentTag.IsNone())
+	{
+		for (TActorIterator<AInstancedFoliageActor> It(GetWorld()); It; ++It)
+		{
+			AInstancedFoliageActor* FoliageActor = *It;
+			if (FoliageActor)
+			{
+				TArray<UActorComponent*> Comps = FoliageActor->GetComponentsByTag(UPrimitiveComponent::StaticClass(), EndHideComponentTag);
+				for (UActorComponent* Comp : Comps)
+				{
+					if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Comp))
+					{
+						PrimComp->SetVisibility(false, true);
+					}
+				}
+			}
+		}
+	}
+
+	// 4. 이탈 시 인스턴스 폴리지 컴포넌트 표시 처리
+	if (!EndShowComponentTag.IsNone())
+	{
+		for (TActorIterator<AInstancedFoliageActor> It(GetWorld()); It; ++It)
+		{
+			AInstancedFoliageActor* FoliageActor = *It;
+			if (FoliageActor)
+			{
+				TArray<UActorComponent*> Comps = FoliageActor->GetComponentsByTag(UPrimitiveComponent::StaticClass(), EndShowComponentTag);
+				for (UActorComponent* Comp : Comps)
+				{
+					if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Comp))
+					{
+						PrimComp->SetVisibility(true, true);
+					}
+				}
 			}
 		}
 	}

@@ -221,3 +221,27 @@ void ARoadBase::DrawBackgroundGuides()
 			10.0f);
 	}
 }
+
+void ARoadBase::SetRoadComponentsStatic()
+{
+	TArray<UActorComponent*> Components;
+	GetComponents(Components);
+
+	for (UActorComponent* Component : Components)
+	{
+		if (!Component)
+		{
+			continue;
+		}
+
+		if (USceneComponent* SceneComponent = Cast<USceneComponent>(Component))
+		{
+			SceneComponent->SetMobility(EComponentMobility::Static);
+		}
+
+		if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))
+		{
+			PrimitiveComponent->SetCollisionObjectType(ECC_WorldStatic);
+		}
+	}
+}

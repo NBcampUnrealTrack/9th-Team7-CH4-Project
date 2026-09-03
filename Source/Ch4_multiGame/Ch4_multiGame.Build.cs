@@ -26,7 +26,7 @@ public class Ch4_multiGame : ModuleRules
 			"Landscape"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { });
+		PrivateDependencyModuleNames.AddRange(new string[] { "Foliage" });
 
 		PublicIncludePaths.AddRange(new string[] {
 			"Ch4_multiGame",

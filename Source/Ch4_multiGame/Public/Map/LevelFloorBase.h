@@ -47,6 +47,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap")
 	FName EndShowTargetTag = FName("EndShowTagName");
 	
+	// --- 컴포넌트(폴리지 등) 단위 태그 ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap | Component")
+	FName BeginHideComponentTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap | Component")
+	FName BeginShowComponentTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap | Component")
+	FName EndHideComponentTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap | Component")
+	FName EndShowComponentTag;
 
 	UFUNCTION()
 	void OnCollisionBoxBeginOverlap(
