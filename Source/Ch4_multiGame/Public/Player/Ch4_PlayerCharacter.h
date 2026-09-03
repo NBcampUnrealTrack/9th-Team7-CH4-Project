@@ -50,14 +50,22 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Input")
 	class UInputAction* Emote4Action;
 	
-	UPROPERTY(EditDefaultsOnly, Category = "Stun")
+	UPROPERTY(EditDefaultsOnly, Category="Input")
+	class UInputAction* GrabAction;
+	
+	UPROPERTY(EditDefaultsOnly, Category="Anim")
 	TObjectPtr<class UAnimMontage> StunMontage;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Stun")
+	UPROPERTY(EditDefaultsOnly, Category="Stun")
 	TSubclassOf<class UCameraShakeBase> StunCameraShake;
 	
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Emotion")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Emotion")
 	TObjectPtr<class UEmotionDataAsset> EmotionDataAsset;
+	
+	UPROPERTY(EditDefaultsOnly, Category="Anim")
+	TObjectPtr<class UAnimMontage> GrabMontage;
+	
+	void OnGrabNotify();
 	
 protected:
 	void InputActionMove(const struct FInputActionValue& Value);
@@ -67,6 +75,7 @@ protected:
 	void InputActionEmote2(const struct FInputActionValue& Value);
 	void InputActionEmote3(const struct FInputActionValue& Value);
 	void InputActionEmote4(const struct FInputActionValue& Value);
+	void InputActionGrab(const struct FInputActionValue& Value);
 	
 	// MovementMode가 변경될 때 호출
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
@@ -131,4 +140,25 @@ protected:
 
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastRPC_InterruptEmotionMontage();
+	
+	UPROPERTY(ReplicatedUsing = OnRep_GrabbedComponent)
+	TObjectPtr<class UPrimitiveComponent> GrabbedComponent;
+
+	UPROPERTY(EditDefaultsOnly, Category="Grab")
+	FName GrabSocketName = TEXT("GrabSocket");
+	
+	UFUNCTION()
+	void OnRep_GrabbedComponent();
+
+	UFUNCTION(Server, Reliable)
+	void ServerRPC_AttachGrab(UPrimitiveComponent* TargetComponent);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRPC_ReleaseGrab();
+	
+	UFUNCTION(Server, Reliable)
+	void ServerRPC_PlayGrabMontage();
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastRPC_PlayGrabMontage();
 };
