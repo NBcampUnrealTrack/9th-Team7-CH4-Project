@@ -64,15 +64,31 @@ void ALevelFloorBase::OnCollisionBoxBeginOverlap(
 		return;
 	}
 
-	// 변수로 지정된 TargetTag를 사용해 액터 검색
-	TArray<AActor*> TargetActors;
-	UGameplayStatics::GetAllActorsWithTag(GetWorld(), TargetTag, TargetActors);
-
-	for (AActor* Actor : TargetActors)
+	// 1. 진입 시 숨길 태그 처리
+	if (!BeginHideTargetTag.IsNone())
 	{
-		if (Actor)
+		TArray<AActor*> HideActors;
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), BeginHideTargetTag, HideActors);
+		for (AActor* Actor : HideActors)
 		{
-			Actor->SetActorHiddenInGame(true);
+			if (Actor)
+			{
+				Actor->SetActorHiddenInGame(true);
+			}
+		}
+	}
+
+	// 2. 진입 시 보일 태그 처리
+	if (!BeginShowTargetTag.IsNone())
+	{
+		TArray<AActor*> ShowActors;
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), BeginShowTargetTag, ShowActors);
+		for (AActor* Actor : ShowActors)
+		{
+			if (Actor)
+			{
+				Actor->SetActorHiddenInGame(false);
+			}
 		}
 	}
 }
@@ -100,15 +116,31 @@ void ALevelFloorBase::OnCollisionBoxEndOverlap(
 		return;
 	}
 
-	// 변수로 지정된 TargetTag를 사용해 액터 검색
-	TArray<AActor*> TargetActors;
-	UGameplayStatics::GetAllActorsWithTag(GetWorld(), TargetTag, TargetActors);
-
-	for (AActor* Actor : TargetActors)
+	// 1. 이탈 시 숨길 태그 처리
+	if (!EndHideTargetTag.IsNone())
 	{
-		if (Actor)
+		TArray<AActor*> HideActors;
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), EndHideTargetTag, HideActors);
+		for (AActor* Actor : HideActors)
 		{
-			Actor->SetActorHiddenInGame(false);
+			if (Actor)
+			{
+				Actor->SetActorHiddenInGame(true);
+			}
+		}
+	}
+
+	// 2. 이탈 시 보일 태그 처리
+	if (!EndShowTargetTag.IsNone())
+	{
+		TArray<AActor*> ShowActors;
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), EndShowTargetTag, ShowActors);
+		for (AActor* Actor : ShowActors)
+		{
+			if (Actor)
+			{
+				Actor->SetActorHiddenInGame(false);
+			}
 		}
 	}
 }

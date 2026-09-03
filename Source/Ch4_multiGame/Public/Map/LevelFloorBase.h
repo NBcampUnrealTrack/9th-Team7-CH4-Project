@@ -33,8 +33,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Guide")
 	int32 DivisionCount = 8;
 	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-	FName TargetTag = FName("TargetTagName");
+	// --- 오버랩 진입(Begin) 시 사용할 태그 설정 ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap")
+	FName BeginHideTargetTag = FName("BeginHideTagName");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap")
+	FName BeginShowTargetTag = FName("BeginShowTagName");
+
+	// --- 오버랩 이탈(End) 시 사용할 태그 설정 ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap")
+	FName EndHideTargetTag = FName("EndHideTagName");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap")
+	FName EndShowTargetTag = FName("EndShowTagName");
 	
 
 	UFUNCTION()
