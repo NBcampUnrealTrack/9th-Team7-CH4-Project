@@ -71,6 +71,15 @@ public:
 	void OnGrabNotify();
 	void OnGrabReleaseNotify();
 	
+	UPROPERTY(VisibleAnywhere, Category="Hat")
+	TObjectPtr<class UStaticMeshComponent> HatMeshComponent;
+
+	UPROPERTY(EditDefaultsOnly, Category="Hat")
+	FName HatSocketName = TEXT("HatSocket");
+
+	UFUNCTION(BlueprintCallable, Category="Hat")
+	void SetHatMesh(class UStaticMesh* NewHat);
+	
 protected:
 	void InputActionMove(const struct FInputActionValue& Value);
 	void InputActionLook(const struct FInputActionValue& Value);

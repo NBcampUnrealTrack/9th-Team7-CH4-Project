@@ -26,6 +26,10 @@ ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 	CameraComponent->bUsePawnControlRotation = false;
 	
 	bUseControllerRotationYaw = false; // 카메라 이동에 따라 캐릭터 몸이 같이 움직이지 않음
+	
+	HatMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HatMeshComponent"));
+	HatMeshComponent->SetupAttachment(GetMesh(), HatSocketName);
+	HatMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void ACh4_PlayerCharacter::BeginPlay()
@@ -67,6 +71,25 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		if (Emote3Action) EIC->BindAction(Emote3Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote3);
 		if (Emote4Action) EIC->BindAction(Emote4Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote4);
 		if (GrabAction) EIC->BindAction(GrabAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionGrab);
+	}
+}
+
+void ACh4_PlayerCharacter::SetHatMesh(class UStaticMesh* NewHat)
+{
+	if (HatMeshComponent == nullptr)
+	{
+		return;
+	}
+
+	if (NewHat)
+	{
+		HatMeshComponent->SetStaticMesh(NewHat);
+		HatMeshComponent->SetVisibility(true);
+	}
+	else
+	{
+		HatMeshComponent->SetStaticMesh(nullptr);
+		HatMeshComponent->SetVisibility(false);
 	}
 }
 
