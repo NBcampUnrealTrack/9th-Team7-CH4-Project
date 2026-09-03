@@ -23,9 +23,10 @@ public class Ch4_multiGame : ModuleRules
 			"ModelViewViewModel",
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",
+			"Landscape"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { });
+		PrivateDependencyModuleNames.AddRange(new string[] { "Foliage" });
 
 		PublicIncludePaths.AddRange(new string[] {
 			"Ch4_multiGame",

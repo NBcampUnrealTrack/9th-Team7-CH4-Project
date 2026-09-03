@@ -6,6 +6,9 @@
 
 class ARoadBase;
 class ALevelFloorBase;
+class AFinalDeliveryZone;
+class AZonePostProcessVolume;
+class ALandscape;
 
 UCLASS()
 class CH4_MULTIGAME_API ALevelManager : public AActor
@@ -33,6 +36,12 @@ public:
 
 	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Start")
 	ALevelFloorBase* StartEnvironmentActor;
+	
+	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Start")
+	AZonePostProcessVolume* StartPostProcessVolume;
+	
+	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Start")
+	ALandscape* StartLandscapeActor;
 
 	// 중간 Zone
 	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Middle")
@@ -40,6 +49,12 @@ public:
 
 	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Middle")
 	TArray<ALevelFloorBase*> MiddleEnvironmentActors;
+	
+	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Middle")
+	TArray<AZonePostProcessVolume*> MiddlePostProcessVolumes;
+	
+	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|Middle")
+	TArray<ALandscape*> MiddleLandscapeActors;
 
 	// 끝 Zone
 	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|End")
@@ -47,6 +62,15 @@ public:
 
 	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|End")
 	ALevelFloorBase* EndEnvironmentActor;
+	
+	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|End")
+	ALandscape* EndLandscapeActor;
+	
+	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|End")
+	AFinalDeliveryZone* FinalDeliveryZoneActor;
+	
+	UPROPERTY(EditInstanceOnly, Category = "Zone Setup|End")
+	AZonePostProcessVolume* EndPostProcessVolume;
 
 protected:
 	virtual void BeginPlay() override;
