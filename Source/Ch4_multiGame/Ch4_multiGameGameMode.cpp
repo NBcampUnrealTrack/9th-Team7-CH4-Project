@@ -4,6 +4,7 @@
 
 #include "Ch4_multiGame.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
+#include "GameFlow/GameFlowTargetInterface.h"
 
 ACh4_multiGameGameMode::ACh4_multiGameGameMode()
 {
@@ -14,6 +15,14 @@ ACh4_multiGameGameMode::ACh4_multiGameGameMode()
 void ACh4_multiGameGameMode::SetGameRuleConfigForTesting(const FCh4GameRuleConfig& NewGameRuleConfig)
 {
 	GameRuleConfig = NewGameRuleConfig;
+}
+
+void ACh4_multiGameGameMode::SetDeliveryScoreSummaryForTesting(
+	AActor* TargetActor,
+	const FCh4DeliveryScoreSummary& NewDeliveryScoreSummary)
+{
+	DeliveryScoreTargetOverrideForTesting = TargetActor;
+	DeliveryScoreSummaryOverrideForTesting = NewDeliveryScoreSummary;
 }
 #endif
 
@@ -263,7 +272,68 @@ bool ACh4_multiGameGameMode::NotifyGoalReached(AActor* ReachingActor)
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Final Delivery Zone Reached by %s"),
 		*GetNameSafe(ReachingActor));
 
-	return EvaluateGameOutcome(EGameRuleEvaluationEvent::GoalReached);
+	const FCh4DeliveryScoreSummary DeliveryScoreSummary = GetValidatedDeliveryScoreSummary(ReachingActor);
+	if (DeliveryScoreSummary.bHasScoreData
+		&& DeliveryScoreSummary.DeliveredCargoCount != GameFlowState->GetRemainingCargoCount())
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Delivered Cargo count differs from GameState Remaining Cargo: Delivered=%d, Remaining=%d"),
+			DeliveryScoreSummary.DeliveredCargoCount,
+			GameFlowState->GetRemainingCargoCount());
+	}
+
+	return EvaluateGameOutcome(
+		EGameRuleEvaluationEvent::GoalReached,
+		DeliveryScoreSummary.DeliveredCargoScore);
+}
+
+FCh4DeliveryScoreSummary ACh4_multiGameGameMode::GetValidatedDeliveryScoreSummary(AActor* ReachingActor) const
+{
+	FCh4DeliveryScoreSummary RawSummary;
+#if WITH_DEV_AUTOMATION_TESTS
+	if (DeliveryScoreTargetOverrideForTesting.Get() == ReachingActor)
+	{
+		RawSummary = DeliveryScoreSummaryOverrideForTesting;
+	}
+	else
+#endif
+	if (IsValid(ReachingActor)
+		&& ReachingActor->GetClass()->ImplementsInterface(UGameFlowTargetInterface::StaticClass()))
+	{
+		RawSummary = IGameFlowTargetInterface::Execute_GetDeliveryScoreSummary(ReachingActor);
+	}
+
+	if (!RawSummary.bHasScoreData)
+	{
+		if (RawSummary.DeliveredCargoCount != 0 || RawSummary.DeliveredCargoScore != 0)
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[GameFlow] Ignored delivery score values because the target reported no score data: Count=%d, Score=%d"),
+				RawSummary.DeliveredCargoCount,
+				RawSummary.DeliveredCargoScore);
+		}
+		return FCh4DeliveryScoreSummary();
+	}
+
+	FCh4DeliveryScoreSummary ValidatedSummary = RawSummary;
+	ValidatedSummary.DeliveredCargoCount = FMath::Max(RawSummary.DeliveredCargoCount, 0);
+	ValidatedSummary.DeliveredCargoScore = FMath::Max(RawSummary.DeliveredCargoScore, 0);
+	if (ValidatedSummary.DeliveredCargoCount != RawSummary.DeliveredCargoCount
+		|| ValidatedSummary.DeliveredCargoScore != RawSummary.DeliveredCargoScore)
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Clamped invalid delivery score summary: Count=%d->%d, Score=%d->%d"),
+			RawSummary.DeliveredCargoCount,
+			ValidatedSummary.DeliveredCargoCount,
+			RawSummary.DeliveredCargoScore,
+			ValidatedSummary.DeliveredCargoScore);
+	}
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[GameFlow] Delivery score summary received: Cargo=%d, Score=%d"),
+		ValidatedSummary.DeliveredCargoCount,
+		ValidatedSummary.DeliveredCargoScore);
+	return ValidatedSummary;
 }
 
 ACh4_multiGameGameState* ACh4_multiGameGameMode::GetGameFlowGameState() const
@@ -326,7 +396,9 @@ bool ACh4_multiGameGameMode::CanCompleteGame(const ACh4_multiGameGameState& Game
 		&& GameFlowState.GetCargoSurvivalRate() + UE_KINDA_SMALL_NUMBER >= RequiredSurvivalRate;
 }
 
-bool ACh4_multiGameGameMode::EvaluateGameOutcome(const EGameRuleEvaluationEvent EvaluationEvent)
+bool ACh4_multiGameGameMode::EvaluateGameOutcome(
+	const EGameRuleEvaluationEvent EvaluationEvent,
+	const int32 FinalCargoScore)
 {
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
 	if (!GameFlowState || GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Playing)
@@ -360,8 +432,7 @@ bool ACh4_multiGameGameMode::EvaluateGameOutcome(const EGameRuleEvaluationEvent 
 		return false;
 	}
 
-	EndGameAsClear(ECh4GameEndReason::GoalReached);
-	return true;
+	return EndGameAsClear(ECh4GameEndReason::GoalReached, FinalCargoScore);
 }
 
 bool ACh4_multiGameGameMode::IsGamePhaseTransitionAllowed(
@@ -393,7 +464,8 @@ bool ACh4_multiGameGameMode::IsGameEndReasonValidForPhase(
 
 bool ACh4_multiGameGameMode::TryTransitionGamePhase(
 	const ECh4GamePhase NewPhase,
-	const ECh4GameEndReason EndReason)
+	const ECh4GameEndReason EndReason,
+	const int32 FinalCargoScore)
 {
 	if (!HasAuthority())
 	{
@@ -426,14 +498,16 @@ bool ACh4_multiGameGameMode::TryTransitionGamePhase(
 		return false;
 	}
 
-	return GameFlowState->SetGamePhaseState(NewPhase, EndReason);
+	return GameFlowState->SetGamePhaseState(NewPhase, EndReason, FinalCargoScore);
 }
 
-void ACh4_multiGameGameMode::EndGameAsClear(const ECh4GameEndReason EndReason)
+bool ACh4_multiGameGameMode::EndGameAsClear(
+	const ECh4GameEndReason EndReason,
+	const int32 FinalCargoScore)
 {
-	if (!TryTransitionGamePhase(ECh4GamePhase::Cleared, EndReason))
+	if (!TryTransitionGamePhase(ECh4GamePhase::Cleared, EndReason, FinalCargoScore))
 	{
-		return;
+		return false;
 	}
 
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
@@ -442,7 +516,10 @@ void ACh4_multiGameGameMode::EndGameAsClear(const ECh4GameEndReason EndReason)
 	{
 		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Remaining Cargo: %d / %d"),
 			GameFlowState->GetRemainingCargoCount(), GameFlowState->GetInitialCargoCount());
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Final Cargo Score: %d"),
+			GameFlowState->GetFinalCargoScore());
 	}
+	return true;
 }
 
 void ACh4_multiGameGameMode::EndGameAsGameOver(const ECh4GameEndReason EndReason)

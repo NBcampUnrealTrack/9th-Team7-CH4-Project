@@ -39,6 +39,9 @@ public:
 #if WITH_DEV_AUTOMATION_TESTS
 	/** Test-only configuration injection used before a test session starts. */
 	void SetGameRuleConfigForTesting(const FCh4GameRuleConfig& NewGameRuleConfig);
+	void SetDeliveryScoreSummaryForTesting(
+		AActor* TargetActor,
+		const FCh4DeliveryScoreSummary& NewDeliveryScoreSummary);
 #endif
 
 protected:
@@ -70,13 +73,22 @@ private:
 	bool CanProcessCargoChange(const ACh4_multiGameGameState& GameFlowState) const;
 	bool ShouldFailGame(const ACh4_multiGameGameState& GameFlowState) const;
 	bool CanCompleteGame(const ACh4_multiGameGameState& GameFlowState) const;
-	bool EvaluateGameOutcome(EGameRuleEvaluationEvent EvaluationEvent);
+	FCh4DeliveryScoreSummary GetValidatedDeliveryScoreSummary(AActor* ReachingActor) const;
+	bool EvaluateGameOutcome(EGameRuleEvaluationEvent EvaluationEvent, int32 FinalCargoScore = 0);
 	bool IsGamePhaseTransitionAllowed(ECh4GamePhase CurrentPhase, ECh4GamePhase NewPhase) const;
 	bool IsGameEndReasonValidForPhase(ECh4GamePhase GamePhase, ECh4GameEndReason EndReason) const;
-	bool TryTransitionGamePhase(ECh4GamePhase NewPhase, ECh4GameEndReason EndReason);
+	bool TryTransitionGamePhase(
+		ECh4GamePhase NewPhase,
+		ECh4GameEndReason EndReason,
+		int32 FinalCargoScore = 0);
 	bool ApplyRemainingCargoCount(int32 NewRemainingCargo);
-	void EndGameAsClear(ECh4GameEndReason EndReason);
+	bool EndGameAsClear(ECh4GameEndReason EndReason, int32 FinalCargoScore);
 	void EndGameAsGameOver(ECh4GameEndReason EndReason);
+
+#if WITH_DEV_AUTOMATION_TESTS
+	TWeakObjectPtr<AActor> DeliveryScoreTargetOverrideForTesting;
+	FCh4DeliveryScoreSummary DeliveryScoreSummaryOverrideForTesting;
+#endif
 };
 
 

@@ -46,6 +46,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cargo|Definition")
 	FName CargoCategory = NAME_None;
 
+	/** Team score awarded only if this Cargo reaches the final goal while not Lost. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cargo|Score",
+		meta=(ClampMin="0", UIMin="0"))
+	int32 DeliveryScore = 100;
+
 	/** Enables event-driven break damage from strong impacts against static ground. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cargo|Ground Impact")
 	bool bBreakableFromGroundImpact = true;

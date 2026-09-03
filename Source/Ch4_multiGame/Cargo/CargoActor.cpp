@@ -57,6 +57,16 @@ void ACargoActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
 	DOREPLIFETIME(ACargoActor, CargoState);
 }
 
+int32 ACargoActor::GetDeliveryScore() const
+{
+	if (IsLost() || !IsValid(CargoData))
+	{
+		return 0;
+	}
+
+	return FMath::Max(CargoData->DeliveryScore, 0);
+}
+
 bool ACargoActor::ApplyCargoData()
 {
 	// Construction runs repeatedly in the Editor; defer validation logs until BeginPlay.

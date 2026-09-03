@@ -41,6 +41,10 @@ public:
 	UFUNCTION(BlueprintPure, Category="Cargo|State")
 	bool IsLost() const { return CargoState == ECargoState::Lost; }
 
+	/** Returns zero for Lost Cargo, missing data, or invalid negative data. */
+	UFUNCTION(BlueprintPure, Category="Cargo|Score")
+	int32 GetDeliveryScore() const;
+
 	/** Server-only runtime count. It is intentionally not replicated or stored in CargoData. */
 	UFUNCTION(BlueprintPure, Category="Cargo|Ground Impact")
 	int32 GetGroundImpactCount() const { return GroundImpactCount; }

@@ -106,6 +106,7 @@ bool FCh4CargoDataApplicationTest::RunTest(const FString& Parameters)
 	}
 
 	TestTrue(TEXT("Ground impact breaking is enabled by default"), CargoData->bBreakableFromGroundImpact);
+	TestEqual(TEXT("Default delivery score is 100"), CargoData->DeliveryScore, 100);
 	TestEqual(TEXT("Default break threshold is three impacts"), CargoData->GroundImpactsToBreak, 3);
 	TestEqual(TEXT("Default minimum ground impulse is practical for a 20 kg Cargo"),
 		CargoData->MinimumGroundImpactImpulse, 8000.0f);
@@ -148,6 +149,59 @@ bool FCh4CargoDataApplicationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Invalid mass falls back to one kilogram"), CargoMesh->GetBodyInstance()->GetMassOverride(), 1.0f);
 	TestEqual(TEXT("Negative linear damping clamps to zero"), CargoMesh->GetLinearDamping(), 0.0f);
 	TestEqual(TEXT("Negative angular damping clamps to zero"), CargoMesh->GetAngularDamping(), 0.0f);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCh4CargoScoreTest,
+	"Ch4_multiGame.Cargo.Score",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCh4CargoScoreTest::RunTest(const FString& Parameters)
+{
+	using namespace Ch4CargoTests;
+
+	FCargoTestWorld TestWorld;
+	if (!TestWorld.Initialize())
+	{
+		AddError(TEXT("Failed to initialize the Cargo score test world."));
+		return false;
+	}
+
+	ACargoActor* Cargo = TestWorld.World->SpawnActor<ACargoActor>();
+	UCargoDataAsset* CargoData = NewObject<UCargoDataAsset>(GetTransientPackage());
+	TestNotNull(TEXT("Score-test Cargo Actor is valid"), Cargo);
+	TestNotNull(TEXT("Score-test CargoData is valid"), CargoData);
+	if (!Cargo || !CargoData)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Cargo without data has zero delivery score"), Cargo->GetDeliveryScore(), 0);
+	CargoData->DeliveryScore = 100;
+	Cargo->SetCargoDataForTesting(CargoData);
+	TestEqual(TEXT("Active Cargo returns its configured delivery score"), Cargo->GetDeliveryScore(), 100);
+
+	CargoData->DeliveryScore = -50;
+	TestEqual(TEXT("Invalid negative delivery score clamps to zero"), Cargo->GetDeliveryScore(), 0);
+	CargoData->DeliveryScore = 300;
+	TestEqual(TEXT("Active Cargo reflects updated static score data"), Cargo->GetDeliveryScore(), 300);
+
+	ACh4_multiGameGameState* GameState = nullptr;
+	IGameFlowRuleInterface* GameFlowRule = TestWorld.InitializeGameFlow(GameState);
+	TestNotNull(TEXT("Score-test GameFlow state is valid"), GameState);
+	TestNotNull(TEXT("Score-test GameFlow rule is valid"), GameFlowRule);
+	if (!GameState || !GameFlowRule)
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Score-test GameFlow initializes"), GameFlowRule->RequestCargoInitialization(1));
+	TestTrue(TEXT("Score-test GameFlow starts"), GameFlowRule->RequestGameStart());
+	Cargo->SetGameFlowRuleOverrideForTesting(GameFlowRule);
+	TestTrue(TEXT("Cargo can become Lost through the existing path"), Cargo->MarkAsLost());
+	TestEqual(TEXT("Lost Cargo contributes zero delivery score"), Cargo->GetDeliveryScore(), 0);
 
 	return true;
 }
