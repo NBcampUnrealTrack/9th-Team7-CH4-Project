@@ -33,6 +33,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Guide")
 	int32 DivisionCount = 8;
 	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+	FName TargetTag = FName("TargetTagName");
+	
 
 	UFUNCTION()
 	void OnCollisionBoxBeginOverlap(
@@ -42,4 +45,11 @@ public:
 		int32 OtherBodyIndex,
 		bool bFromSweep,
 		const FHitResult& SweepResult);
+	
+	UFUNCTION()
+	void OnCollisionBoxEndOverlap(
+	   UPrimitiveComponent* OverlappedComponent,
+	   AActor* OtherActor,
+	   UPrimitiveComponent* OtherComp,
+	   int32 OtherBodyIndex);
 };

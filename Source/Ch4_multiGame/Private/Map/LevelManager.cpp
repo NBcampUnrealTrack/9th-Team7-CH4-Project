@@ -11,6 +11,7 @@ ALevelManager::ALevelManager()
 {
     PrimaryActorTick.bCanEverTick = false;
     bReplicates = true;
+    bAlwaysRelevant = true;
 }
 
 void ALevelManager::BeginPlay()

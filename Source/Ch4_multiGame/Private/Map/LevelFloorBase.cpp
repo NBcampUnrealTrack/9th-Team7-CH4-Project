@@ -2,6 +2,7 @@
 #include "Components/BoxComponent.h"
 #include "GameFramework/Character.h"
 #include "DrawDebugHelpers.h"
+#include "Kismet/GameplayStatics.h"
 
 ALevelFloorBase::ALevelFloorBase()
 {
@@ -14,7 +15,6 @@ ALevelFloorBase::ALevelFloorBase()
 	USceneComponent* RootComp = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 	SetRootComponent(RootComp);
 	
-
 	// 환경 충돌 영역
 	CollisionBox = CreateDefaultSubobject<UBoxComponent>(TEXT("CollisionBox"));
 	CollisionBox->SetupAttachment(RootComponent);
@@ -37,6 +37,10 @@ void ALevelFloorBase::BeginPlay()
 		this,
 		&ALevelFloorBase::OnCollisionBoxBeginOverlap);
 	
+	CollisionBox->OnComponentEndOverlap.AddDynamic(
+	   this,
+	   &ALevelFloorBase::OnCollisionBoxEndOverlap);
+	
 	//(지울예정)
 	DrawBackgroundGuides();
 }
@@ -54,12 +58,58 @@ void ALevelFloorBase::OnCollisionBoxBeginOverlap(
 		return;
 	}
 
-	ACharacter* PlayerCharacter =
-		Cast<ACharacter>(OtherActor);
+	ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor);
+	if (!PlayerCharacter || !PlayerCharacter->IsLocallyControlled())
+	{
+		return;
+	}
 
+	// 변수로 지정된 TargetTag를 사용해 액터 검색
+	TArray<AActor*> TargetActors;
+	UGameplayStatics::GetAllActorsWithTag(GetWorld(), TargetTag, TargetActors);
+
+	for (AActor* Actor : TargetActors)
+	{
+		if (Actor)
+		{
+			Actor->SetActorHiddenInGame(true);
+		}
+	}
+}
+
+void ALevelFloorBase::OnCollisionBoxEndOverlap(
+	UPrimitiveComponent* OverlappedComponent,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComp,
+	int32 OtherBodyIndex)
+{
+	if (!OtherActor)
+	{
+		return;
+	}
+
+	ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor);
 	if (!PlayerCharacter)
 	{
 		return;
+	}
+
+	// 이탈할 때도 내 로컬 플레이어인지 확인
+	if (!PlayerCharacter->IsLocallyControlled())
+	{
+		return;
+	}
+
+	// 변수로 지정된 TargetTag를 사용해 액터 검색
+	TArray<AActor*> TargetActors;
+	UGameplayStatics::GetAllActorsWithTag(GetWorld(), TargetTag, TargetActors);
+
+	for (AActor* Actor : TargetActors)
+	{
+		if (Actor)
+		{
+			Actor->SetActorHiddenInGame(false);
+		}
 	}
 }
 
