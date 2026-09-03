@@ -1,5 +1,6 @@
 #include "Player/Ch4_PlayerCharacter.h"
 
+#include "Animation/AnimInstance.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "EnhancedInputComponent.h"
@@ -8,6 +9,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/EmotionDataAsset.h"
+#include "Player/GrabbableInterface.h"
+#include "Engine/OverlapResult.h"
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
@@ -47,6 +50,7 @@ void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProp
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	
 	DOREPLIFETIME(ThisClass, bIsStunned);
+	DOREPLIFETIME(ThisClass, GrabbedComponent);
 }
 
 void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -62,6 +66,7 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		if (Emote2Action) EIC->BindAction(Emote2Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote2);
 		if (Emote3Action) EIC->BindAction(Emote3Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote3);
 		if (Emote4Action) EIC->BindAction(Emote4Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote4);
+		if (GrabAction) EIC->BindAction(GrabAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionGrab);
 	}
 }
 
@@ -77,6 +82,11 @@ void ACh4_PlayerCharacter::InputActionMove(const struct FInputActionValue& Value
 	if (Controller == nullptr)
 	{
 		return;
+	}
+
+	if (MoveVec.IsNearlyZero() == false)
+	{
+		InterruptEmotionMontage();
 	}
 
 	const FRotator Rotation = Controller->GetControlRotation();
@@ -108,6 +118,8 @@ void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
 	{
 		return;
     }
+
+	InterruptEmotionMontage();
     	
 	Jump();
 }
@@ -130,6 +142,29 @@ void ACh4_PlayerCharacter::InputActionEmote3(const struct FInputActionValue& Val
 void ACh4_PlayerCharacter::InputActionEmote4(const struct FInputActionValue& Value)
 {
 	PlayEmotion(EEmotionType::Emote4);
+}
+
+void ACh4_PlayerCharacter::InputActionGrab(const FInputActionValue& Value)
+{
+	if (bIsStunned)
+	{
+		return;
+	}
+
+	if (GrabbedComponent != nullptr)
+	{
+		ServerRPC_ReleaseGrab();
+		return;
+	}
+
+	if (HasAuthority())
+	{
+		MulticastRPC_PlayGrabMontage();
+	}
+	else
+	{
+		ServerRPC_PlayGrabMontage();
+	}
 }
 
 void ACh4_PlayerCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -177,9 +212,6 @@ void ACh4_PlayerCharacter::OnStun()
 	}
 	
 	bIsStunned = true;
-
-	// 즉시 Replication 갱신 요청
-	// ForceNetUpdate();
 	
 	// 현재 이동 중이었다면 즉시 정지
 	GetCharacterMovement()->StopMovementImmediately();
@@ -328,4 +360,136 @@ void ACh4_PlayerCharacter::MulticastRPC_PlayEmotion_Implementation(EEmotionType 
 	}
 
 	PlayAnimMontage(EmotionMontage);
+}
+
+void ACh4_PlayerCharacter::InterruptEmotionMontage()
+{
+	StopEmotionMontages();
+
+	if (HasAuthority())
+	{
+		MulticastRPC_InterruptEmotionMontage();
+	}
+	else
+	{
+		ServerRPC_InterruptEmotionMontage();
+	}
+}
+
+void ACh4_PlayerCharacter::StopEmotionMontages(float BlendOutTime)
+{
+	if (EmotionDataAsset == nullptr)
+	{
+		return;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (AnimInstance == nullptr)
+	{
+		return;
+	}
+
+	for (const FEmotionData& EmotionData : EmotionDataAsset->EmotionDataList)
+	{
+		if (EmotionData.EmoteMontage)
+		{
+			AnimInstance->Montage_Stop(BlendOutTime, EmotionData.EmoteMontage);
+		}
+	}
+}
+
+void ACh4_PlayerCharacter::ServerRPC_InterruptEmotionMontage_Implementation()
+{
+	MulticastRPC_InterruptEmotionMontage();
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_InterruptEmotionMontage_Implementation()
+{
+	StopEmotionMontages();
+}
+
+void ACh4_PlayerCharacter::OnRep_GrabbedComponent()
+{
+	// 클라이언트에서 잡음/놓음 시각 효과 처리용 (필요 시 사용)
+}
+
+void ACh4_PlayerCharacter::OnGrabNotify()
+{
+	if (HasAuthority() == false && IsLocallyControlled() == false)
+	{
+		return; // 서버 또는 본인 조종 클라이언트만 판정
+	}
+	
+	if (GrabbedComponent != nullptr)
+	{
+		return;
+	}
+
+	FVector SocketLoc = GetMesh()->GetSocketLocation(GrabSocketName);
+	TArray<FOverlapResult> Overlaps;
+	FCollisionShape Sphere = FCollisionShape::MakeSphere(300.0f);
+	
+	bool bHit = GetWorld()->OverlapMultiByChannel(
+		Overlaps, SocketLoc, FQuat::Identity, ECC_PhysicsBody, Sphere);
+	
+	if (bHit == false)
+	{
+		return;
+	}
+	
+	for (const FOverlapResult& Result : Overlaps)
+	{
+		AActor* HitActor = Result.GetActor();
+		if (HitActor && HitActor->Implements<UGrabbableInterface>())
+		{
+			IGrabbableInterface* GI = Cast<IGrabbableInterface>(HitActor);
+			ServerRPC_AttachGrab(GI->GetGrabbableComponent());
+			break;
+		}
+	}
+}
+
+void ACh4_PlayerCharacter::ServerRPC_AttachGrab_Implementation(UPrimitiveComponent* TargetComponent)
+{
+	if (TargetComponent == nullptr || GrabbedComponent != nullptr)
+	{
+		return;
+	}
+
+	TargetComponent->SetSimulatePhysics(false);
+	TargetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	TargetComponent->AttachToComponent(
+		GetMesh(),
+		FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+		GrabSocketName);
+
+	GrabbedComponent = TargetComponent;
+}
+
+void ACh4_PlayerCharacter::ServerRPC_ReleaseGrab_Implementation()
+{
+	if (GrabbedComponent == nullptr)
+	{
+		return;
+	}
+
+	GrabbedComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+	GrabbedComponent->SetSimulatePhysics(true);
+	GrabbedComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+	GrabbedComponent = nullptr;
+}
+
+void ACh4_PlayerCharacter::ServerRPC_PlayGrabMontage_Implementation()
+{
+	MulticastRPC_PlayGrabMontage();
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_PlayGrabMontage_Implementation()
+{
+	if (GrabMontage)
+	{
+		PlayAnimMontage(GrabMontage);
+	}
 }
