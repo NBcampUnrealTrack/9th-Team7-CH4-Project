@@ -151,6 +151,13 @@ void ACh4_PlayerCharacter::InputActionGrab(const FInputActionValue& Value)
 		return;
 	}
 
+	if (bIsGrabActionInProgress)
+	{
+		return; // 몽타주 재생 중엔 입력 무시
+	}
+	
+	bIsGrabActionInProgress = true;
+	
 	if (GrabbedComponent != nullptr)
 	{
 		if (HasAuthority())
@@ -220,6 +227,9 @@ void ACh4_PlayerCharacter::OnStun()
 	
 	bIsStunned = true;
 	
+	// 서버(호스트)는 RepNotify가 자동으로 안 불리므로 직접 호출
+    OnRep_IsStunned();
+	
 	// 현재 이동 중이었다면 즉시 정지
 	GetCharacterMovement()->StopMovementImmediately();
 
@@ -246,9 +256,9 @@ void ACh4_PlayerCharacter::EndStun()
 	}
 	
 	bIsStunned = false;
-
-	// 즉시 Replication 갱신 요청
-	// ForceNetUpdate();
+	
+	// 서버(호스트)는 RepNotify가 자동으로 안 불리므로 직접 호출
+	OnRep_IsStunned();
 	
 	// 다시 걷기 가능
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
@@ -427,11 +437,13 @@ void ACh4_PlayerCharacter::OnGrabNotify()
 		return; // 서버 또는 본인 조종 클라이언트만 판정
 	}
 	
+	bIsGrabActionInProgress = false;
+	
 	if (GrabbedComponent != nullptr)
 	{
 		return;
 	}
-
+	
 	FVector SocketLoc = GetMesh()->GetSocketLocation(GrabSocketName);
 	TArray<FOverlapResult> Overlaps;
 	FCollisionShape Sphere = FCollisionShape::MakeSphere(50.0f);
@@ -508,12 +520,12 @@ void ACh4_PlayerCharacter::OnGrabReleaseNotify()
 		return;
 	}
 
-	if (GrabbedComponent == nullptr)
+	bIsGrabActionInProgress = false;
+	
+	if (GrabbedComponent != nullptr)
 	{
-		return;
+		ServerRPC_ReleaseGrab();
 	}
-
-	ServerRPC_ReleaseGrab();
 }
 
 void ACh4_PlayerCharacter::ServerRPC_PlayGrabReleaseMontage_Implementation()
