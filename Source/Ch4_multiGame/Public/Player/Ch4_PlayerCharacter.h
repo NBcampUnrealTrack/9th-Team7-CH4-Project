@@ -65,7 +65,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Anim")
 	TObjectPtr<class UAnimMontage> GrabMontage;
 	
+	UPROPERTY(EditDefaultsOnly, Category="Anim")
+	TObjectPtr<class UAnimMontage> GrabReleaseMontage;
+	
 	void OnGrabNotify();
+	void OnGrabReleaseNotify();
 	
 protected:
 	void InputActionMove(const struct FInputActionValue& Value);
@@ -161,4 +165,10 @@ protected:
 
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastRPC_PlayGrabMontage();
+	
+	UFUNCTION(Server, Reliable)
+	void ServerRPC_PlayGrabReleaseMontage();
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastRPC_PlayGrabReleaseMontage();
 };

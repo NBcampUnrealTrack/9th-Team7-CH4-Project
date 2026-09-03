@@ -153,7 +153,14 @@ void ACh4_PlayerCharacter::InputActionGrab(const FInputActionValue& Value)
 
 	if (GrabbedComponent != nullptr)
 	{
-		ServerRPC_ReleaseGrab();
+		if (HasAuthority())
+		{
+			MulticastRPC_PlayGrabReleaseMontage();
+		}
+		else
+		{
+			ServerRPC_PlayGrabReleaseMontage();
+		}
 		return;
 	}
 
@@ -427,7 +434,7 @@ void ACh4_PlayerCharacter::OnGrabNotify()
 
 	FVector SocketLoc = GetMesh()->GetSocketLocation(GrabSocketName);
 	TArray<FOverlapResult> Overlaps;
-	FCollisionShape Sphere = FCollisionShape::MakeSphere(300.0f);
+	FCollisionShape Sphere = FCollisionShape::MakeSphere(50.0f);
 	
 	bool bHit = GetWorld()->OverlapMultiByChannel(
 		Overlaps, SocketLoc, FQuat::Identity, ECC_PhysicsBody, Sphere);
@@ -491,5 +498,33 @@ void ACh4_PlayerCharacter::MulticastRPC_PlayGrabMontage_Implementation()
 	if (GrabMontage)
 	{
 		PlayAnimMontage(GrabMontage);
+	}
+}
+
+void ACh4_PlayerCharacter::OnGrabReleaseNotify()
+{
+	if (HasAuthority() == false && IsLocallyControlled() == false)
+	{
+		return;
+	}
+
+	if (GrabbedComponent == nullptr)
+	{
+		return;
+	}
+
+	ServerRPC_ReleaseGrab();
+}
+
+void ACh4_PlayerCharacter::ServerRPC_PlayGrabReleaseMontage_Implementation()
+{
+	MulticastRPC_PlayGrabReleaseMontage();
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_PlayGrabReleaseMontage_Implementation()
+{
+	if (GrabReleaseMontage)
+	{
+		PlayAnimMontage(GrabReleaseMontage);
 	}
 }
