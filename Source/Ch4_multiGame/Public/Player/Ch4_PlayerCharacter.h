@@ -71,6 +71,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Anim")
 	TObjectPtr<class UAnimMontage> GrabReleaseMontage;
 	
+	UPROPERTY(ReplicatedUsing = OnRep_GrabbedComponent)
+	TObjectPtr<class UPrimitiveComponent> GrabbedComponent;
+	
 	void OnGrabNotify();
 	void OnGrabReleaseNotify();
 	
@@ -158,9 +161,6 @@ protected:
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastRPC_InterruptEmotionMontage();
 	
-	UPROPERTY(ReplicatedUsing = OnRep_GrabbedComponent)
-	TObjectPtr<class UPrimitiveComponent> GrabbedComponent;
-
 	UPROPERTY(EditDefaultsOnly, Category="Grab")
 	FName GrabSocketName = TEXT("GrabSocket");
 	
