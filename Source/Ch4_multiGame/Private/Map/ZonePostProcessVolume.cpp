@@ -1,4 +1,5 @@
 #include "Map/ZonePostProcessVolume.h"
+#include "Kismet/GameplayStatics.h"
 
 AZonePostProcessVolume::AZonePostProcessVolume()
 {
@@ -6,4 +7,6 @@ AZonePostProcessVolume::AZonePostProcessVolume()
 
 	bReplicates = true;
 	SetReplicateMovement(true);
+	
+	
 }
