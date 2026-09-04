@@ -41,9 +41,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Ready", meta=(ClampMin="2", UIMin="2"))
 	int32 MinPlayersToStart = 2;
 
-	/** Gameplay map selected through the Unreal asset picker. */
+	/** Server-side random pool of gameplay maps configured through the Unreal asset picker. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Travel")
-	TSoftObjectPtr<UWorld> GameplayMap;
+	TArray<TSoftObjectPtr<UWorld>> GameplayMaps;
 
 private:
 #if WITH_DEV_AUTOMATION_TESTS
@@ -59,6 +59,9 @@ private:
 		int32 TotalPlayers,
 		int32 MinimumPlayers,
 		bool bIsTravelInProgress);
+	static bool TrySelectRandomGameplayMap(
+		const TArray<TSoftObjectPtr<UWorld>>& GameplayMapCandidates,
+		FString& OutMapPackage);
 	void StartGameTravel();
 	void ShowServerDebugStatus(const FString& EventMessage, const FColor& Color, float Duration) const;
 	int32 GetListenPort() const;

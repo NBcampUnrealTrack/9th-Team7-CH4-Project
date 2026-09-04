@@ -15,6 +15,7 @@
 #include "Lobby/Ch4_multiGameLobbyPlayerController.h"
 #include "Lobby/Ch4_multiGameLobbyPlayerState.h"
 #include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -24,8 +25,8 @@ ACh4_multiGameLobbyGameMode::ACh4_multiGameLobbyGameMode()
 	PlayerStateClass = ACh4_multiGameLobbyPlayerState::StaticClass();
 	PlayerControllerClass = ACh4_multiGameLobbyPlayerController::StaticClass();
 	bUseSeamlessTravel = false;
-	GameplayMap = TSoftObjectPtr<UWorld>(
-		FSoftObjectPath(TEXT("/Game/ThirdPerson/Lvl_ThirdPerson.Lvl_ThirdPerson")));
+	GameplayMaps.Add(TSoftObjectPtr<UWorld>(
+		FSoftObjectPath(TEXT("/Game/Map/Level/ForestLevel.ForestLevel"))));
 
 	static ConstructorHelpers::FClassFinder<APawn> ThirdPersonPawnClass(
 		TEXT("/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter"));
@@ -321,6 +322,43 @@ bool ACh4_multiGameLobbyGameMode::CanStartLobbyTravel(
 		&& ReadyPlayers == TotalPlayers;
 }
 
+bool ACh4_multiGameLobbyGameMode::TrySelectRandomGameplayMap(
+	const TArray<TSoftObjectPtr<UWorld>>& GameplayMapCandidates,
+	FString& OutMapPackage)
+{
+	OutMapPackage.Reset();
+	TArray<FString> ValidMapPackages;
+
+	for (const TSoftObjectPtr<UWorld>& GameplayMapCandidate : GameplayMapCandidates)
+	{
+		const FSoftObjectPath MapObjectPath = GameplayMapCandidate.ToSoftObjectPath();
+		if (MapObjectPath.IsNull())
+		{
+			continue;
+		}
+
+		const FString MapPackage = MapObjectPath.GetLongPackageName();
+		FString PackageFilename;
+		if (!FPackageName::IsValidLongPackageName(MapPackage)
+			|| !FPackageName::DoesPackageExist(MapPackage, &PackageFilename)
+			|| !FPaths::GetExtension(PackageFilename, true).Equals(
+				FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+
+		ValidMapPackages.AddUnique(MapPackage);
+	}
+
+	if (ValidMapPackages.IsEmpty())
+	{
+		return false;
+	}
+
+	OutMapPackage = ValidMapPackages[FMath::RandRange(0, ValidMapPackages.Num() - 1)];
+	return true;
+}
+
 void ACh4_multiGameLobbyGameMode::GetReadyPlayerCounts(
 	int32& OutReadyPlayers,
 	int32& OutTotalPlayers) const
@@ -358,14 +396,12 @@ void ACh4_multiGameLobbyGameMode::StartGameTravel()
 		return;
 	}
 
-	const FString MapPackage = GameplayMap.ToSoftObjectPath().GetLongPackageName();
-	if (!FPackageName::IsValidLongPackageName(MapPackage) ||
-		!FPackageName::DoesPackageExist(MapPackage))
+	FString MapPackage;
+	if (!TrySelectRandomGameplayMap(GameplayMaps, MapPackage))
 	{
 		UE_LOG(LogCh4_multiGame, Error,
-			TEXT("[Lobby] Travel aborted: gameplay map package does not exist: %s"),
-			*MapPackage);
-		ShowServerDebugStatus(TEXT("TRAVEL FAILED\nGameplay map is missing"), FColor::Red, 15.0f);
+			TEXT("[Lobby] Travel aborted: GameplayMaps contains no valid map packages"));
+		ShowServerDebugStatus(TEXT("TRAVEL FAILED\nNo valid gameplay maps"), FColor::Red, 15.0f);
 		return;
 	}
 
@@ -376,6 +412,7 @@ void ACh4_multiGameLobbyGameMode::StartGameTravel()
 	}
 
 	bTravelStarted = true;
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Selected Gameplay Map: %s"), *MapPackage);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Traveling to %s"), *MapPackage);
 	ShowServerDebugStatus(
 		FString::Printf(TEXT("ALL PLAYERS READY\nTraveling to %s"), *MapPackage),
