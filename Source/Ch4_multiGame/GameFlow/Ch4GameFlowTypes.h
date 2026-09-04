@@ -50,6 +50,25 @@ struct CH4_MULTIGAME_API FCh4GameRuleConfig
 	float MinimumCargoSurvivalRateToClear = 0.0f;
 };
 
+/** Optional final-delivery snapshot supplied by a GameFlow target such as the future Cart. */
+USTRUCT(BlueprintType)
+struct CH4_MULTIGAME_API FCh4DeliveryScoreSummary
+{
+	GENERATED_BODY()
+
+	/** False keeps legacy/debug targets compatible and resolves to a zero score. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Game Flow|Delivery Score")
+	bool bHasScoreData = false;
+
+	/** Cargo references that actually reached the goal with this target. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Game Flow|Delivery Score")
+	int32 DeliveredCargoCount = 0;
+
+	/** Sum of the delivered Cargo actors' safe delivery scores. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Game Flow|Delivery Score")
+	int32 DeliveredCargoScore = 0;
+};
+
 /** Read-only result snapshot derived from the replicated game-flow state. */
 USTRUCT(BlueprintType)
 struct CH4_MULTIGAME_API FCh4GameResult
@@ -73,6 +92,10 @@ struct CH4_MULTIGAME_API FCh4GameResult
 
 	UPROPERTY(BlueprintReadOnly, Category="Game Flow|Result")
 	float CargoSurvivalRate = 0.0f;
+
+	/** Team Cargo score finalized only when the match successfully reaches the goal. */
+	UPROPERTY(BlueprintReadOnly, Category="Game Flow|Result")
+	int32 FinalCargoScore = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category="Game Flow|Result")
 	bool bGameEnded = false;

@@ -33,6 +33,32 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Guide")
 	int32 DivisionCount = 8;
 	
+	// --- 오버랩 진입(Begin) 시 사용할 태그 설정 ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap")
+	FName BeginHideTargetTag = FName("BeginHideTagName");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap")
+	FName BeginShowTargetTag = FName("BeginShowTagName");
+
+	// --- 오버랩 이탈(End) 시 사용할 태그 설정 ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap")
+	FName EndHideTargetTag = FName("EndHideTagName");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap")
+	FName EndShowTargetTag = FName("EndShowTagName");
+	
+	// --- 컴포넌트(폴리지 등) 단위 태그 ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap | Component")
+	FName BeginHideComponentTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap | Component")
+	FName BeginShowComponentTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap | Component")
+	FName EndHideComponentTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap | Component")
+	FName EndShowComponentTag;
 
 	UFUNCTION()
 	void OnCollisionBoxBeginOverlap(
@@ -42,4 +68,11 @@ public:
 		int32 OtherBodyIndex,
 		bool bFromSweep,
 		const FHitResult& SweepResult);
+	
+	UFUNCTION()
+	void OnCollisionBoxEndOverlap(
+	   UPrimitiveComponent* OverlappedComponent,
+	   AActor* OtherActor,
+	   UPrimitiveComponent* OtherComp,
+	   int32 OtherBodyIndex);
 };

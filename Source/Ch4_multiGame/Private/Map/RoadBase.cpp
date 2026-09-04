@@ -36,7 +36,7 @@ ARoadBase::ARoadBase()
 	BackgroundBounds->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	// 모든 환경에서 사용할 기본 배경 영역(지울예정)
-	BackgroundBounds->SetBoxExtent(FVector(20000.0f, 20000.0f, 24000.0f));
+	BackgroundBounds->SetBoxExtent(FVector(20000.0f, 20000.0f, 48000.0f));
 }
 
 void ARoadBase::BeginPlay()
@@ -219,5 +219,29 @@ void ARoadBase::DrawBackgroundGuides()
 			-1.0f,
 			0,
 			10.0f);
+	}
+}
+
+void ARoadBase::SetRoadComponentsStatic()
+{
+	TArray<UActorComponent*> Components;
+	GetComponents(Components);
+
+	for (UActorComponent* Component : Components)
+	{
+		if (!Component)
+		{
+			continue;
+		}
+
+		if (USceneComponent* SceneComponent = Cast<USceneComponent>(Component))
+		{
+			SceneComponent->SetMobility(EComponentMobility::Static);
+		}
+
+		if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))
+		{
+			PrimitiveComponent->SetCollisionObjectType(ECC_WorldStatic);
+		}
 	}
 }

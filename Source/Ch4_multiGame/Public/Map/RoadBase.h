@@ -23,6 +23,9 @@ public:
 
 	void DrawBackgroundGuides();
 
+	// 모든 Road 컴포넌트를 WorldStatic + Static으로 변경
+	void SetRoadComponentsStatic();
+	
 	// 도로 시작점
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Road Anchors")
 	TObjectPtr<USceneComponent> StartPoint;
