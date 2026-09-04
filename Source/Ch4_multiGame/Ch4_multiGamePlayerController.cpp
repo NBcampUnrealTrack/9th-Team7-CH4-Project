@@ -15,11 +15,14 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "OnlineSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"
+#include "Lobby/Ch4_multiGameLobbyPlayerState.h"
 #include "UI/PauseMenu/Ch4PauseMenuViewModel.h"
 #include "UI/HUD/Ch4HUDViewModel.h"
 #include "View/MVVMView.h"
 #include "MVVMSubsystem.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Player/Ch4_multiGameGameInstance.h"
+#include "Player/Ch4_multiGamePlayerState.h"
 
 namespace
 {
@@ -270,6 +273,129 @@ void ACh4_multiGamePlayerController::BeginPlay()
 			}
 		}
 	}
+
+	SynchronizeCharacterSelectionForCurrentWorld();
+}
+
+void ACh4_multiGamePlayerController::OnPossess(APawn* InPawn)
+{
+	Super::OnPossess(InPawn);
+	SynchronizeCharacterSelectionForCurrentWorld();
+}
+
+void ACh4_multiGamePlayerController::OnRep_PlayerState()
+{
+	Super::OnRep_PlayerState();
+	SynchronizeCharacterSelectionForCurrentWorld();
+}
+
+void ACh4_multiGamePlayerController::RequestCharacterType(
+	const ECh4CharacterType CharacterType)
+{
+	if (!IsLocalPlayerController() || !Ch4Character::IsValidType(CharacterType))
+	{
+		return;
+	}
+
+	if (UCh4_multiGameGameInstance* GameInstance =
+		GetGameInstance<UCh4_multiGameGameInstance>())
+	{
+		// This local cache bridges non-seamless travel; the server still validates the RPC.
+		GameInstance->StoreLocalCharacterRequest(CharacterType);
+	}
+
+	if (HasAuthority())
+	{
+		ApplyServerCharacterType(CharacterType);
+	}
+	else
+	{
+		ServerRequestCharacterType(CharacterType);
+	}
+}
+
+void ACh4_multiGamePlayerController::ServerRequestCharacterType_Implementation(
+	const ECh4CharacterType CharacterType)
+{
+	ApplyServerCharacterType(CharacterType);
+}
+
+void ACh4_multiGamePlayerController::ApplyServerCharacterType(
+	const ECh4CharacterType CharacterType)
+{
+	if (!HasAuthority() || !Ch4Character::IsValidType(CharacterType))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[CharacterSelection] Rejected invalid or non-authoritative request from %s"),
+			*GetNameSafe(this));
+		return;
+	}
+
+	ACh4_multiGamePlayerState* CharacterPlayerState =
+		GetPlayerState<ACh4_multiGamePlayerState>();
+	if (!CharacterPlayerState
+		|| !CharacterPlayerState->SetCharacterTypeFromServer(CharacterType))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[CharacterSelection] Could not store selection for %s"),
+			*GetNameSafe(this));
+	}
+}
+
+void ACh4_multiGamePlayerController::SynchronizeCharacterSelectionForCurrentWorld()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	UCh4_multiGameGameInstance* GameInstance =
+		GetGameInstance<UCh4_multiGameGameInstance>();
+	ACh4_multiGamePlayerState* CharacterPlayerState =
+		GetPlayerState<ACh4_multiGamePlayerState>();
+	if (!GameInstance || !CharacterPlayerState)
+	{
+		return;
+	}
+
+	if (CharacterPlayerState->IsA<ACh4_multiGameLobbyPlayerState>())
+	{
+		const ECh4CharacterType LobbyCharacterType =
+			CharacterPlayerState->GetCharacterType();
+		if (Ch4Character::IsValidType(LobbyCharacterType))
+		{
+			GameInstance->CacheAuthoritativeCharacterType(LobbyCharacterType);
+		}
+		return;
+	}
+
+	if (bSubmittedPersistedCharacterType)
+	{
+		return;
+	}
+
+	ECh4CharacterType PersistedCharacterType = ECh4CharacterType::Invalid;
+	if (!GameInstance->TryGetLocalCharacterType(PersistedCharacterType))
+	{
+		return;
+	}
+
+	// Protect the persisted choice from any older replication until the new world's
+	// PlayerState confirms this re-registration.
+	GameInstance->StoreLocalCharacterRequest(PersistedCharacterType);
+	bSubmittedPersistedCharacterType = true;
+	if (HasAuthority())
+	{
+		ApplyServerCharacterType(PersistedCharacterType);
+	}
+	else
+	{
+		ServerRequestCharacterType(PersistedCharacterType);
+	}
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[CharacterSelection] Re-registered local selection after travel: %s"),
+		*UEnum::GetValueAsString(PersistedCharacterType));
 }
 
 void ACh4_multiGamePlayerController::SetupInputComponent()

@@ -25,6 +25,7 @@ public:
 		FString& ErrorMessage) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual void Logout(AController* Exiting) override;
+	virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
 
 	/** Accepts a Ready toggle request from the owning lobby controller on the server. */
 	void HandlePlayerReady(APlayerController* RequestingPlayer);
@@ -41,13 +42,21 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Ready", meta=(ClampMin="2", UIMin="2"))
 	int32 MinPlayersToStart = 2;
 
-	/** Gameplay map selected through the Unreal asset picker. */
+	/** Server-side random pool of gameplay maps configured through the Unreal asset picker. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Travel")
-	TSoftObjectPtr<UWorld> GameplayMap;
+	TArray<TSoftObjectPtr<UWorld>> GameplayMaps;
+
+	/** Join-order character slots. The array order is Cat, Dog, Gorilla, then Otter by default. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Characters")
+	TArray<TSubclassOf<APawn>> LobbyCharacterClasses;
+
+	/** Reserves the first free character slot immediately before the player's initial pawn spawn. */
+	virtual void OnPostLogin(AController* NewPlayer) override;
 
 private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FCh4LobbyReadyTravelRulesTest;
+	friend class FCh4LobbyCharacterAssignmentTest;
 #endif
 
 	class ACh4_multiGameLobbyGameState* GetLobbyGameState() const;
@@ -59,10 +68,19 @@ private:
 		int32 TotalPlayers,
 		int32 MinimumPlayers,
 		bool bIsTravelInProgress);
+	static bool TrySelectRandomGameplayMap(
+		const TArray<TSoftObjectPtr<UWorld>>& GameplayMapCandidates,
+		FString& OutMapPackage);
+	static int32 FindFirstAvailableCharacterSlot(const TArray<bool>& UnavailableSlots);
+	int32 AssignCharacterSlot(AController* Controller);
+	int32 ReleaseCharacterSlot(AController* Controller);
+	int32 FindAssignedCharacterSlot(AController* Controller) const;
 	void StartGameTravel();
 	void ShowServerDebugStatus(const FString& EventMessage, const FColor& Color, float Duration) const;
 	int32 GetListenPort() const;
 	FString GetPlayerLogLabel(const AController* Controller) const;
 
 	bool bTravelStarted = false;
+	TMap<TWeakObjectPtr<AController>, int32> CharacterSlotsByController;
+	TSet<TWeakObjectPtr<AController>> ControllersAwaitingInitialCharacterSpawn;
 };
