@@ -13,20 +13,9 @@
 
 ACh4_multiGameLobbyPlayerController::ACh4_multiGameLobbyPlayerController()
 {
-	static ConstructorHelpers::FObjectFinder<UInputMappingContext> DefaultContext(
-		TEXT("/Game/Input/IMC_Default.IMC_Default"));
-	if (DefaultContext.Succeeded())
-	{
-		DefaultMappingContexts.AddUnique(DefaultContext.Object);
-	}
-
-	static ConstructorHelpers::FObjectFinder<UInputMappingContext> MouseLookContext(
-		TEXT("/Game/Input/IMC_MouseLook.IMC_MouseLook"));
-	if (MouseLookContext.Succeeded())
-	{
-		MobileExcludedMappingContexts.AddUnique(MouseLookContext.Object);
-	}
-
+	// The possessed animal supplies the team's existing IMC_Player. The lobby
+	// controller adds only the Ready layer so template mappings cannot compete
+	// with IA_PlayerMove / IA_PlayerLook at the same priority.
 	static ConstructorHelpers::FObjectFinder<UInputMappingContext> LobbyContext(
 		TEXT("/Game/Input/Lobby/IMC_Lobby.IMC_Lobby"));
 	if (LobbyContext.Succeeded())

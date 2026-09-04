@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Player/Ch4CharacterTypes.h"
 #include "Ch4_PlayerCharacter.generated.h"
 
 UCLASS()
@@ -11,13 +12,19 @@ class CH4_MULTIGAME_API ACh4_PlayerCharacter : public ACharacter
 
 public:
 	ACh4_PlayerCharacter();
+
+	/** Applies appearance and animation data without replacing movement, camera, input, or possession. */
+	void ApplyCharacterType(ECh4CharacterType CharacterType);
 	
 protected:
 	virtual void BeginPlay() override;
+	virtual void PossessedBy(AController* NewController) override;
+	virtual void OnRep_PlayerState() override;
 	
 	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
 	
 public:
+	virtual void PawnClientRestart() override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 	UPROPERTY(VisibleAnywhere, Category="Camera")
@@ -87,6 +94,9 @@ public:
 	void SetHatMesh(class UStaticMesh* NewHat);
 	
 protected:
+	void AddPlayerInputMappingContext();
+	void ApplyCharacterTypeFromPlayerState();
+
 	void InputActionMove(const struct FInputActionValue& Value);
 	void InputActionLook(const struct FInputActionValue& Value);
 	void InputActionJump(const struct FInputActionValue& Value);

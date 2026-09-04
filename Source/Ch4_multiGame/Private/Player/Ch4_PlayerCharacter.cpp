@@ -2,12 +2,16 @@
 
 #include "Animation/AnimInstance.h"
 #include "Camera/CameraComponent.h"
+#include "Ch4_multiGame.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "InputMappingContext.h"
 #include "InputActionValue.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Player/Ch4_multiGameGameInstance.h"
+#include "Player/Ch4_multiGamePlayerState.h"
 #include "Player/EmotionDataAsset.h"
 #include "Player/GrabbableInterface.h"
 #include "Engine/OverlapResult.h"
@@ -35,18 +39,101 @@ ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 void ACh4_PlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-	
+
+	AddPlayerInputMappingContext();
+	ApplyCharacterTypeFromPlayerState();
+}
+
+void ACh4_PlayerCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+	ApplyCharacterTypeFromPlayerState();
+}
+
+void ACh4_PlayerCharacter::OnRep_PlayerState()
+{
+	Super::OnRep_PlayerState();
+	ApplyCharacterTypeFromPlayerState();
+}
+
+void ACh4_PlayerCharacter::PawnClientRestart()
+{
+	Super::PawnClientRestart();
+
+	// Remote clients commonly receive possession after BeginPlay. Register the pawn IMC here too.
+	AddPlayerInputMappingContext();
+}
+
+void ACh4_PlayerCharacter::AddPlayerInputMappingContext()
+{
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
+		if (!PC->IsLocalController())
+		{
+			return;
+		}
+
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
 			ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
 		{
 			if (InputMappingContext)
 			{
 				Subsystem->AddMappingContext(InputMappingContext, 0);
+				UE_LOG(LogCh4_multiGame, Log,
+					TEXT("[PlayerInput] Activated existing mapping %s for locally possessed %s"),
+					*GetNameSafe(InputMappingContext),
+					*GetNameSafe(this));
 			}
 		}
 	}
+}
+
+void ACh4_PlayerCharacter::ApplyCharacterTypeFromPlayerState()
+{
+	if (const ACh4_multiGamePlayerState* CharacterPlayerState =
+		GetPlayerState<ACh4_multiGamePlayerState>())
+	{
+		ApplyCharacterType(CharacterPlayerState->GetCharacterType());
+	}
+}
+
+void ACh4_PlayerCharacter::ApplyCharacterType(const ECh4CharacterType CharacterType)
+{
+	if (!Ch4Character::IsValidType(CharacterType) || !GetWorld() || !GetMesh())
+	{
+		return;
+	}
+
+	const UCh4_multiGameGameInstance* GameInstance =
+		GetWorld()->GetGameInstance<UCh4_multiGameGameInstance>();
+	if (!GameInstance)
+	{
+		return;
+	}
+
+	const TSubclassOf<ACh4_PlayerCharacter> CharacterClass =
+		GameInstance->LoadCharacterClass(CharacterType);
+	ACh4_PlayerCharacter* AppearanceDefaults = CharacterClass
+		? CharacterClass->GetDefaultObject<ACh4_PlayerCharacter>()
+		: nullptr;
+	USkeletalMeshComponent* AppearanceMesh = AppearanceDefaults
+		? AppearanceDefaults->GetMesh()
+		: nullptr;
+	if (!AppearanceMesh || !AppearanceMesh->GetSkeletalMeshAsset())
+	{
+		return;
+	}
+
+	GetMesh()->SetSkeletalMeshAsset(AppearanceMesh->GetSkeletalMeshAsset());
+	GetMesh()->SetAnimInstanceClass(AppearanceMesh->GetAnimClass());
+	GetMesh()->SetRelativeTransform(AppearanceMesh->GetRelativeTransform());
+
+	// These assets contain character-specific animations, not control behavior.
+	StunMontage = AppearanceDefaults->StunMontage;
+	StunCameraShake = AppearanceDefaults->StunCameraShake;
+	EmotionDataAsset = AppearanceDefaults->EmotionDataAsset;
+	GrabMontage = AppearanceDefaults->GrabMontage;
+	GrabReleaseMontage = AppearanceDefaults->GrabReleaseMontage;
 }
 
 void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const

@@ -5,10 +5,12 @@
 #include "Ch4_multiGame.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
 #include "GameFlow/GameFlowTargetInterface.h"
+#include "Player/Ch4_multiGamePlayerState.h"
 
 ACh4_multiGameGameMode::ACh4_multiGameGameMode()
 {
 	GameStateClass = ACh4_multiGameGameState::StaticClass();
+	PlayerStateClass = ACh4_multiGamePlayerState::StaticClass();
 }
 
 #if WITH_DEV_AUTOMATION_TESTS

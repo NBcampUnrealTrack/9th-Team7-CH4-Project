@@ -16,6 +16,7 @@
 #include "Lobby/Ch4_multiGameLobbyPlayerState.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Player/Ch4CharacterTypes.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -28,12 +29,58 @@ ACh4_multiGameLobbyGameMode::ACh4_multiGameLobbyGameMode()
 	GameplayMaps.Add(TSoftObjectPtr<UWorld>(
 		FSoftObjectPath(TEXT("/Game/Map/Level/ForestLevel.ForestLevel"))));
 
+	LobbyCharacterClasses.SetNum(4);
+	for (int32 CharacterIndex = 0; CharacterIndex < LobbyCharacterClasses.Num(); ++CharacterIndex)
+	{
+		LobbyCharacterClasses[CharacterIndex] = StaticLoadClass(
+			APawn::StaticClass(),
+			nullptr,
+			Ch4Character::GetClassPath(Ch4Character::FromIndex(CharacterIndex)));
+	}
+
 	static ConstructorHelpers::FClassFinder<APawn> ThirdPersonPawnClass(
 		TEXT("/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter"));
 	if (ThirdPersonPawnClass.Succeeded())
 	{
 		DefaultPawnClass = ThirdPersonPawnClass.Class;
 	}
+}
+
+void ACh4_multiGameLobbyGameMode::OnPostLogin(AController* NewPlayer)
+{
+	if (HasAuthority() && IsValid(Cast<APlayerController>(NewPlayer)))
+	{
+		AssignCharacterSlot(NewPlayer);
+	}
+
+	Super::OnPostLogin(NewPlayer);
+}
+
+UClass* ACh4_multiGameLobbyGameMode::GetDefaultPawnClassForController_Implementation(
+	AController* InController)
+{
+	const TWeakObjectPtr<AController> ControllerKey(InController);
+	if (!ControllersAwaitingInitialCharacterSpawn.Contains(ControllerKey))
+	{
+		return Super::GetDefaultPawnClassForController_Implementation(InController);
+	}
+
+	const int32 CharacterSlot = FindAssignedCharacterSlot(InController);
+	if (LobbyCharacterClasses.IsValidIndex(CharacterSlot))
+	{
+		if (UClass* AssignedPawnClass = LobbyCharacterClasses[CharacterSlot].Get())
+		{
+			return AssignedPawnClass;
+		}
+	}
+
+	if (IsValid(Cast<APlayerController>(InController)))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[Lobby] No valid initial character slot for %s; using DefaultPawnClass"),
+			*GetPlayerLogLabel(InController));
+	}
+	return Super::GetDefaultPawnClassForController_Implementation(InController);
 }
 
 void ACh4_multiGameLobbyGameMode::InitGame(
@@ -164,6 +211,11 @@ void ACh4_multiGameLobbyGameMode::PostLogin(APlayerController* NewPlayer)
 	{
 		return;
 	}
+	if (IsValid(NewPlayer->GetPawn()))
+	{
+		ControllersAwaitingInitialCharacterSpawn.Remove(
+			TWeakObjectPtr<AController>(NewPlayer));
+	}
 
 	UpdateLobbyPlayerCount(GetNumPlayers());
 	const FString PlayerLabel = GetPlayerLogLabel(NewPlayer);
@@ -188,6 +240,9 @@ void ACh4_multiGameLobbyGameMode::Logout(AController* Exiting)
 {
 	const FString PlayerLabel = GetPlayerLogLabel(Exiting);
 	const bool bWasPlayerController = IsValid(Cast<APlayerController>(Exiting));
+	const int32 ReleasedCharacterSlot = HasAuthority() && bWasPlayerController
+		? ReleaseCharacterSlot(Exiting)
+		: INDEX_NONE;
 	const int32 RemainingPlayerCount = bWasPlayerController
 		? FMath::Max(GetNumPlayers() - 1, 0)
 		: GetNumPlayers();
@@ -201,6 +256,16 @@ void ACh4_multiGameLobbyGameMode::Logout(AController* Exiting)
 
 	UpdateLobbyPlayerCount(RemainingPlayerCount);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Player Left: %s"), *PlayerLabel);
+	if (ReleasedCharacterSlot != INDEX_NONE)
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[Lobby] Initial Character Released | Player: %s | Slot: %d | Character: %s"),
+			*PlayerLabel,
+			ReleasedCharacterSlot + 1,
+			*GetNameSafe(LobbyCharacterClasses.IsValidIndex(ReleasedCharacterSlot)
+				? LobbyCharacterClasses[ReleasedCharacterSlot].Get()
+				: nullptr));
+	}
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Players: %d / %d"), RemainingPlayerCount, MaxLobbyPlayers);
 	ShowServerDebugStatus(
 		FString::Printf(TEXT("PLAYER LEFT\nPlayers: %d / %d"), RemainingPlayerCount, MaxLobbyPlayers),
@@ -357,6 +422,118 @@ bool ACh4_multiGameLobbyGameMode::TrySelectRandomGameplayMap(
 
 	OutMapPackage = ValidMapPackages[FMath::RandRange(0, ValidMapPackages.Num() - 1)];
 	return true;
+}
+
+int32 ACh4_multiGameLobbyGameMode::FindFirstAvailableCharacterSlot(
+	const TArray<bool>& UnavailableSlots)
+{
+	for (int32 SlotIndex = 0; SlotIndex < UnavailableSlots.Num(); ++SlotIndex)
+	{
+		if (!UnavailableSlots[SlotIndex])
+		{
+			return SlotIndex;
+		}
+	}
+
+	return INDEX_NONE;
+}
+
+int32 ACh4_multiGameLobbyGameMode::AssignCharacterSlot(AController* Controller)
+{
+	if (!HasAuthority() || !IsValid(Controller))
+	{
+		return INDEX_NONE;
+	}
+
+	if (const int32 ExistingSlot = FindAssignedCharacterSlot(Controller);
+		ExistingSlot != INDEX_NONE)
+	{
+		return ExistingSlot;
+	}
+
+	for (auto SlotIt = CharacterSlotsByController.CreateIterator(); SlotIt; ++SlotIt)
+	{
+		if (!SlotIt.Key().IsValid())
+		{
+			SlotIt.RemoveCurrent();
+		}
+	}
+
+	TArray<bool> UnavailableSlots;
+	UnavailableSlots.Init(false, LobbyCharacterClasses.Num());
+	for (int32 SlotIndex = 0; SlotIndex < LobbyCharacterClasses.Num(); ++SlotIndex)
+	{
+		UnavailableSlots[SlotIndex] = LobbyCharacterClasses[SlotIndex].Get() == nullptr;
+	}
+	for (const TPair<TWeakObjectPtr<AController>, int32>& Assignment : CharacterSlotsByController)
+	{
+		if (UnavailableSlots.IsValidIndex(Assignment.Value))
+		{
+			UnavailableSlots[Assignment.Value] = true;
+		}
+	}
+
+	const int32 CharacterSlot = FindFirstAvailableCharacterSlot(UnavailableSlots);
+	if (CharacterSlot == INDEX_NONE)
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[Lobby] Initial Character Assignment Failed | Player: %s | Configured Slots: %d"),
+			*GetPlayerLogLabel(Controller),
+			LobbyCharacterClasses.Num());
+		return INDEX_NONE;
+	}
+
+	const ECh4CharacterType CharacterType = Ch4Character::FromIndex(CharacterSlot);
+	ACh4_multiGameLobbyPlayerState* LobbyPlayerState =
+		Controller->GetPlayerState<ACh4_multiGameLobbyPlayerState>();
+	if (!LobbyPlayerState
+		|| !LobbyPlayerState->SetCharacterTypeFromServer(CharacterType))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[Lobby] Initial Character Assignment Failed | PlayerState unavailable for %s"),
+			*GetPlayerLogLabel(Controller));
+		return INDEX_NONE;
+	}
+
+	CharacterSlotsByController.Add(TWeakObjectPtr<AController>(Controller), CharacterSlot);
+	ControllersAwaitingInitialCharacterSpawn.Add(TWeakObjectPtr<AController>(Controller));
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[Lobby] Initial Character Assigned | Player: %s | Slot: %d | Character: %s"),
+		*GetPlayerLogLabel(Controller),
+		CharacterSlot + 1,
+		*GetNameSafe(LobbyCharacterClasses[CharacterSlot].Get()));
+	return CharacterSlot;
+}
+
+int32 ACh4_multiGameLobbyGameMode::ReleaseCharacterSlot(AController* Controller)
+{
+	if (!IsValid(Controller))
+	{
+		return INDEX_NONE;
+	}
+
+	int32 ReleasedSlot = INDEX_NONE;
+	ControllersAwaitingInitialCharacterSpawn.Remove(TWeakObjectPtr<AController>(Controller));
+	CharacterSlotsByController.RemoveAndCopyValue(
+		TWeakObjectPtr<AController>(Controller),
+		ReleasedSlot);
+	return ReleasedSlot;
+}
+
+int32 ACh4_multiGameLobbyGameMode::FindAssignedCharacterSlot(AController* Controller) const
+{
+	if (!IsValid(Controller))
+	{
+		return INDEX_NONE;
+	}
+
+	if (const int32* CharacterSlot = CharacterSlotsByController.Find(
+		TWeakObjectPtr<AController>(Controller)))
+	{
+		return *CharacterSlot;
+	}
+
+	return INDEX_NONE;
 }
 
 void ACh4_multiGameLobbyGameMode::GetReadyPlayerCounts(
