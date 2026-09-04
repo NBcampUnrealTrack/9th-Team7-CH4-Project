@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Player/GrabbableInterface.h"
 #include "CargoActor.generated.h"
 
 class UCargoDataAsset;
@@ -23,7 +24,7 @@ enum class ECargoState : uint8
  * External authoritative systems decide when to call MarkAsLost().
  */
 UCLASS(Blueprintable)
-class CH4_MULTIGAME_API ACargoActor : public AActor
+class CH4_MULTIGAME_API ACargoActor : public AActor, public IGrabbableInterface
 {
 	GENERATED_BODY()
 
@@ -44,6 +45,8 @@ public:
 	/** Returns zero for Lost Cargo, missing data, or invalid negative data. */
 	UFUNCTION(BlueprintPure, Category="Cargo|Score")
 	int32 GetDeliveryScore() const;
+
+	virtual UPrimitiveComponent* GetGrabbableComponent() override { return CargoMesh; }
 
 	/** Server-only runtime count. It is intentionally not replicated or stored in CargoData. */
 	UFUNCTION(BlueprintPure, Category="Cargo|Ground Impact")

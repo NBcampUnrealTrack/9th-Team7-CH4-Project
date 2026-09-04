@@ -132,6 +132,20 @@ bool FCh4CargoDataApplicationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	TestTrue(TEXT("Cargo Actor implements IGrabbableInterface"),
+		Cargo->Implements<UGrabbableInterface>());
+	IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(Cargo);
+	TestNotNull(TEXT("Cargo Actor exposes the native Grabbable interface"), Grabbable);
+	TestTrue(TEXT("Grabbable component is the existing Cargo Mesh"),
+		Grabbable && Grabbable->GetGrabbableComponent() == CargoMesh);
+	TestEqual(TEXT("Cargo Mesh object type is PhysicsBody"),
+		CargoMesh->GetCollisionObjectType(), ECC_PhysicsBody);
+	TestEqual(TEXT("Cargo Mesh keeps query and physics collision enabled"),
+		CargoMesh->GetCollisionEnabled(), ECollisionEnabled::QueryAndPhysics);
+	TestEqual(TEXT("Cargo Mesh blocks WorldStatic"),
+		CargoMesh->GetCollisionResponseToChannel(ECC_WorldStatic), ECR_Block);
+	TestTrue(TEXT("Cargo Mesh simulates physics"), CargoMesh->IsSimulatingPhysics());
+
 	TestTrue(TEXT("Cargo Mesh requests rigid-body hit notifications"),
 		CargoMesh->GetBodyInstance()->bNotifyRigidBodyCollision);
 	TestTrue(TEXT("Static Mesh is applied"), CargoMesh->GetStaticMesh() == CubeMesh);

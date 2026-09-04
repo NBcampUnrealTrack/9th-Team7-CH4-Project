@@ -32,6 +32,7 @@ ACargoActor::ACargoActor()
 
 	CargoMesh->SetMobility(EComponentMobility::Movable);
 	CargoMesh->SetCollisionProfileName(UCollisionProfile::PhysicsActor_ProfileName);
+	CargoMesh->SetCollisionObjectType(ECC_PhysicsBody);
 	CargoMesh->SetSimulatePhysics(true);
 	CargoMesh->SetEnableGravity(true);
 	CargoMesh->SetNotifyRigidBodyCollision(true);
