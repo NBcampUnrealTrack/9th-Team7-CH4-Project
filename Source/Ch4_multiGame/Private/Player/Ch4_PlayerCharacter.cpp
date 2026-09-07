@@ -8,6 +8,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "InputActionValue.h"
+#include "Components/BoxComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/Ch4_multiGameGameInstance.h"
@@ -38,6 +39,14 @@ ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 	HatMeshComponent->SetupAttachment(GetMesh(), HatSocketName);
 	HatMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	HatMeshComponent->ComponentTags.Add(FName(TEXT("Headwear")));
+	
+	GrabBoxComponent = CreateDefaultSubobject<UBoxComponent>(TEXT("GrabBoxComponent"));
+	GrabBoxComponent->SetupAttachment(GetMesh(), GrabSocketName);
+	GrabBoxComponent->SetBoxExtent(FVector(70.0f, 70.0f, 70.0f));
+	GrabBoxComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision); // 평소엔 꺼둠
+	GrabBoxComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+	GrabBoxComponent->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Overlap);
+	GrabBoxComponent->SetGenerateOverlapEvents(false);	
 }
 
 void ACh4_PlayerCharacter::BeginPlay()
@@ -254,7 +263,6 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		if (Emote3Action) EIC->BindAction(Emote3Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote3);
 		if (Emote4Action) EIC->BindAction(Emote4Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote4);
 		if (GrabAction) EIC->BindAction(GrabAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionGrab);
-		if (SkinChangeAction) EIC->BindAction(SkinChangeAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionSkinChange);
 	}
 }
 
@@ -386,11 +394,6 @@ void ACh4_PlayerCharacter::InputActionGrab(const FInputActionValue& Value)
 	{
 		ServerRPC_PlayGrabMontage();
 	}
-}
-
-void ACh4_PlayerCharacter::InputActionSkinChange(const struct FInputActionValue& Value)
-{
-	
 }
 
 void ACh4_PlayerCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -642,41 +645,79 @@ void ACh4_PlayerCharacter::OnRep_GrabbedComponent()
 	// 클라이언트에서 잡음/놓음 시각 효과 처리용 (필요 시 사용)
 }
 
-void ACh4_PlayerCharacter::OnGrabNotify()
+void ACh4_PlayerCharacter::BeginGrabDetection()
 {
 	if (HasAuthority() == false && IsLocallyControlled() == false)
 	{
 		return; // 서버 또는 본인 조종 클라이언트만 판정
 	}
-	
+
 	bIsGrabActionInProgress = false;
-	
+
+	if (GrabbedComponent != nullptr || GrabBoxComponent == nullptr)
+	{
+		return;
+	}
+
+	GrabBoxComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	GrabBoxComponent->SetGenerateOverlapEvents(true);
+	GrabBoxComponent->OnComponentBeginOverlap.AddUniqueDynamic(this, &ACh4_PlayerCharacter::OnGrabBoxBeginOverlap);
+
+	// 콜리전이 켜지기 전부터 이미 범위 안에 들어와 있던 대상도 놓치지 않도록
+	// 활성화 직후 한 번 즉시 갱신해서 확인한다.
+	GrabBoxComponent->UpdateOverlaps();
+
+	TArray<AActor*> OverlappingActors;
+	GrabBoxComponent->GetOverlappingActors(OverlappingActors);
+	for (AActor* OverlappingActor : OverlappingActors)
+	{
+		if (OverlappingActor && OverlappingActor->Implements<UGrabbableInterface>())
+		{
+			TryGrabActor(OverlappingActor);
+			break;
+		}
+	}
+}
+
+void ACh4_PlayerCharacter::EndGrabDetection()
+{
+	bIsGrabActionInProgress = false;
+
+	if (GrabBoxComponent == nullptr)
+	{
+		return;
+	}
+
+	GrabBoxComponent->OnComponentBeginOverlap.RemoveDynamic(this, &ACh4_PlayerCharacter::OnGrabBoxBeginOverlap);
+	GrabBoxComponent->SetGenerateOverlapEvents(false);
+	GrabBoxComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+}
+
+void ACh4_PlayerCharacter::TryGrabActor(AActor* TargetActor)
+{
 	if (GrabbedComponent != nullptr)
 	{
 		return;
 	}
-	
-	FVector SocketLoc = GetMesh()->GetSocketLocation(GrabSocketName);
-	TArray<FOverlapResult> Overlaps;
-	FCollisionShape Sphere = FCollisionShape::MakeSphere(GrabRadius);
-	
-	bool bHit = GetWorld()->OverlapMultiByChannel(
-		Overlaps, SocketLoc, FQuat::Identity, ECC_PhysicsBody, Sphere);
-	
-	if (bHit == false)
+
+	IGrabbableInterface* GI = Cast<IGrabbableInterface>(TargetActor);
+	if (GI == nullptr)
 	{
 		return;
 	}
-	
-	for (const FOverlapResult& Result : Overlaps)
+
+	ServerRPC_AttachGrab(GI->GetGrabbableComponent());
+
+	// 한 번 잡았으면 이 구간에서 더 검사할 필요가 없으니 바로 꺼준다.
+	EndGrabDetection();
+}
+
+void ACh4_PlayerCharacter::OnGrabBoxBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	if (OtherActor && OtherActor->Implements<UGrabbableInterface>())
 	{
-		AActor* HitActor = Result.GetActor();
-		if (HitActor && HitActor->Implements<UGrabbableInterface>())
-		{
-			IGrabbableInterface* GI = Cast<IGrabbableInterface>(HitActor);
-			ServerRPC_AttachGrab(GI->GetGrabbableComponent());
-			break;
-		}
+		TryGrabActor(OtherActor);
 	}
 }
 

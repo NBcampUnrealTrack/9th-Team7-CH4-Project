@@ -68,9 +68,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Input")
 	class UInputAction* GrabAction;
 	
-	UPROPERTY(EditDefaultsOnly, Category="Input")
-    class UInputAction* SkinChangeAction;
-	
 	UPROPERTY(EditDefaultsOnly, Category="Anim")
 	TObjectPtr<class UAnimMontage> StunMontage;
 
@@ -89,7 +86,11 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_GrabbedComponent)
 	TObjectPtr<class UPrimitiveComponent> GrabbedComponent;
 	
-	void OnGrabNotify();
+	UPROPERTY(VisibleAnywhere, Category="Grab")
+	class UBoxComponent* GrabBoxComponent;
+	
+	void BeginGrabDetection();
+	void EndGrabDetection();
 	void OnGrabReleaseNotify();
 	
 	UPROPERTY(VisibleAnywhere, Category="Hat")
@@ -134,7 +135,6 @@ protected:
 	void InputActionEmote3(const struct FInputActionValue& Value);
 	void InputActionEmote4(const struct FInputActionValue& Value);
 	void InputActionGrab(const struct FInputActionValue& Value);
-	void InputActionSkinChange(const struct FInputActionValue& Value);
 	
 	// MovementMode가 변경될 때 호출
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
@@ -203,15 +203,18 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Grab")
 	FName GrabSocketName = TEXT("GrabSocket");
 	
-	UPROPERTY(EditDefaultsOnly, Category="Grab")
-	float GrabRadius = 50.0f;
-	
 	// 그랩/릴리즈 몽타주 재생 중 여부 (입력 잠금용)
 	bool bIsGrabActionInProgress = false;
 	
 	UFUNCTION()
 	void OnRep_GrabbedComponent();
+	
+	UFUNCTION()
+	void OnGrabBoxBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
+	void TryGrabActor(AActor* TargetActor);
+	
 	UFUNCTION(Server, Reliable)
 	void ServerRPC_AttachGrab(UPrimitiveComponent* TargetComponent);
 
