@@ -1,13 +1,20 @@
 #include "Player/Ch4_PlayerCharacter.h"
 
+#include "Animation/AnimInstance.h"
 #include "Camera/CameraComponent.h"
+#include "Ch4_multiGame.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "InputMappingContext.h"
 #include "InputActionValue.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Player/Ch4_multiGameGameInstance.h"
+#include "Player/Ch4_multiGamePlayerState.h"
 #include "Player/EmotionDataAsset.h"
+#include "Player/GrabbableInterface.h"
+#include "Engine/OverlapResult.h"
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
@@ -23,23 +30,110 @@ ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 	CameraComponent->bUsePawnControlRotation = false;
 	
 	bUseControllerRotationYaw = false; // 카메라 이동에 따라 캐릭터 몸이 같이 움직이지 않음
+	
+	HatMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HatMeshComponent"));
+	HatMeshComponent->SetupAttachment(GetMesh(), HatSocketName);
+	HatMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void ACh4_PlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-	
+
+	AddPlayerInputMappingContext();
+	ApplyCharacterTypeFromPlayerState();
+}
+
+void ACh4_PlayerCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+	ApplyCharacterTypeFromPlayerState();
+}
+
+void ACh4_PlayerCharacter::OnRep_PlayerState()
+{
+	Super::OnRep_PlayerState();
+	ApplyCharacterTypeFromPlayerState();
+}
+
+void ACh4_PlayerCharacter::PawnClientRestart()
+{
+	Super::PawnClientRestart();
+
+	// Remote clients commonly receive possession after BeginPlay. Register the pawn IMC here too.
+	AddPlayerInputMappingContext();
+}
+
+void ACh4_PlayerCharacter::AddPlayerInputMappingContext()
+{
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
+		if (!PC->IsLocalController())
+		{
+			return;
+		}
+
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
 			ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
 		{
 			if (InputMappingContext)
 			{
 				Subsystem->AddMappingContext(InputMappingContext, 0);
+				UE_LOG(LogCh4_multiGame, Log,
+					TEXT("[PlayerInput] Activated existing mapping %s for locally possessed %s"),
+					*GetNameSafe(InputMappingContext),
+					*GetNameSafe(this));
 			}
 		}
 	}
+}
+
+void ACh4_PlayerCharacter::ApplyCharacterTypeFromPlayerState()
+{
+	if (const ACh4_multiGamePlayerState* CharacterPlayerState =
+		GetPlayerState<ACh4_multiGamePlayerState>())
+	{
+		ApplyCharacterType(CharacterPlayerState->GetCharacterType());
+	}
+}
+
+void ACh4_PlayerCharacter::ApplyCharacterType(const ECh4CharacterType CharacterType)
+{
+	if (!Ch4Character::IsValidType(CharacterType) || !GetWorld() || !GetMesh())
+	{
+		return;
+	}
+
+	const UCh4_multiGameGameInstance* GameInstance =
+		GetWorld()->GetGameInstance<UCh4_multiGameGameInstance>();
+	if (!GameInstance)
+	{
+		return;
+	}
+
+	const TSubclassOf<ACh4_PlayerCharacter> CharacterClass =
+		GameInstance->LoadCharacterClass(CharacterType);
+	ACh4_PlayerCharacter* AppearanceDefaults = CharacterClass
+		? CharacterClass->GetDefaultObject<ACh4_PlayerCharacter>()
+		: nullptr;
+	USkeletalMeshComponent* AppearanceMesh = AppearanceDefaults
+		? AppearanceDefaults->GetMesh()
+		: nullptr;
+	if (!AppearanceMesh || !AppearanceMesh->GetSkeletalMeshAsset())
+	{
+		return;
+	}
+
+	GetMesh()->SetSkeletalMeshAsset(AppearanceMesh->GetSkeletalMeshAsset());
+	GetMesh()->SetAnimInstanceClass(AppearanceMesh->GetAnimClass());
+	GetMesh()->SetRelativeTransform(AppearanceMesh->GetRelativeTransform());
+
+	// These assets contain character-specific animations, not control behavior.
+	StunMontage = AppearanceDefaults->StunMontage;
+	StunCameraShake = AppearanceDefaults->StunCameraShake;
+	EmotionDataAsset = AppearanceDefaults->EmotionDataAsset;
+	GrabMontage = AppearanceDefaults->GrabMontage;
+	GrabReleaseMontage = AppearanceDefaults->GrabReleaseMontage;
 }
 
 void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
@@ -47,6 +141,7 @@ void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProp
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	
 	DOREPLIFETIME(ThisClass, bIsStunned);
+	DOREPLIFETIME(ThisClass, GrabbedComponent);
 }
 
 void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -62,6 +157,27 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		if (Emote2Action) EIC->BindAction(Emote2Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote2);
 		if (Emote3Action) EIC->BindAction(Emote3Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote3);
 		if (Emote4Action) EIC->BindAction(Emote4Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote4);
+		if (GrabAction) EIC->BindAction(GrabAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionGrab);
+		if (SkinChangeAction) EIC->BindAction(SkinChangeAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionSkinChange);
+	}
+}
+
+void ACh4_PlayerCharacter::SetHatMesh(class UStaticMesh* NewHat)
+{
+	if (HatMeshComponent == nullptr)
+	{
+		return;
+	}
+
+	if (NewHat)
+	{
+		HatMeshComponent->SetStaticMesh(NewHat);
+		HatMeshComponent->SetVisibility(true);
+	}
+	else
+	{
+		HatMeshComponent->SetStaticMesh(nullptr);
+		HatMeshComponent->SetVisibility(false);
 	}
 }
 
@@ -77,6 +193,11 @@ void ACh4_PlayerCharacter::InputActionMove(const struct FInputActionValue& Value
 	if (Controller == nullptr)
 	{
 		return;
+	}
+
+	if (MoveVec.IsNearlyZero() == false)
+	{
+		InterruptEmotionMontage();
 	}
 
 	const FRotator Rotation = Controller->GetControlRotation();
@@ -108,6 +229,8 @@ void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
 	{
 		return;
     }
+
+	InterruptEmotionMontage();
     	
 	Jump();
 }
@@ -130,6 +253,48 @@ void ACh4_PlayerCharacter::InputActionEmote3(const struct FInputActionValue& Val
 void ACh4_PlayerCharacter::InputActionEmote4(const struct FInputActionValue& Value)
 {
 	PlayEmotion(EEmotionType::Emote4);
+}
+
+void ACh4_PlayerCharacter::InputActionGrab(const FInputActionValue& Value)
+{
+	if (bIsStunned)
+	{
+		return;
+	}
+
+	if (bIsGrabActionInProgress)
+	{
+		return; // 몽타주 재생 중엔 입력 무시
+	}
+	
+	bIsGrabActionInProgress = true;
+	
+	if (GrabbedComponent != nullptr)
+	{
+		if (HasAuthority())
+		{
+			MulticastRPC_PlayGrabReleaseMontage();
+		}
+		else
+		{
+			ServerRPC_PlayGrabReleaseMontage();
+		}
+		return;
+	}
+
+	if (HasAuthority())
+	{
+		MulticastRPC_PlayGrabMontage();
+	}
+	else
+	{
+		ServerRPC_PlayGrabMontage();
+	}
+}
+
+void ACh4_PlayerCharacter::InputActionSkinChange(const struct FInputActionValue& Value)
+{
+	
 }
 
 void ACh4_PlayerCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -177,9 +342,9 @@ void ACh4_PlayerCharacter::OnStun()
 	}
 	
 	bIsStunned = true;
-
-	// 즉시 Replication 갱신 요청
-	// ForceNetUpdate();
+	
+	// 서버(호스트)는 RepNotify가 자동으로 안 불리므로 직접 호출
+    OnRep_IsStunned();
 	
 	// 현재 이동 중이었다면 즉시 정지
 	GetCharacterMovement()->StopMovementImmediately();
@@ -207,9 +372,9 @@ void ACh4_PlayerCharacter::EndStun()
 	}
 	
 	bIsStunned = false;
-
-	// 즉시 Replication 갱신 요청
-	// ForceNetUpdate();
+	
+	// 서버(호스트)는 RepNotify가 자동으로 안 불리므로 직접 호출
+	OnRep_IsStunned();
 	
 	// 다시 걷기 가능
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
@@ -328,4 +493,179 @@ void ACh4_PlayerCharacter::MulticastRPC_PlayEmotion_Implementation(EEmotionType 
 	}
 
 	PlayAnimMontage(EmotionMontage);
+}
+
+void ACh4_PlayerCharacter::InterruptEmotionMontage()
+{
+	StopEmotionMontages();
+
+	if (HasAuthority())
+	{
+		MulticastRPC_InterruptEmotionMontage();
+	}
+	else
+	{
+		ServerRPC_InterruptEmotionMontage();
+	}
+}
+
+void ACh4_PlayerCharacter::StopEmotionMontages(float BlendOutTime)
+{
+	if (EmotionDataAsset == nullptr)
+	{
+		return;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (AnimInstance == nullptr)
+	{
+		return;
+	}
+
+	for (const FEmotionData& EmotionData : EmotionDataAsset->EmotionDataList)
+	{
+		if (EmotionData.EmoteMontage)
+		{
+			AnimInstance->Montage_Stop(BlendOutTime, EmotionData.EmoteMontage);
+		}
+	}
+}
+
+void ACh4_PlayerCharacter::ServerRPC_InterruptEmotionMontage_Implementation()
+{
+	MulticastRPC_InterruptEmotionMontage();
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_InterruptEmotionMontage_Implementation()
+{
+	StopEmotionMontages();
+}
+
+void ACh4_PlayerCharacter::OnRep_GrabbedComponent()
+{
+	// 클라이언트에서 잡음/놓음 시각 효과 처리용 (필요 시 사용)
+}
+
+void ACh4_PlayerCharacter::OnGrabNotify()
+{
+	if (HasAuthority() == false && IsLocallyControlled() == false)
+	{
+		return; // 서버 또는 본인 조종 클라이언트만 판정
+	}
+	
+	bIsGrabActionInProgress = false;
+	
+	if (GrabbedComponent != nullptr)
+	{
+		return;
+	}
+	
+	FVector SocketLoc = GetMesh()->GetSocketLocation(GrabSocketName);
+	TArray<FOverlapResult> Overlaps;
+	FCollisionShape Sphere = FCollisionShape::MakeSphere(GrabRadius);
+	
+	bool bHit = GetWorld()->OverlapMultiByChannel(
+		Overlaps, SocketLoc, FQuat::Identity, ECC_PhysicsBody, Sphere);
+	
+	if (bHit == false)
+	{
+		return;
+	}
+	
+	for (const FOverlapResult& Result : Overlaps)
+	{
+		AActor* HitActor = Result.GetActor();
+		if (HitActor && HitActor->Implements<UGrabbableInterface>())
+		{
+			IGrabbableInterface* GI = Cast<IGrabbableInterface>(HitActor);
+			ServerRPC_AttachGrab(GI->GetGrabbableComponent());
+			break;
+		}
+	}
+}
+
+void ACh4_PlayerCharacter::ServerRPC_AttachGrab_Implementation(UPrimitiveComponent* TargetComponent)
+{
+	if (TargetComponent == nullptr || GrabbedComponent != nullptr)
+	{
+		return;
+	}
+
+	GrabbedComponent = TargetComponent;
+	MulticastRPC_AttachGrab(TargetComponent);
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_AttachGrab_Implementation(UPrimitiveComponent* TargetComponent)
+{
+	if (TargetComponent == nullptr)
+	{
+		return;
+	}
+
+	TargetComponent->SetSimulatePhysics(false);
+	TargetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	TargetComponent->AttachToComponent(
+	   GetMesh(),
+	   FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+	   GrabSocketName);
+}
+
+void ACh4_PlayerCharacter::ServerRPC_ReleaseGrab_Implementation()
+{
+	if (GrabbedComponent == nullptr)
+	{
+		return;
+	}
+	
+	MulticastRPC_ReleaseGrab(GrabbedComponent);
+	GrabbedComponent = nullptr;
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_ReleaseGrab_Implementation(UPrimitiveComponent* TargetComponent)
+{
+	TargetComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+	TargetComponent->SetSimulatePhysics(true);
+	TargetComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+}
+
+void ACh4_PlayerCharacter::ServerRPC_PlayGrabMontage_Implementation()
+{
+	MulticastRPC_PlayGrabMontage();
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_PlayGrabMontage_Implementation()
+{
+	if (GrabMontage)
+	{
+		PlayAnimMontage(GrabMontage);
+	}
+}
+
+void ACh4_PlayerCharacter::OnGrabReleaseNotify()
+{
+	if (HasAuthority() == false && IsLocallyControlled() == false)
+	{
+		return;
+	}
+
+	bIsGrabActionInProgress = false;
+	
+	if (GrabbedComponent != nullptr)
+	{
+		ServerRPC_ReleaseGrab();
+	}
+}
+
+void ACh4_PlayerCharacter::ServerRPC_PlayGrabReleaseMontage_Implementation()
+{
+	MulticastRPC_PlayGrabReleaseMontage();
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_PlayGrabReleaseMontage_Implementation()
+{
+	if (GrabReleaseMontage)
+	{
+		PlayAnimMontage(GrabReleaseMontage);
+	}
 }

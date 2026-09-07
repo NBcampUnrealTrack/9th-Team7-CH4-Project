@@ -10,6 +10,8 @@
 #include "GameFlow/Ch4_multiGameGameState.h"
 #include "GameFlow/GameFlowDebugDriver.h"
 #include "GameFlow/GameFlowRuleInterface.h"
+#include "GameFlow/GameFlowTargetInterface.h"
+#include "UObject/UnrealType.h"
 
 namespace Ch4GameFlowTests
 {
@@ -74,6 +76,7 @@ namespace Ch4GameFlowTests
 		const int32 RemainingCargoCount = GameState.GetRemainingCargoCount();
 		const int32 LostCargoCount = GameState.GetLostCargoCount();
 		const float SurvivalRate = GameState.GetCargoSurvivalRate();
+		const int32 FinalCargoScore = GameState.GetFinalCargoScore();
 
 		Test.TestTrue(Context + TEXT(": Initial Cargo is non-negative"), InitialCargoCount >= 0);
 		Test.TestTrue(Context + TEXT(": Remaining Cargo is non-negative"), RemainingCargoCount >= 0);
@@ -83,6 +86,7 @@ namespace Ch4GameFlowTests
 		Test.TestEqual(Context + TEXT(": Lost Cargo equals Initial minus Remaining"), LostCargoCount, InitialCargoCount - RemainingCargoCount);
 		Test.TestTrue(Context + TEXT(": Survival Rate is at least zero"), SurvivalRate >= 0.0f);
 		Test.TestTrue(Context + TEXT(": Survival Rate is at most one"), SurvivalRate <= 1.0f);
+		Test.TestTrue(Context + TEXT(": Final Cargo Score is non-negative"), FinalCargoScore >= 0);
 
 		const ECh4GamePhase GamePhase = GameState.GetCurrentGamePhase();
 		const ECh4GameEndReason EndReason = GameState.GetGameEndReason();
@@ -94,6 +98,10 @@ namespace Ch4GameFlowTests
 			|| (GamePhase == ECh4GamePhase::GameOver
 				&& EndReason == ECh4GameEndReason::CargoRuleFailed);
 		Test.TestTrue(Context + TEXT(": Phase and End Reason are consistent"), bEndReasonMatchesPhase);
+		if (GamePhase != ECh4GamePhase::Cleared)
+		{
+			Test.TestEqual(Context + TEXT(": Non-cleared phase keeps Final Cargo Score zero"), FinalCargoScore, 0);
+		}
 	}
 }
 
@@ -246,6 +254,115 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Disabled empty-cargo failure keeps Playing"), static_cast<uint8>(EmptyCargoAllowedFlow.GameState->GetCurrentGamePhase()), static_cast<uint8>(ECh4GamePhase::Playing));
 		TestFalse(TEXT("Zero cargo still cannot satisfy the default clear requirement"), EmptyCargoAllowedFlow.GameRule->NotifyGoalReached(GoalActor));
 	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCh4GameFlowScoreTest,
+	"Ch4_multiGame.GameFlow.Score",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCh4GameFlowScoreTest::RunTest(const FString& Parameters)
+{
+	using namespace Ch4GameFlowTests;
+
+	{
+		FGameFlowTestWorld ProviderlessFlow;
+		if (!ProviderlessFlow.Initialize())
+		{
+			AddError(TEXT("Failed to initialize the providerless score test world."));
+			return false;
+		}
+
+		AActor* GoalActor = ProviderlessFlow.SpawnGoalActor();
+		TestNotNull(TEXT("Providerless goal Actor is valid"), GoalActor);
+		TestEqual(TEXT("Initial Final Cargo Score is zero"), ProviderlessFlow.GameState->GetFinalCargoScore(), 0);
+		TestTrue(TEXT("Providerless flow initializes"), ProviderlessFlow.GameRule->RequestCargoInitialization(2));
+		TestTrue(TEXT("Providerless flow starts"), ProviderlessFlow.GameRule->RequestGameStart());
+		TestEqual(TEXT("Playing Final Cargo Score remains zero"), ProviderlessFlow.GameState->GetFinalCargoScore(), 0);
+		TestTrue(TEXT("Goal without a score provider still clears"), ProviderlessFlow.GameRule->NotifyGoalReached(GoalActor));
+		TestEqual(TEXT("Providerless clear finalizes zero score"), ProviderlessFlow.GameState->GetFinalCargoScore(), 0);
+		TestEqual(TEXT("Providerless result contains zero score"),
+			ProviderlessFlow.GameState->GetGameResult().FinalCargoScore, 0);
+	}
+
+	{
+		FGameFlowTestWorld ScoredFlow;
+		if (!ScoredFlow.Initialize())
+		{
+			AddError(TEXT("Failed to initialize the scored GameFlow test world."));
+			return false;
+		}
+
+		AActor* GoalActor = ScoredFlow.SpawnGoalActor();
+		TestNotNull(TEXT("Scored goal Actor is valid"), GoalActor);
+		FCh4DeliveryScoreSummary ScoreSummary;
+		ScoreSummary.bHasScoreData = true;
+		ScoreSummary.DeliveredCargoCount = 2;
+		ScoreSummary.DeliveredCargoScore = 600;
+		ScoredFlow.GameMode->SetDeliveryScoreSummaryForTesting(GoalActor, ScoreSummary);
+
+		TestTrue(TEXT("Scored flow initializes"), ScoredFlow.GameRule->RequestCargoInitialization(2));
+		TestTrue(TEXT("Scored flow starts"), ScoredFlow.GameRule->RequestGameStart());
+		TestTrue(TEXT("Score provider goal clears"), ScoredFlow.GameRule->NotifyGoalReached(GoalActor));
+		TestEqual(TEXT("Cleared flow finalizes provided score"), ScoredFlow.GameState->GetFinalCargoScore(), 600);
+		TestEqual(TEXT("Game result contains finalized score"),
+			ScoredFlow.GameState->GetGameResult().FinalCargoScore, 600);
+
+		ScoreSummary.DeliveredCargoScore = 900;
+		ScoredFlow.GameMode->SetDeliveryScoreSummaryForTesting(GoalActor, ScoreSummary);
+		TestFalse(TEXT("Duplicate goal after Cleared is rejected"), ScoredFlow.GameRule->NotifyGoalReached(GoalActor));
+		TestEqual(TEXT("Cleared score is terminal and immutable"), ScoredFlow.GameState->GetFinalCargoScore(), 600);
+	}
+
+	{
+		FGameFlowTestWorld InvalidSummaryFlow;
+		if (!InvalidSummaryFlow.Initialize())
+		{
+			AddError(TEXT("Failed to initialize the invalid-summary test world."));
+			return false;
+		}
+
+		AActor* GoalActor = InvalidSummaryFlow.SpawnGoalActor();
+		FCh4DeliveryScoreSummary InvalidSummary;
+		InvalidSummary.bHasScoreData = true;
+		InvalidSummary.DeliveredCargoCount = -2;
+		InvalidSummary.DeliveredCargoScore = -100;
+		InvalidSummaryFlow.GameMode->SetDeliveryScoreSummaryForTesting(GoalActor, InvalidSummary);
+		TestTrue(TEXT("Invalid-summary flow initializes"), InvalidSummaryFlow.GameRule->RequestCargoInitialization(1));
+		TestTrue(TEXT("Invalid-summary flow starts"), InvalidSummaryFlow.GameRule->RequestGameStart());
+		TestTrue(TEXT("Invalid score data does not block a valid clear"),
+			InvalidSummaryFlow.GameRule->NotifyGoalReached(GoalActor));
+		TestEqual(TEXT("Negative provided score clamps to zero"),
+			InvalidSummaryFlow.GameState->GetFinalCargoScore(), 0);
+	}
+
+	{
+		FGameFlowTestWorld GameOverScoreFlow;
+		if (!GameOverScoreFlow.Initialize())
+		{
+			AddError(TEXT("Failed to initialize the GameOver score test world."));
+			return false;
+		}
+
+		TestTrue(TEXT("GameOver score flow initializes"), GameOverScoreFlow.GameRule->RequestCargoInitialization(1));
+		TestTrue(TEXT("GameOver score flow starts"), GameOverScoreFlow.GameRule->RequestGameStart());
+		TestTrue(TEXT("Final Cargo loss is processed"), GameOverScoreFlow.GameRule->NotifyCargoLost(1));
+		TestEqual(TEXT("GameOver keeps Final Cargo Score zero"),
+			GameOverScoreFlow.GameState->GetFinalCargoScore(), 0);
+		TestEqual(TEXT("GameOver result contains zero score"),
+			GameOverScoreFlow.GameState->GetGameResult().FinalCargoScore, 0);
+	}
+
+	const FProperty* FinalScoreProperty =
+		FindFProperty<FProperty>(ACh4_multiGameGameState::StaticClass(), TEXT("FinalCargoScore"));
+	TestTrue(TEXT("FinalCargoScore is replicated"),
+		FinalScoreProperty && FinalScoreProperty->HasAnyPropertyFlags(CPF_Net));
+	TestNull(TEXT("FinalCargoScore has no Blueprint setter"),
+		ACh4_multiGameGameState::StaticClass()->FindFunctionByName(TEXT("SetFinalCargoScore")));
+	TestNotNull(TEXT("GameFlow target exposes an optional score summary function"),
+		UGameFlowTargetInterface::StaticClass()->FindFunctionByName(TEXT("GetDeliveryScoreSummary")));
 
 	return true;
 }

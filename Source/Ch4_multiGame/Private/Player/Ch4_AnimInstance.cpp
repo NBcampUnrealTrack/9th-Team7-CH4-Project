@@ -24,9 +24,10 @@ void UCh4_AnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	}
 
 	Velocity = OwnerCharacterMovementComponent->Velocity;
-	GroundSpeed = FVector(Velocity.X, Velocity.Y, 0.f).Size();
+	GroundSpeed = FVector(Velocity.X, Velocity.Y, 0.f).Length();
 	bShouldMove = ((OwnerCharacterMovementComponent->GetCurrentAcceleration().IsNearlyZero()) == false)
 	&& (3.f < GroundSpeed);
 	bIsFalling = OwnerCharacterMovementComponent->IsFalling();
+	bIsGrabbing = OwnerCharacter->GrabbedComponent != nullptr;
 }
 

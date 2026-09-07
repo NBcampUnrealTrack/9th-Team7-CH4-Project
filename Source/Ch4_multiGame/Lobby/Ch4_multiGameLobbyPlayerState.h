@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/PlayerState.h"
+#include "Player/Ch4_multiGamePlayerState.h"
 #include "Ch4_multiGameLobbyPlayerState.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
@@ -12,7 +12,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 
 /** Replicated, per-player Ready state used only while the lobby GameMode is active. */
 UCLASS()
-class ACh4_multiGameLobbyPlayerState : public APlayerState
+class ACh4_multiGameLobbyPlayerState : public ACh4_multiGamePlayerState
 {
 	GENERATED_BODY()
 

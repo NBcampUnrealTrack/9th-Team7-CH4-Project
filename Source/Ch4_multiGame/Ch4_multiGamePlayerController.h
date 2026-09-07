@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Player/Ch4CharacterTypes.h"
 #include "Ch4_multiGamePlayerController.generated.h"
 
 class UInputMappingContext;
@@ -32,6 +33,10 @@ public:
 	 */
 	UFUNCTION(Exec, BlueprintCallable, Category="Network|Debug")
 	void JoinHamachi(FString HostIPv4);
+
+	/** Saves the local choice for travel and asks the server to update replicated PlayerState. */
+	UFUNCTION(BlueprintCallable, Category="Player|Character")
+	void RequestCharacterType(ECh4CharacterType CharacterType);
 	
 	// [추가] PauseMenu 관련 공개 함수들 선언
 	// P 키(이후에 ESC키로 전환)를 눌렀을 때 열려있으면 닫고, 닫혀있으면 여는 토글 함수
@@ -76,7 +81,27 @@ protected:
 	// PauseMenu 전용 MVVM ViewModel 인스턴스
 	UPROPERTY(BlueprintReadOnly, Category = "UI|Pause Menu")
 	TObjectPtr<class UCh4PauseMenuViewModel> PauseMenuViewModel;
-	
+
+	// ── HUD ────────────────────────────────────────────────────────────
+	// 에디터에서 WBP_HUD 클래스를 지정할 변수
+	UPROPERTY(EditAnywhere, Category = "UI|HUD")
+	TSubclassOf<UUserWidget> HUDWidgetClass;
+
+	// 생성된 HUD 위젯 인스턴스
+	UPROPERTY()
+	TObjectPtr<UUserWidget> HUDWidget;
+
+	// HUD 전용 MVVM ViewModel 인스턴스
+	UPROPERTY(BlueprintReadOnly, Category = "UI|HUD")
+	TObjectPtr<class UCh4HUDViewModel> HUDViewModel;
+
+	// ── Voice Mute Toggle (V Key) ──────────────────────────────────────
+	UPROPERTY(EditAnywhere, Category = "Input|Voice")
+	TObjectPtr<UInputAction> VoiceToggleAction;
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Voice")
+	void ToggleVoice();
+
 	/** Input Mapping Contexts */
 	UPROPERTY(EditAnywhere, Category ="Input|Input Mappings")
 	TArray<UInputMappingContext*> DefaultMappingContexts;
@@ -99,11 +124,22 @@ protected:
 
 	/** Gameplay initialization */
 	virtual void BeginPlay() override;
+	virtual void OnPossess(APawn* InPawn) override;
+	virtual void OnRep_PlayerState() override;
 
 	/** Input mapping context setup */
 	virtual void SetupInputComponent() override;
 
 	/** Returns true if the player should use UMG touch controls */
 	bool ShouldUseTouchControls() const;
+
+private:
+	UFUNCTION(Server, Reliable)
+	void ServerRequestCharacterType(ECh4CharacterType CharacterType);
+
+	void ApplyServerCharacterType(ECh4CharacterType CharacterType);
+	void SynchronizeCharacterSelectionForCurrentWorld();
+
+	bool bSubmittedPersistedCharacterType = false;
 
 };
