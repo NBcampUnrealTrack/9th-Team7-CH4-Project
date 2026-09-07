@@ -15,6 +15,9 @@
 #include "Player/EmotionDataAsset.h"
 #include "Player/GrabbableInterface.h"
 #include "Engine/OverlapResult.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "PhysicsEngine/PhysicalAnimationComponent.h"
+#include "PhysicsEngine/PhysicsAsset.h"
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
@@ -34,6 +37,7 @@ ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 	HatMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HatMeshComponent"));
 	HatMeshComponent->SetupAttachment(GetMesh(), HatSocketName);
 	HatMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	HatMeshComponent->ComponentTags.Add(FName(TEXT("Headwear")));
 }
 
 void ACh4_PlayerCharacter::BeginPlay()
@@ -42,6 +46,9 @@ void ACh4_PlayerCharacter::BeginPlay()
 
 	AddPlayerInputMappingContext();
 	ApplyCharacterTypeFromPlayerState();
+
+	// PlayerState가 아직 없으면 현재 BP의 기본 설정으로 초기화한다.
+	InitializeCharacterPhysics();
 }
 
 void ACh4_PlayerCharacter::PossessedBy(AController* NewController)
@@ -128,12 +135,53 @@ void ACh4_PlayerCharacter::ApplyCharacterType(const ECh4CharacterType CharacterT
 	GetMesh()->SetAnimInstanceClass(AppearanceMesh->GetAnimClass());
 	GetMesh()->SetRelativeTransform(AppearanceMesh->GetRelativeTransform());
 
+	// 콜리전 프로파일 및 피직스 에셋 동기화
+	GetMesh()->SetCollisionProfileName(AppearanceMesh->GetCollisionProfileName());
+	GetMesh()->SetCollisionEnabled(AppearanceMesh->GetCollisionEnabled());
+	if (UPhysicsAsset* NewPhysicsAsset = AppearanceMesh->GetPhysicsAsset())
+	{
+		GetMesh()->SetPhysicsAsset(NewPhysicsAsset, false);
+	}
+	else if (USkeletalMesh* SkeletalMeshAsset = AppearanceMesh->GetSkeletalMeshAsset())
+	{
+		if (UPhysicsAsset* MeshPhysicsAsset = SkeletalMeshAsset->GetPhysicsAsset())
+		{
+			GetMesh()->SetPhysicsAsset(MeshPhysicsAsset, false);
+		}
+	}
+
 	// These assets contain character-specific animations, not control behavior.
 	StunMontage = AppearanceDefaults->StunMontage;
 	StunCameraShake = AppearanceDefaults->StunCameraShake;
 	EmotionDataAsset = AppearanceDefaults->EmotionDataAsset;
 	GrabMontage = AppearanceDefaults->GrabMontage;
 	GrabReleaseMontage = AppearanceDefaults->GrabReleaseMontage;
+
+	// 동물별 래그돌 물리 설정 동기화
+	RagdollRootBone = AppearanceDefaults->RagdollRootBone;
+	RagdollProfileName = AppearanceDefaults->RagdollProfileName;
+	RagdollStrengthMultiplier = AppearanceDefaults->RagdollStrengthMultiplier;
+	bRagdollIncludeSelf = AppearanceDefaults->bRagdollIncludeSelf;
+
+	InitializeCharacterPhysics();
+
+	// 블루프린트 래그돌 초기화용 이벤트 발생
+	OnCharacterTypeApplied(CharacterType);
+}
+
+void ACh4_PlayerCharacter::InitializeCharacterPhysics()
+{
+	if (UPhysicalAnimationComponent* PhysAnimComp = FindComponentByClass<UPhysicalAnimationComponent>())
+	{
+		if (USkeletalMeshComponent* MeshComp = GetMesh())
+		{
+			PhysAnimComp->SetSkeletalMeshComponent(MeshComp);
+			PhysAnimComp->ApplyPhysicalAnimationProfileBelow(RagdollRootBone, RagdollProfileName, bRagdollIncludeSelf);
+			MeshComp->SetAllBodiesBelowSimulatePhysics(RagdollRootBone, true, bRagdollIncludeSelf);
+			PhysAnimComp->SetStrengthMultiplyer(RagdollStrengthMultiplier);
+			bCharacterPhysicsInitialized = true;
+		}
+	}
 }
 
 void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const

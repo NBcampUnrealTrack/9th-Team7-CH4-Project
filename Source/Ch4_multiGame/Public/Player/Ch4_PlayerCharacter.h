@@ -15,6 +15,10 @@ public:
 
 	/** Applies appearance and animation data without replacing movement, camera, input, or possession. */
 	void ApplyCharacterType(ECh4CharacterType CharacterType);
+
+	/** Blueprint hook called whenever character appearance/physics is updated */
+	UFUNCTION(BlueprintImplementableEvent, Category="Player|Character")
+	void OnCharacterTypeApplied(ECh4CharacterType NewType);
 	
 protected:
 	virtual void BeginPlay() override;
@@ -94,6 +98,24 @@ public:
 	void SetHatMesh(class UStaticMesh* NewHat);
 	
 protected:
+	// 각 동물 BP의 Class Defaults에서 설정한다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Character|Ragdoll")
+	FName RagdollRootBone = TEXT("chest");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Character|Ragdoll")
+	FName RagdollProfileName = TEXT("PA_ActiveLoose");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Character|Ragdoll", meta = (ClampMin = "0.0"))
+	float RagdollStrengthMultiplier = 2.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Character|Ragdoll")
+	bool bRagdollIncludeSelf = true;
+
+	// 실제 플레이 중 초기화 여부
+	bool bCharacterPhysicsInitialized = false;
+
+	void InitializeCharacterPhysics();
+
 	void AddPlayerInputMappingContext();
 	void ApplyCharacterTypeFromPlayerState();
 
