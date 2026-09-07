@@ -191,6 +191,30 @@ bool FCh4LobbyReadyTravelRulesTest::RunTest(const FString& Parameters)
 		TEXT("Invalid negative ready counts cannot start travel"),
 		ACh4_multiGameLobbyGameMode::CanStartLobbyTravel(-1, 2, 2, false));
 
+	TestEqual(TEXT("Solo Ready is the default policy"), LobbyGameModeDefaults->MinPlayersToStart, 1);
+	TestEqual(TEXT("Lobby capacity remains four"), LobbyGameModeDefaults->MaxLobbyPlayers, 4);
+	TestEqual(TEXT("Minimum values below one clamp to one"),
+		ACh4_multiGameLobbyGameMode::ClampMinimumPlayersToStart(0, 4), 1);
+	TestEqual(TEXT("Negative minimum values clamp to one"),
+		ACh4_multiGameLobbyGameMode::ClampMinimumPlayersToStart(-2, 4), 1);
+	TestEqual(TEXT("Minimum cannot exceed the lobby capacity"),
+		ACh4_multiGameLobbyGameMode::ClampMinimumPlayersToStart(5, 4), 4);
+	for (int32 PlayerCount = 1; PlayerCount <= 4; ++PlayerCount)
+	{
+		TestEqual(FString::Printf(TEXT("Valid minimum %d is preserved"), PlayerCount),
+			ACh4_multiGameLobbyGameMode::ClampMinimumPlayersToStart(PlayerCount, 4), PlayerCount);
+		TestFalse(FString::Printf(TEXT("%d/%d Ready cannot travel"), PlayerCount - 1, PlayerCount),
+			ACh4_multiGameLobbyGameMode::CanStartLobbyTravel(PlayerCount - 1, PlayerCount, 1, false));
+		TestTrue(FString::Printf(TEXT("%d/%d Ready can travel with minimum one"), PlayerCount, PlayerCount),
+			ACh4_multiGameLobbyGameMode::CanStartLobbyTravel(PlayerCount, PlayerCount, 1, false));
+		TestFalse(FString::Printf(TEXT("%d-player travel cannot start twice"), PlayerCount),
+			ACh4_multiGameLobbyGameMode::CanStartLobbyTravel(PlayerCount, PlayerCount, 1, true));
+	}
+	TestFalse(TEXT("An empty lobby cannot travel"),
+		ACh4_multiGameLobbyGameMode::CanStartLobbyTravel(0, 0, 1, false));
+	TestTrue(TEXT("A ready player left alone after another disconnect can travel"),
+		ACh4_multiGameLobbyGameMode::CanStartLobbyTravel(1, 1, 1, false));
+
 	return true;
 }
 
