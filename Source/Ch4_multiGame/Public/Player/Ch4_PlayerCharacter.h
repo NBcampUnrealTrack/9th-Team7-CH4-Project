@@ -19,6 +19,10 @@ public:
 	/** Blueprint hook called whenever character appearance/physics is updated */
 	UFUNCTION(BlueprintImplementableEvent, Category="Player|Character")
 	void OnCharacterTypeApplied(ECh4CharacterType NewType);
+
+	/** Blueprint hook passing uint8 index (0=Cat, 1=Dog, 2=Gorilla, 3=Otter) for easy BP enum conversion */
+	UFUNCTION(BlueprintImplementableEvent, Category="Player|Character")
+	void OnCharacterTypeChanged(uint8 CharacterIndex);
 	
 protected:
 	virtual void BeginPlay() override;
@@ -113,6 +117,9 @@ protected:
 
 	// 실제 플레이 중 초기화 여부
 	bool bCharacterPhysicsInitialized = false;
+
+	UPROPERTY(Transient)
+	ECh4CharacterType CurrentCharacterType = ECh4CharacterType::Invalid;
 
 	void InitializeCharacterPhysics();
 

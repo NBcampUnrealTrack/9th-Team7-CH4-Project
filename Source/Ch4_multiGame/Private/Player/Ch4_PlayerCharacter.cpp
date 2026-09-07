@@ -47,8 +47,11 @@ void ACh4_PlayerCharacter::BeginPlay()
 	AddPlayerInputMappingContext();
 	ApplyCharacterTypeFromPlayerState();
 
-	// PlayerState가 아직 없으면 현재 BP의 기본 설정으로 초기화한다.
-	InitializeCharacterPhysics();
+	// PlayerState가 아직 없으면 현재 BP의 기본 설정으로 1회만 초기화한다.
+	if (!bCharacterPhysicsInitialized)
+	{
+		InitializeCharacterPhysics();
+	}
 }
 
 void ACh4_PlayerCharacter::PossessedBy(AController* NewController)
@@ -111,6 +114,12 @@ void ACh4_PlayerCharacter::ApplyCharacterType(const ECh4CharacterType CharacterT
 		return;
 	}
 
+	if (CurrentCharacterType == CharacterType && bCharacterPhysicsInitialized)
+	{
+		return;
+	}
+	CurrentCharacterType = CharacterType;
+
 	const UCh4_multiGameGameInstance* GameInstance =
 		GetWorld()->GetGameInstance<UCh4_multiGameGameInstance>();
 	if (!GameInstance)
@@ -131,6 +140,19 @@ void ACh4_PlayerCharacter::ApplyCharacterType(const ECh4CharacterType CharacterT
 		return;
 	}
 
+	// 자식 컴포넌트(모자 등)가 붙어있는 상태에서 피직스 에셋 교체 시 Welded Body 크래시 방지
+	TArray<USceneComponent*> AttachedChildren;
+	GetMesh()->GetChildrenComponents(true, AttachedChildren);
+	for (USceneComponent* Child : AttachedChildren)
+	{
+		if (UPrimitiveComponent* Prim = Cast<UPrimitiveComponent>(Child))
+		{
+			Prim->SetSimulatePhysics(false);
+			Prim->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+	}
+
+	GetMesh()->SetSimulatePhysics(false);
 	GetMesh()->SetSkeletalMeshAsset(AppearanceMesh->GetSkeletalMeshAsset());
 	GetMesh()->SetAnimInstanceClass(AppearanceMesh->GetAnimClass());
 	GetMesh()->SetRelativeTransform(AppearanceMesh->GetRelativeTransform());
@@ -165,17 +187,43 @@ void ACh4_PlayerCharacter::ApplyCharacterType(const ECh4CharacterType CharacterT
 
 	InitializeCharacterPhysics();
 
+	// E_AnimalType enum order: Dog=0, Otter=1, Gorilla=2, Cat=3
+	uint8 MappedAnimalIndex = 3; // Default Cat
+	switch (CharacterType)
+	{
+	case ECh4CharacterType::Dog:     MappedAnimalIndex = 0; break;
+	case ECh4CharacterType::Otter:   MappedAnimalIndex = 1; break;
+	case ECh4CharacterType::Gorilla: MappedAnimalIndex = 2; break;
+	case ECh4CharacterType::Cat:     MappedAnimalIndex = 3; break;
+	default: break;
+	}
+
 	// 블루프린트 래그돌 초기화용 이벤트 발생
 	OnCharacterTypeApplied(CharacterType);
+	OnCharacterTypeChanged(MappedAnimalIndex);
 }
 
 void ACh4_PlayerCharacter::InitializeCharacterPhysics()
 {
+	USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!MeshComp || !MeshComp->GetSkeletalMeshAsset())
+	{
+		return;
+	}
+
+	UPhysicsAsset* PhysAsset = MeshComp->GetPhysicsAsset();
+	if (!PhysAsset)
+	{
+		return;
+	}
+
 	if (UPhysicalAnimationComponent* PhysAnimComp = FindComponentByClass<UPhysicalAnimationComponent>())
 	{
-		if (USkeletalMeshComponent* MeshComp = GetMesh())
+		PhysAnimComp->SetSkeletalMeshComponent(MeshComp);
+
+		// 피직스 에셋 내에 해당 본이 존재하는지 검증 후 안전하게 적용
+		if (PhysAsset->FindBodyIndex(RagdollRootBone) != INDEX_NONE)
 		{
-			PhysAnimComp->SetSkeletalMeshComponent(MeshComp);
 			PhysAnimComp->ApplyPhysicalAnimationProfileBelow(RagdollRootBone, RagdollProfileName, bRagdollIncludeSelf);
 			MeshComp->SetAllBodiesBelowSimulatePhysics(RagdollRootBone, true, bRagdollIncludeSelf);
 			PhysAnimComp->SetStrengthMultiplyer(RagdollStrengthMultiplier);
