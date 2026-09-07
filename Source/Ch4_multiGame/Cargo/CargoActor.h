@@ -46,7 +46,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="Cargo|Score")
 	int32 GetDeliveryScore() const;
 
-	virtual UPrimitiveComponent* GetGrabbableComponent() override { return CargoMesh; }
+	virtual UPrimitiveComponent* GetGrabbableComponent() override;
 
 	/** Server-only runtime count. It is intentionally not replicated or stored in CargoData. */
 	UFUNCTION(BlueprintPure, Category="Cargo|Ground Impact")

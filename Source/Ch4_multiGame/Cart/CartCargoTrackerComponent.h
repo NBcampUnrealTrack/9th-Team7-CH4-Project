@@ -34,6 +34,10 @@ public:
 	UFUNCTION(BlueprintPure, BlueprintAuthorityOnly, Category="Cart|Cargo")
 	FCh4DeliveryScoreSummary BuildDeliveryScoreSummary() const;
 
+	/** One-shot server snapshot of valid, active members. Never searches the world. */
+	UFUNCTION(BlueprintPure, BlueprintAuthorityOnly, Category="Cart|Cargo")
+	TArray<ACargoActor*> GetTrackedCargoSnapshot() const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

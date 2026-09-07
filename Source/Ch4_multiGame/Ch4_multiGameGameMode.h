@@ -31,6 +31,30 @@ public:
 	virtual bool RequestGameStart() override;
 	virtual bool NotifyCargoLost(int32 LostCargoCount = 1) override;
 	virtual bool NotifyGoalReached(AActor* ReachingActor) override;
+	virtual bool IsCargoPartOfMatch(const AActor* CargoActor) const override;
+
+	/** Production initialization uses exactly the Cart's one-shot preparation snapshot. */
+	bool InitializePreparationCargo(const TArray<class ACargoActor*>& CargoSnapshot);
+	bool FinishPreparationTransition();
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow|Lobby Return")
+	bool ScheduleReturnToLobby();
+
+	/** Reusable authoritative route for a future result button. Only Cleared is supported currently. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow|Lobby Return")
+	bool ReturnToLobby();
+
+	UFUNCTION(BlueprintPure, Category="Game Flow|Lobby Return")
+	bool IsReturnToLobbyScheduled() const { return bReturnToLobbyScheduled; }
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Lobby Return")
+	TSoftObjectPtr<UWorld> LobbyMap;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Lobby Return")
+	bool bAutoReturnToLobbyOnClear = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Lobby Return", meta=(ClampMin="0.0", Units="s"))
+	float ReturnToLobbyDelaySeconds = 10.0f;
 
 	/** Returns the active rule policy. Runtime cargo values live in GameState instead. */
 	UFUNCTION(BlueprintPure, Category="Game Flow|Rules")
@@ -42,9 +66,11 @@ public:
 	void SetDeliveryScoreSummaryForTesting(
 		AActor* TargetActor,
 		const FCh4DeliveryScoreSummary& NewDeliveryScoreSummary);
+	TFunction<bool(const FString&)> LobbyTravelForTesting;
 #endif
 
 protected:
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	/** Authoritative success/failure policy, separate from runtime state and debug settings. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Rules")
 	FCh4GameRuleConfig GameRuleConfig;
@@ -72,9 +98,10 @@ private:
 	bool CanStartGame(const ACh4_multiGameGameState& GameFlowState) const;
 	bool CanProcessCargoChange(const ACh4_multiGameGameState& GameFlowState) const;
 	bool ShouldFailGame(const ACh4_multiGameGameState& GameFlowState) const;
-	bool CanCompleteGame(const ACh4_multiGameGameState& GameFlowState) const;
+	bool CanCompleteGame(const ACh4_multiGameGameState& GameFlowState, int32 DeliveredCargoCount) const;
 	FCh4DeliveryScoreSummary GetValidatedDeliveryScoreSummary(AActor* ReachingActor) const;
-	bool EvaluateGameOutcome(EGameRuleEvaluationEvent EvaluationEvent, int32 FinalCargoScore = 0);
+	bool EvaluateGameOutcome(EGameRuleEvaluationEvent EvaluationEvent, int32 FinalCargoScore = 0,
+		int32 DeliveredCargoCount = INDEX_NONE);
 	bool IsGamePhaseTransitionAllowed(ECh4GamePhase CurrentPhase, ECh4GamePhase NewPhase) const;
 	bool IsGameEndReasonValidForPhase(ECh4GamePhase GamePhase, ECh4GameEndReason EndReason) const;
 	bool TryTransitionGamePhase(
@@ -84,6 +111,14 @@ private:
 	bool ApplyRemainingCargoCount(int32 NewRemainingCargo);
 	bool EndGameAsClear(ECh4GameEndReason EndReason, int32 FinalCargoScore);
 	void EndGameAsGameOver(ECh4GameEndReason EndReason);
+	bool GetLobbyTravelURL(FString& OutURL) const;
+	void OnReturnToLobbyTimer();
+	FTimerHandle ReturnToLobbyTimer;
+	bool bReturnToLobbyScheduled = false;
+	bool bLobbyTravelStarted = false;
+	bool bUsesPreparationCargoRoster = false;
+	bool bPreparationTransitionPending = false;
+	TSet<TWeakObjectPtr<AActor>> PreparationCargoRoster;
 
 #if WITH_DEV_AUTOMATION_TESTS
 	TWeakObjectPtr<AActor> DeliveryScoreTargetOverrideForTesting;
