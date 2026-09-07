@@ -41,7 +41,7 @@ struct CH4_MULTIGAME_API FCh4GameRuleConfig
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Failure")
 	bool bFailOnAnyCargoLost = false;
 
-	/** Absolute cargo count required when the goal is reached. */
+	/** Delivered count for score providers; remaining count for providerless legacy/debug targets. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Success", meta=(ClampMin="0", UIMin="0"))
 	int32 MinimumCargoCountToClear = 1;
 

@@ -3,6 +3,12 @@
 #include "Ch4_multiGameGameMode.h"
 
 #include "Ch4_multiGame.h"
+#include "Cargo/CargoActor.h"
+#include "Cart/CartCargoTrackerComponent.h"
+#include "Engine/World.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
+#include "TimerManager.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
 #include "GameFlow/GameFlowTargetInterface.h"
 #include "Player/Ch4_multiGamePlayerState.h"
@@ -11,6 +17,7 @@ ACh4_multiGameGameMode::ACh4_multiGameGameMode()
 {
 	GameStateClass = ACh4_multiGameGameState::StaticClass();
 	PlayerStateClass = ACh4_multiGamePlayerState::StaticClass();
+	LobbyMap = TSoftObjectPtr<UWorld>(FSoftObjectPath(TEXT("/Game/Lobby/L_Lobby.L_Lobby")));
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -76,6 +83,11 @@ bool ACh4_multiGameGameMode::RequestCargoInitialization(const int32 InitialCargo
 
 bool ACh4_multiGameGameMode::RequestGameStart()
 {
+	if (bPreparationTransitionPending)
+	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Game start rejected while the preparation load is moving"));
+		return false;
+	}
 	if (!HasAuthority())
 	{
 		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Game start rejected without server authority"));
@@ -278,7 +290,7 @@ bool ACh4_multiGameGameMode::NotifyGoalReached(AActor* ReachingActor)
 	if (DeliveryScoreSummary.bHasScoreData
 		&& DeliveryScoreSummary.DeliveredCargoCount != GameFlowState->GetRemainingCargoCount())
 	{
-		UE_LOG(LogCh4_multiGame, Warning,
+		UE_LOG(LogCh4_multiGame, Verbose,
 			TEXT("[GameFlow] Delivered Cargo count differs from GameState Remaining Cargo: Delivered=%d, Remaining=%d"),
 			DeliveryScoreSummary.DeliveredCargoCount,
 			GameFlowState->GetRemainingCargoCount());
@@ -286,7 +298,8 @@ bool ACh4_multiGameGameMode::NotifyGoalReached(AActor* ReachingActor)
 
 	return EvaluateGameOutcome(
 		EGameRuleEvaluationEvent::GoalReached,
-		DeliveryScoreSummary.DeliveredCargoScore);
+		DeliveryScoreSummary.DeliveredCargoScore,
+		DeliveryScoreSummary.bHasScoreData ? DeliveryScoreSummary.DeliveredCargoCount : INDEX_NONE);
 }
 
 FCh4DeliveryScoreSummary ACh4_multiGameGameMode::GetValidatedDeliveryScoreSummary(AActor* ReachingActor) const
@@ -303,6 +316,16 @@ FCh4DeliveryScoreSummary ACh4_multiGameGameMode::GetValidatedDeliveryScoreSummar
 		&& ReachingActor->GetClass()->ImplementsInterface(UGameFlowTargetInterface::StaticClass()))
 	{
 		RawSummary = IGameFlowTargetInterface::Execute_GetDeliveryScoreSummary(ReachingActor);
+	}
+
+	// An actual Cart with a native tracker must never silently use the providerless debug clear rule.
+	// This only queries the reaching actor's component, never all Cargo in the world.
+	if (!RawSummary.bHasScoreData && IsValid(ReachingActor))
+	{
+		if (const UCartCargoTrackerComponent* Tracker = ReachingActor->FindComponentByClass<UCartCargoTrackerComponent>())
+		{
+			RawSummary = Tracker->BuildDeliveryScoreSummary();
+		}
 	}
 
 	if (!RawSummary.bHasScoreData)
@@ -382,7 +405,8 @@ bool ACh4_multiGameGameMode::ShouldFailGame(const ACh4_multiGameGameState& GameF
 	return bCargoEmptyFailure || bAnyCargoLostFailure;
 }
 
-bool ACh4_multiGameGameMode::CanCompleteGame(const ACh4_multiGameGameState& GameFlowState) const
+bool ACh4_multiGameGameMode::CanCompleteGame(
+	const ACh4_multiGameGameState& GameFlowState, const int32 DeliveredCargoCount) const
 {
 	if (GameFlowState.GetCurrentGamePhase() != ECh4GamePhase::Playing)
 	{
@@ -394,13 +418,16 @@ bool ACh4_multiGameGameMode::CanCompleteGame(const ACh4_multiGameGameState& Game
 		GameRuleConfig.MinimumCargoSurvivalRateToClear,
 		0.0f,
 		1.0f);
-	return GameFlowState.GetRemainingCargoCount() >= RequiredCargoCount
+	const int32 CargoCountAtGoal = DeliveredCargoCount == INDEX_NONE
+		? GameFlowState.GetRemainingCargoCount() : DeliveredCargoCount;
+	return CargoCountAtGoal >= RequiredCargoCount
 		&& GameFlowState.GetCargoSurvivalRate() + UE_KINDA_SMALL_NUMBER >= RequiredSurvivalRate;
 }
 
 bool ACh4_multiGameGameMode::EvaluateGameOutcome(
 	const EGameRuleEvaluationEvent EvaluationEvent,
-	const int32 FinalCargoScore)
+	const int32 FinalCargoScore,
+	const int32 DeliveredCargoCount)
 {
 	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
 	if (!GameFlowState || GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Playing)
@@ -423,11 +450,11 @@ bool ACh4_multiGameGameMode::EvaluateGameOutcome(
 		return false;
 	}
 
-	if (!CanCompleteGame(*GameFlowState))
+	if (!CanCompleteGame(*GameFlowState, DeliveredCargoCount))
 	{
 		UE_LOG(LogCh4_multiGame, Log,
-			TEXT("[GameFlow] Goal reached but clear requirements were not met: Cargo=%d/%d, Survival=%.3f/%.3f"),
-			GameFlowState->GetRemainingCargoCount(),
+			TEXT("[GameFlow] Goal reached but clear requirements were not met: CargoAtGoal=%d/%d, Survival=%.3f/%.3f"),
+			DeliveredCargoCount == INDEX_NONE ? GameFlowState->GetRemainingCargoCount() : DeliveredCargoCount,
 			FMath::Max(GameRuleConfig.MinimumCargoCountToClear, 0),
 			GameFlowState->GetCargoSurvivalRate(),
 			FMath::Clamp(GameRuleConfig.MinimumCargoSurvivalRateToClear, 0.0f, 1.0f));
@@ -521,6 +548,10 @@ bool ACh4_multiGameGameMode::EndGameAsClear(
 		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Final Cargo Score: %d"),
 			GameFlowState->GetFinalCargoScore());
 	}
+	if (bAutoReturnToLobbyOnClear)
+	{
+		ScheduleReturnToLobby();
+	}
 	return true;
 }
 
@@ -530,4 +561,149 @@ void ACh4_multiGameGameMode::EndGameAsGameOver(const ECh4GameEndReason EndReason
 	{
 		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] GAME OVER"));
 	}
+}
+
+bool ACh4_multiGameGameMode::InitializePreparationCargo(const TArray<ACargoActor*>& CargoSnapshot)
+{
+	if (!HasAuthority() || bUsesPreparationCargoRoster || CargoSnapshot.IsEmpty())
+	{
+		return false;
+	}
+	TSet<TWeakObjectPtr<AActor>> NewRoster;
+	for (ACargoActor* Cargo : CargoSnapshot)
+	{
+		if (!IsValid(Cargo) || Cargo->IsActorBeingDestroyed() || Cargo->IsLost() || Cargo->GetWorld() != GetWorld())
+		{
+			return false;
+		}
+		NewRoster.Add(Cargo);
+	}
+	if (NewRoster.Num() != CargoSnapshot.Num())
+	{
+		return false;
+	}
+	// Install the roster before initialization broadcasts; roll back only if initialization is rejected.
+	PreparationCargoRoster = MoveTemp(NewRoster);
+	bUsesPreparationCargoRoster = true;
+	bPreparationTransitionPending = true;
+	if (!RequestCargoInitialization(PreparationCargoRoster.Num()))
+	{
+		PreparationCargoRoster.Reset();
+		bUsesPreparationCargoRoster = false;
+		bPreparationTransitionPending = false;
+		return false;
+	}
+	return true;
+}
+
+bool ACh4_multiGameGameMode::IsCargoPartOfMatch(const AActor* CargoActor) const
+{
+	return !bUsesPreparationCargoRoster
+		|| PreparationCargoRoster.Contains(TWeakObjectPtr<AActor>(const_cast<AActor*>(CargoActor)));
+}
+
+bool ACh4_multiGameGameMode::FinishPreparationTransition()
+{
+	if (!HasAuthority() || !bPreparationTransitionPending)
+	{
+		return false;
+	}
+	bPreparationTransitionPending = false;
+	return RequestGameStart();
+}
+
+bool ACh4_multiGameGameMode::GetLobbyTravelURL(FString& OutURL) const
+{
+	const FString Package = LobbyMap.ToSoftObjectPath().GetLongPackageName();
+	FString Filename;
+	if (!FPackageName::IsValidLongPackageName(Package)
+		|| !FPackageName::DoesPackageExist(Package, &Filename)
+		|| !FPaths::GetExtension(Filename, true).Equals(FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase))
+	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Lobby return rejected: configure a valid Lobby World asset"));
+		return false;
+	}
+	OutURL = Package;
+	if (GetNetMode() == NM_ListenServer)
+	{
+		OutURL += TEXT("?listen");
+	}
+	return true;
+}
+
+bool ACh4_multiGameGameMode::ScheduleReturnToLobby()
+{
+	if (!HasAuthority() || !GetWorld() || bReturnToLobbyScheduled || bLobbyTravelStarted)
+	{
+		return false;
+	}
+	const ACh4_multiGameGameState* State = GetGameFlowGameState();
+	FString URL;
+	if (!State || State->GetCurrentGamePhase() != ECh4GamePhase::Cleared || !GetLobbyTravelURL(URL))
+	{
+		return false;
+	}
+	if (!FMath::IsFinite(ReturnToLobbyDelaySeconds) || ReturnToLobbyDelaySeconds < 0.0f)
+	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Lobby return rejected: invalid return delay"));
+		return false;
+	}
+	bReturnToLobbyScheduled = true;
+	if (ReturnToLobbyDelaySeconds > 0.0f)
+	{
+		GetWorldTimerManager().SetTimer(ReturnToLobbyTimer, this,
+			&ACh4_multiGameGameMode::OnReturnToLobbyTimer, ReturnToLobbyDelaySeconds, false);
+	}
+	else
+	{
+		ReturnToLobbyTimer = GetWorldTimerManager().SetTimerForNextTick(this, &ACh4_multiGameGameMode::OnReturnToLobbyTimer);
+	}
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Lobby return scheduled in %.2f seconds"), ReturnToLobbyDelaySeconds);
+	return true;
+}
+
+void ACh4_multiGameGameMode::OnReturnToLobbyTimer()
+{
+	ReturnToLobby();
+}
+
+bool ACh4_multiGameGameMode::ReturnToLobby()
+{
+	if (!HasAuthority() || !GetWorld() || bLobbyTravelStarted)
+	{
+		return false;
+	}
+	const ACh4_multiGameGameState* State = GetGameFlowGameState();
+	if (!State || State->GetCurrentGamePhase() != ECh4GamePhase::Cleared)
+	{
+		return false;
+	}
+	GetWorldTimerManager().ClearTimer(ReturnToLobbyTimer);
+	bReturnToLobbyScheduled = false;
+	FString URL;
+	if (!GetLobbyTravelURL(URL))
+	{
+		return false;
+	}
+	bLobbyTravelStarted = true;
+#if WITH_DEV_AUTOMATION_TESTS
+	const bool bAccepted = LobbyTravelForTesting ? LobbyTravelForTesting(URL) : GetWorld()->ServerTravel(URL, true);
+#else
+	const bool bAccepted = GetWorld()->ServerTravel(URL, true);
+#endif
+	if (!bAccepted)
+	{
+		bLobbyTravelStarted = false;
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] ServerTravel to Lobby was rejected; manual retry is allowed"));
+		return false;
+	}
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] ServerTravel to Lobby: %s"), *URL);
+	return true;
+}
+
+void ACh4_multiGameGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	GetWorldTimerManager().ClearTimer(ReturnToLobbyTimer);
+	bReturnToLobbyScheduled = false;
+	Super::EndPlay(EndPlayReason);
 }

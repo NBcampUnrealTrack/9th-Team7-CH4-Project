@@ -10,13 +10,13 @@ UFinalDeliveryZoneComponent::UFinalDeliveryZoneComponent(const FObjectInitialize
 	: Super(ObjectInitializer)
 {
 	PrimaryComponentTick.bCanEverTick = false;
+	InitBoxExtent(FVector(300.0f, 300.0f, 150.0f));
 }
 
 void UFinalDeliveryZoneComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	//SetBoxExtent(FVector(300.0f, 300.0f, 150.0f));
 	SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	SetCollisionObjectType(ECC_WorldDynamic);
 	SetCollisionResponseToAllChannels(ECR_Ignore);
@@ -24,15 +24,11 @@ void UFinalDeliveryZoneComponent::BeginPlay()
 	SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Overlap);
 	SetGenerateOverlapEvents(true);
 
-	OnComponentBeginOverlap.AddUniqueDynamic(
-		this,
-		&UFinalDeliveryZoneComponent::OnTriggerBeginOverlap
-	);
-
-	if (!GetOwner() || !GetOwner()->HasAuthority())
+	if (!HasServerAuthority())
 	{
 		return;
 	}
+	OnComponentBeginOverlap.AddUniqueDynamic(this, &UFinalDeliveryZoneComponent::OnTriggerBeginOverlap);
 
 	if (ACh4_multiGameGameState* GameFlowState =
 		GetWorld()->GetGameState<ACh4_multiGameGameState>())
@@ -54,7 +50,7 @@ void UFinalDeliveryZoneComponent::BeginPlay()
 
 void UFinalDeliveryZoneComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (GetOwner() && GetOwner()->HasAuthority())
+	if (HasServerAuthority())
 	{
 		if (ACh4_multiGameGameState* GameFlowState =
 			GetWorld()->GetGameState<ACh4_multiGameGameState>())
@@ -71,6 +67,8 @@ void UFinalDeliveryZoneComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
 		&UFinalDeliveryZoneComponent::OnTriggerBeginOverlap
 	);
 
+	GetWorld()->GetTimerManager().ClearAllTimersForObject(this);
+	NotifiedDeliveryTargets.Reset();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -88,9 +86,7 @@ void UFinalDeliveryZoneComponent::OnTriggerBeginOverlap(
 void UFinalDeliveryZoneComponent::OnGamePhaseChanged(
 	const ECh4GamePhase NewGamePhase)
 {
-	if (!GetOwner() ||
-		!GetOwner()->HasAuthority() ||
-		NewGamePhase != ECh4GamePhase::Playing)
+	if (!HasServerAuthority() || NewGamePhase != ECh4GamePhase::Playing)
 	{
 		return;
 	}
@@ -105,9 +101,10 @@ void UFinalDeliveryZoneComponent::OnGamePhaseChanged(
 
 void UFinalDeliveryZoneComponent::EvaluateDeliveryTarget(AActor* OtherActor)
 {
-	if (!GetOwner() ||
-		!GetOwner()->HasAuthority() ||
+	if (!HasServerAuthority() ||
 		!IsValid(OtherActor) ||
+		OtherActor->IsActorBeingDestroyed() ||
+		OtherActor->GetWorld() != GetWorld() ||
 		OtherActor == GetOwner() ||
 		!OtherActor->GetClass()->ImplementsInterface(
 			UGameFlowTargetInterface::StaticClass()))
@@ -134,7 +131,11 @@ void UFinalDeliveryZoneComponent::EvaluateDeliveryTarget(AActor* OtherActor)
 		Cast<IGameFlowRuleInterface>(GetWorld()->GetAuthGameMode()))
 	{
 		NotifiedDeliveryTargets.Add(TargetKey);
-		GameRule->NotifyGoalReached(OtherActor);
+		if (!GameRule->NotifyGoalReached(OtherActor))
+		{
+			// Permit another entry after a rejected delivery; keep the reentrancy guard above.
+			NotifiedDeliveryTargets.Remove(TargetKey);
+		}
 	}
 	else
 	{
@@ -148,7 +149,7 @@ void UFinalDeliveryZoneComponent::EvaluateDeliveryTarget(AActor* OtherActor)
 
 void UFinalDeliveryZoneComponent::EvaluateOverlappingTargets()
 {
-	if (!GetOwner() || !GetOwner()->HasAuthority())
+	if (!HasServerAuthority())
 	{
 		return;
 	}
@@ -172,7 +173,12 @@ void UFinalDeliveryZoneComponent::EvaluateOverlappingTargets()
 				UGameFlowTargetInterface::StaticClass()))
 		{
 			EvaluateDeliveryTarget(OverlappingActor);
-			break;
 		}
 	}
+}
+
+bool UFinalDeliveryZoneComponent::HasServerAuthority() const
+{
+	// A nonreplicated, level-placed wrapper can have ROLE_Authority locally on a client.
+	return IsValid(GetOwner()) && GetOwner()->HasAuthority() && GetNetMode() != NM_Client;
 }
