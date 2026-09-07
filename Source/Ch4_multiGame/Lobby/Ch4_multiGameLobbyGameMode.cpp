@@ -91,7 +91,7 @@ void ACh4_multiGameLobbyGameMode::InitGame(
 	Super::InitGame(MapName, Options, ErrorMessage);
 
 	MaxLobbyPlayers = FMath::Max(MaxLobbyPlayers, 2);
-	MinPlayersToStart = FMath::Clamp(MinPlayersToStart, 2, MaxLobbyPlayers);
+	MinPlayersToStart = ClampMinimumPlayersToStart(MinPlayersToStart, MaxLobbyPlayers);
 	if (GameSession)
 	{
 		// AGameSession::ApproveLogin uses this value before Login/PostLogin.
@@ -372,6 +372,12 @@ void ACh4_multiGameLobbyGameMode::CheckAllPlayersReady()
 		UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] All Players Ready"));
 		StartGameTravel();
 	}
+}
+
+int32 ACh4_multiGameLobbyGameMode::ClampMinimumPlayersToStart(
+	const int32 MinimumPlayers, const int32 LobbyCapacity)
+{
+	return FMath::Clamp(MinimumPlayers, 1, FMath::Max(LobbyCapacity, 1));
 }
 
 bool ACh4_multiGameLobbyGameMode::CanStartLobbyTravel(

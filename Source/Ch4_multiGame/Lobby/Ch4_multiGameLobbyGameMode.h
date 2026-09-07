@@ -38,9 +38,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby", meta=(ClampMin="2", UIMin="2"))
 	int32 MaxLobbyPlayers = 4;
 
-	/** Prevents a listen-server host from starting alone before remote players can join. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Ready", meta=(ClampMin="2", UIMin="2"))
-	int32 MinPlayersToStart = 2;
+	/** Allows solo Ready by default; every active player must still be Ready. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Ready", meta=(ClampMin="1", UIMin="1"))
+	int32 MinPlayersToStart = 1;
 
 	/** Server-side random pool of gameplay maps configured through the Unreal asset picker. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Travel")
@@ -63,6 +63,7 @@ private:
 	void UpdateLobbyPlayerCount(int32 NewPlayerCount);
 	void CheckAllPlayersReady();
 	void GetReadyPlayerCounts(int32& OutReadyPlayers, int32& OutTotalPlayers) const;
+	static int32 ClampMinimumPlayersToStart(int32 MinimumPlayers, int32 LobbyCapacity);
 	static bool CanStartLobbyTravel(
 		int32 ReadyPlayers,
 		int32 TotalPlayers,
