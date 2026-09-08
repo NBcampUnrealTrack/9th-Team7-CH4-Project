@@ -8,6 +8,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "InputActionValue.h"
+#include "Cart/CartBase.h"
 #include "Components/BoxComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
@@ -15,7 +16,6 @@
 #include "Player/Ch4_multiGamePlayerState.h"
 #include "Player/EmotionDataAsset.h"
 #include "Player/GrabbableInterface.h"
-#include "Engine/OverlapResult.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "PhysicsEngine/PhysicsAsset.h"
@@ -47,6 +47,8 @@ ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 	GrabBoxComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
 	GrabBoxComponent->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Overlap);
 	GrabBoxComponent->SetGenerateOverlapEvents(false);	
+	
+	GetCharacterMovement()->bEnablePhysicsInteraction = false;
 }
 
 void ACh4_PlayerCharacter::BeginPlay()
@@ -247,6 +249,7 @@ void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProp
 	
 	DOREPLIFETIME(ThisClass, bIsStunned);
 	DOREPLIFETIME(ThisClass, GrabbedComponent);
+	DOREPLIFETIME(ACh4_PlayerCharacter, GrabbedCart);
 }
 
 void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -263,6 +266,7 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		if (Emote3Action) EIC->BindAction(Emote3Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote3);
 		if (Emote4Action) EIC->BindAction(Emote4Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote4);
 		if (GrabAction) EIC->BindAction(GrabAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionGrab);
+		if (CartGrabAction) EIC->BindAction(CartGrabAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionCartGrab);
 	}
 }
 
@@ -298,7 +302,13 @@ void ACh4_PlayerCharacter::InputActionMove(const struct FInputActionValue& Value
 	{
 		return;
 	}
-
+	
+	if (GrabbedCart)
+	{
+		GrabbedCart->ServerSetMoveInput(this, MoveVec);
+		return;   // 캐릭터는 걷지 않음
+	}
+	
 	if (MoveVec.IsNearlyZero() == false)
 	{
 		InterruptEmotionMontage();
@@ -393,6 +403,33 @@ void ACh4_PlayerCharacter::InputActionGrab(const FInputActionValue& Value)
 	else
 	{
 		ServerRPC_PlayGrabMontage();
+	}
+}
+
+void ACh4_PlayerCharacter::InputActionCartGrab(const struct FInputActionValue& Value)
+{
+	if (GrabbedCart)
+	{
+		GrabbedCart->ServerRequestRelease(this);
+		GrabbedCart = nullptr;
+	}
+	else
+	{
+		FHitResult Hit;
+		const FVector Start = GetActorLocation();
+		const FVector End = Start + GetActorForwardVector() * 200.0f;
+
+		FCollisionQueryParams Params;
+		Params.AddIgnoredActor(this);
+		
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+		{
+			if (ACartBase* Cart = Cast<ACartBase>(Hit.GetActor()))
+			{
+				Cart->ServerRequestGrab(this);
+				GrabbedCart = Cart;
+			}
+		}
 	}
 }
 
