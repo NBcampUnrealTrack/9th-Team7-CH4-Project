@@ -70,7 +70,7 @@ public:
 	void QuitGame();
 
 protected:
-	/** Lobby animals own their movement mappings; only reuse menu/voice keys there. */
+	/** Animal pawns own IMC_Player; false keeps only the existing menu/voice keys from IMC_Default. */
 	bool bUseTemplateInputMappings = true;
 	
 	// [추가] 에디터에서 설정할 프로퍼티와 위젯 인스턴스 변수
