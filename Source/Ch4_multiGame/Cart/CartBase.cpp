@@ -15,21 +15,20 @@ ACartBase::ACartBase()
     // ── 카트 본체 ──
     CartMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CartMesh"));
     SetRootComponent(CartMesh);
-
-    CartMesh->SetSimulatePhysics(true);
-    // Store defaults without updating physics before GEngine exists during native CDO construction.
-    CartMesh->BodyInstance.SetMassOverride(220.0f, true);
+    
     CartMesh->SetLinearDamping(0.5f);
     CartMesh->SetAngularDamping(3.0f);
-    CartMesh->BodyInstance.COMNudge = FVector(-20.0f, 0.0f, 0.0f);
 
     // 기획: 카트는 절대 전복되지 않는다. Yaw만 남기고 Roll/Pitch를 잠근다.
-    CartMesh->BodyInstance.bLockXRotation = true;
-    CartMesh->BodyInstance.bLockYRotation = true;
+    // // 축 잠금은 물리 바디 초기화가 깨져서 사용하지 않음. ApplyUprightTorque로 대체.
+   // CartMesh->BodyInstance.bLockXRotation = true;
+    //CartMesh->BodyInstance.bLockYRotation = true;
 
     CartMesh->SetCollisionObjectType(ECC_PhysicsBody);
     CartMesh->SetCollisionResponseToAllChannels(ECR_Block);
 
+    CartMesh->SetSimulatePhysics(true);
+    
     // ── 바퀴 (서스펜션 레이 시작점) ──
     const FVector WheelOffsets[] = {
         FVector(-106.0f, -67.0f, -25.0f),   // FL
@@ -88,20 +87,32 @@ void ACartBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetim
 void ACartBase::BeginPlay()
 {
     Super::BeginPlay();
+
+    if (!CartMesh)
+    {
+        return;
+    }
+
+    if (HasAuthority())
+    {
+        CartMesh->SetSimulatePhysics(true);
+        CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
+        CartMesh->SetCenterOfMass(FVector(-20.0f, 0.0f, 0.0f));
+    }
+    else
+    {
+        // 클라이언트는 서버가 복제한 위치를 그대로 따른다.
+        CartMesh->SetSimulatePhysics(false);
+    }
 }
 
 void ACartBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    // 물리는 서버에서만. 클라는 복제된 위치를 받는다.
-    if (!HasAuthority())
-    {
-        return;
-    }
-
+    
     ApplySuspension(DeltaTime);
     ApplyGrip(DeltaTime);
+    ApplyUprightTorque(DeltaTime);
     ApplyPlayerForces(DeltaTime);
 }
 
@@ -131,6 +142,10 @@ void ACartBase::ApplySuspension(float DeltaTime)
         FHitResult Hit;
         const bool bHit = World->LineTraceSingleByChannel(
             Hit, Start, End, ECC_Visibility, Params);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Wheel %s | Hit:%d | Dist:%.1f"),
+    *Wheel->GetName(), bHit ? 1 : 0, bHit ? Hit.Distance : -1.0f);
+        DrawDebugLine(World, Start, End, bHit ? FColor::Green : FColor::Red, false, -1, 0, 2);
 
         if (!bHit)
         {
@@ -180,6 +195,20 @@ void ACartBase::ApplyGrip(float DeltaTime)
     }
 }
 
+void ACartBase::ApplyUprightTorque(float DeltaTime)
+{
+    if (!CartMesh)
+    {
+        return;
+    }
+
+    // 카트의 위쪽과 진짜 위쪽이 벌어진 만큼 되돌리는 토크를 준다.
+    const FVector CartUp = CartMesh->GetUpVector();
+    const FVector Torque = FVector::CrossProduct(CartUp, FVector::UpVector) * UprightTorque;
+
+    CartMesh->AddTorqueInRadians(Torque);
+}
+
 void ACartBase::ApplyPlayerForces(float DeltaTime)
 {
     if (!CartMesh)
@@ -203,14 +232,15 @@ void ACartBase::ApplyPlayerForces(float DeltaTime)
             continue;   // 잡고 있지 않으면 힘을 줄 수 없다.
         }
 
-        // 카트 기준 방향. 누가 어디에 서 있든 같은 입력은 같은 결과를 낸다.
-        const FVector Forward = CartMesh->GetForwardVector();
-        const FVector Right = CartMesh->GetRightVector();
+        // 캐릭터가 보는 방향 기준. BP 버전과 동일하게.
+        const FVector Forward = Player->GetActorForwardVector();
+        const FVector Right = Player->GetActorRightVector();
 
         FVector Force = (Forward * Input.Y + Right * Input.X) * PushForce;
 
-        // 뒤로 미는 입력은 브레이크로 취급한다.
-        if (Input.Y < 0.0f)
+        // 손잡이 쪽(앵커 0, 1)에서 뒤로 당기면 브레이크로 동작한다.
+        const int32 AnchorIndex = AnchorOccupants.IndexOfByKey(Player);
+        if (Input.Y < 0.0f && AnchorIndex <= 1)
         {
             const FVector Velocity = CartMesh->GetPhysicsLinearVelocity();
             Force = -Velocity.GetSafeNormal() * BrakeForce;

@@ -69,6 +69,10 @@ protected:
 
     UPROPERTY(EditAnywhere, Category="Cart|Grab")
     float GrabDistance = 150.0f;
+    
+    // ── 자세 복원 ──
+    UPROPERTY(EditAnywhere, Category="Cart|Upright")
+    float UprightTorque = 3900.0f;
 
 private:
     /** 앵커 인덱스별 점유자. 클라이언트도 손 위치 맞추려면 알아야 하므로 복제. */
@@ -84,4 +88,6 @@ private:
 
     int32 FindClosestFreeAnchor(const ACh4_PlayerCharacter* Player) const;
     void ReleaseAnchorFor(const ACh4_PlayerCharacter* Player);
+    
+    void ApplyUprightTorque(float DeltaTime);
 };
