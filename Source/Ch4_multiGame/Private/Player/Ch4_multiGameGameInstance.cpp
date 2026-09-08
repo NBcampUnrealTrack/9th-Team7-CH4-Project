@@ -27,6 +27,7 @@ UCh4_multiGameGameInstance::UCh4_multiGameGameInstance()
 void UCh4_multiGameGameInstance::Init()
 {
 	Super::Init();
+	InitializeSteamSessions();
 
 	// Context-aware PreLoadMap runs before MoviePlayer's ordinary PreLoadMap playback hook.
 	FCoreUObjectDelegates::PreLoadMapWithContext.AddUObject(this, &ThisClass::HandlePreLoadMap);
@@ -39,6 +40,7 @@ void UCh4_multiGameGameInstance::Init()
 
 void UCh4_multiGameGameInstance::Shutdown()
 {
+	ShutdownSteamSessions();
 	FCoreUObjectDelegates::PreLoadMapWithContext.RemoveAll(this);
 	FCoreUObjectDelegates::PostLoadMapWithWorld.RemoveAll(this);
 	if (bLoadingScreenPrepared && IsMoviePlayerEnabled())

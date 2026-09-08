@@ -2,11 +2,11 @@
 
 #include "CoreMinimal.h"
 #include "MVVMViewModelBase.h"
-#include "OnlineSessionSettings.h"
 #include "Components/SlateWrapperTypes.h"
-#include "Interfaces/OnlineSessionInterface.h"
 #include "UI/MainMenu/Ch4MainMenuTypes.h"
 #include "Ch4MainMenuViewModel.generated.h"
+
+class UCh4_multiGameGameInstance;
 
 // 메인 메뉴 전체를 제어하는 ViewModel
 // 패널 전환, 방 만들기/찾기, 게임 종료 로직을 담당
@@ -16,6 +16,13 @@ class UCh4MainMenuViewModel : public UMVVMViewModelBase
 	GENERATED_BODY()
 	
 public:
+	virtual UWorld* GetWorld() const override;
+	virtual void BeginDestroy() override;
+
+	/** Optional explicit binding for widgets whose ViewModel outer has no world. */
+	UFUNCTION(BlueprintCallable, Category="Menu|Session")
+	void InitializeWithWorld(UWorld* World);
+
 	// FieldNotify 속성 - View Binding 연결 대상
 	// 현재 보여줄 패널 (Main / RoomSelection / RoomList)
 	UPROPERTY(FieldNotify, Setter, Getter, BlueprintReadOnly, Category = "Menu|State")
@@ -71,7 +78,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Menu|Session")
 	void HostGame();
 	
-	// [방 찾기] 버튼 -> LAN 세션 검색
+	// [방 찾기] 버튼 -> Steam Lobby 세션 검색
 	UFUNCTION(BlueprintCallable, Category = "Menu|Session")
 	void FindRooms();
 	
@@ -111,11 +118,8 @@ private:
 	ESlateVisibility GetRoomListVisibility() const { return CurrentPanel == EMenuPanel::RoomList ? ESlateVisibility::Visible : ESlateVisibility::Collapsed; }
 	bool GetbCanInteract() const { return !bIsLoading; }
 	
-	// 세션 비동기 콜백 함수들
-	void OnCreateSessionComplete(FName SessionName, bool bWasSuccessful);
-	void OnFindSessionsComplete(bool bWasSuccessful);
-	void OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);
-	
-	// 세션 검색 설정 보관용
-	TSharedPtr<FOnlineSessionSearch> SearchSettings;
+	UCh4_multiGameGameInstance* ResolveSteamGameInstance();
+	UFUNCTION()
+	void RefreshSteamState();
+	TWeakObjectPtr<UCh4_multiGameGameInstance> SessionGameInstance;
 };

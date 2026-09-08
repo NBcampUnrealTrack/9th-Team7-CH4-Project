@@ -13,8 +13,7 @@
 // [추가}
 #include "EnhancedInputComponent.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "OnlineSubsystem.h"
-#include "Interfaces/OnlineSessionInterface.h"
+#include "Player/Ch4_multiGameGameInstance.h"
 #include "Lobby/Ch4_multiGameLobbyPlayerState.h"
 #include "UI/PauseMenu/Ch4PauseMenuViewModel.h"
 #include "UI/HUD/Ch4HUDViewModel.h"
@@ -117,6 +116,16 @@ void ACh4_multiGamePlayerController::JoinHamachi(FString HostIPv4)
 {
 	if (!IsLocalPlayerController())
 	{
+		return;
+	}
+
+	const UCh4_multiGameGameInstance* SessionGI = GetGameInstance<UCh4_multiGameGameInstance>();
+	if (!SessionGI || !SessionGI->IsDirectIPDebugEnabled()
+		|| SessionGI->HasActiveSteamSession() || SessionGI->IsSteamSessionBusy())
+	{
+		const FString Message = TEXT("[NetworkDebug] Direct IP is disabled while using Steam. For legacy testing restart both games with -Ch4DirectIP -nosteam and DefaultPlatformService=Null.");
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("%s"), *Message);
+		ShowNetworkCommandMessage(Message, FColor::Red);
 		return;
 	}
 
@@ -576,18 +585,11 @@ void ACh4_multiGamePlayerController::ReturnToMainMenu()
 {
 	if (!IsLocalPlayerController()) return;
 	
-	// 온라인 세션이 활성화되어 있다면 세션 정리
-	if (IOnlineSubsystem* Subsystem = IOnlineSubsystem::Get())
+	// The persistent owner waits for Steam cleanup before opening the configured main menu.
+	if (UCh4_multiGameGameInstance* SessionGI = GetGameInstance<UCh4_multiGameGameInstance>())
 	{
-		IOnlineSessionPtr Session = Subsystem->GetSessionInterface();
-		if (Session.IsValid() && Session->GetNamedSession(NAME_GameSession) != nullptr)
-		{
-			Session->DestroySession(NAME_GameSession);
-		}
+		SessionGI->DestroySteamSession();
 	}
-	
-	// 메인 메뉴 레벨로 안전하게 이동
-	ClientTravel(TEXT("/Game/Maps/L_MainMenu"), TRAVEL_Absolute);
 }
 
 void ACh4_multiGamePlayerController::QuitGame()

@@ -7,7 +7,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Ch4_multiGameNetworkDebugSubsystem.generated.h"
 
-/** Development-only diagnostics for direct-IP lobby connection and travel failures. */
+/** Shared diagnostics for Steam and explicit development direct-IP connection/travel failures. */
 UCLASS()
 class UCh4_multiGameNetworkDebugSubsystem : public UGameInstanceSubsystem
 {

@@ -4,6 +4,8 @@
 
 #include "Ch4_multiGame.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Player/Ch4_multiGameGameInstance.h"
 
 void UCh4_multiGameNetworkDebugSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -37,9 +39,15 @@ void UCh4_multiGameNetworkDebugSubsystem::HandleNetworkFailure(
 	const ENetworkFailure::Type FailureType,
 	const FString& ErrorString)
 {
+	if (World && World->GetGameInstance() != GetGameInstance()) return;
+	UCh4_multiGameGameInstance* SessionGI = Cast<UCh4_multiGameGameInstance>(GetGameInstance());
 	const FString FailureName = ENetworkFailure::ToString(FailureType);
 	FString Guidance = TEXT("Check the exact IP:port, Hamachi adapter, and Host UDP 7777 firewall rule.");
-	if (ErrorString.Contains(TEXT("RemoteAddr: 127.")))
+	if (SessionGI && !SessionGI->IsDirectIPDebugEnabled())
+	{
+		Guidance = TEXT("Check Steam login, host availability and matching game builds. Rejoin through Steam room search; see [SteamSession] logs.");
+	}
+	else if (ErrorString.Contains(TEXT("RemoteAddr: 127.")))
 	{
 		Guidance = TEXT("Loopback address detected. Use the other PC Host's Hamachi 25.x.x.x address.");
 	}
@@ -67,6 +75,7 @@ void UCh4_multiGameNetworkDebugSubsystem::HandleNetworkFailure(
 		ErrorString.IsEmpty() ? TEXT("No error details") : *ErrorString,
 		*GetNameSafe(World),
 		*GetNameSafe(NetDriver));
+	if (SessionGI) SessionGI->HandleSteamConnectionFailure(World, FailureName + TEXT(": ") + ErrorString);
 	ShowFailureMessage(TEXT("NETWORK CONNECTION FAILED"), Details);
 }
 
@@ -75,6 +84,7 @@ void UCh4_multiGameNetworkDebugSubsystem::HandleTravelFailure(
 	const ETravelFailure::Type FailureType,
 	const FString& ErrorString)
 {
+	if (World && World->GetGameInstance() != GetGameInstance()) return;
 	const FString FailureName = ETravelFailure::ToString(FailureType);
 	const FString Details = FString::Printf(
 		TEXT("%s: %s\nCheck the map name. Lobby map: /Game/Lobby/L_Lobby"),
@@ -86,6 +96,10 @@ void UCh4_multiGameNetworkDebugSubsystem::HandleTravelFailure(
 		*FailureName,
 		ErrorString.IsEmpty() ? TEXT("No error details") : *ErrorString,
 		*GetNameSafe(World));
+	if (UCh4_multiGameGameInstance* SessionGI = Cast<UCh4_multiGameGameInstance>(GetGameInstance()))
+	{
+		SessionGI->HandleSteamConnectionFailure(World, FailureName + TEXT(": ") + ErrorString);
+	}
 	ShowFailureMessage(TEXT("MAP TRAVEL FAILED"), Details);
 }
 
