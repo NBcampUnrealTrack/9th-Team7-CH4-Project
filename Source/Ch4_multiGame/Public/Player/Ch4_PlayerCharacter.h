@@ -68,6 +68,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Input")
 	class UInputAction* GrabAction;
 	
+	UPROPERTY(EditDefaultsOnly, Category="Input")
+	class UInputAction* CartGrabAction;
+	
 	UPROPERTY(EditDefaultsOnly, Category="Anim")
 	TObjectPtr<class UAnimMontage> StunMontage;
 
@@ -92,6 +95,9 @@ public:
 	void BeginGrabDetection();
 	void EndGrabDetection();
 	void OnGrabReleaseNotify();
+	
+	UPROPERTY(Replicated)
+	TObjectPtr<class ACartBase> GrabbedCart;
 	
 	UPROPERTY(VisibleAnywhere, Category="Hat")
 	TObjectPtr<class UStaticMeshComponent> HatMeshComponent;
@@ -135,6 +141,7 @@ protected:
 	void InputActionEmote3(const struct FInputActionValue& Value);
 	void InputActionEmote4(const struct FInputActionValue& Value);
 	void InputActionGrab(const struct FInputActionValue& Value);
+	void InputActionCartGrab(const struct FInputActionValue& Value);
 	
 	// MovementMode가 변경될 때 호출
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
