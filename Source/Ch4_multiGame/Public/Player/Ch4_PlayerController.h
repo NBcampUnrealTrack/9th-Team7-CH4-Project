@@ -8,5 +8,7 @@ UCLASS()
 class CH4_MULTIGAME_API ACh4_PlayerController : public ACh4_multiGamePlayerController
 {
 	GENERATED_BODY()
-	
+
+public:
+	ACh4_PlayerController();
 };

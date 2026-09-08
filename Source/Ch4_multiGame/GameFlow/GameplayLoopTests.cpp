@@ -299,4 +299,48 @@ bool FCh4PreparationEmptyTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCh4PreparationValidationTest,
+	"Ch4_multiGame.GameFlow.PreparationValidation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCh4PreparationValidationTest::RunTest(const FString&)
+{
+	using namespace Ch4GameplayLoopTests;
+	FWorldFixture F;
+	if (!F.Initialize()) return false;
+	UClass* CartClass = LoadClass<AActor>(nullptr, TEXT("/Game/CartTest/BP_ShoppingCart.BP_ShoppingCart_C"));
+	if (!CartClass) return false;
+	AActor* Cart = F.World->SpawnActor<AActor>(CartClass);
+	auto* Point = F.World->SpawnActor<AGameplayPhaseTransitionPoint>();
+	Point->SetGameModeForTesting(F.Rule);
+	Point->PreparationDurationSeconds = 0.0f;
+	const FTransform Before = Cart->GetActorTransform();
+	TestTrue(TEXT("Missing references do not prevent observing timer completion"), Point->StartPreparationTimer());
+	F.TickTimers();
+	TestFalse(TEXT("Missing Cart rejects transition safely"), Point->TryStartMainGameplay());
+	Point->CartActor = Cart;
+	TestFalse(TEXT("Missing Cart destination rejects transition safely"), Point->TryStartMainGameplay());
+	Point->CartDestination = F.World->SpawnActor<ATargetPoint>();
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		auto* PC = F.World->SpawnActor<APlayerController>();
+		auto* Pawn = F.World->SpawnActor<ACharacter>();
+		PC->Possess(Pawn);
+		TestFalse(TEXT("Insufficient destinations reject the group before any move or initialization"), Point->TryStartMainGameplay());
+		auto* Destination = F.World->SpawnActor<ATargetPoint>();
+		Destination->SetActorLocation(FVector(5000, Index * 300, 800));
+		Point->PlayerDestinationPoints.Add(Destination);
+		TestFalse(TEXT("One to four valid destinations still cannot start an empty Cart"), Point->TryStartMainGameplay());
+		TestTrue(TEXT("Existing possession retained on rejected transition"), Pawn->GetController() == PC);
+		TestEqual(TEXT("Validation never partially initializes Cargo"), F.State->GetInitialCargoCount(), 0);
+	}
+	TestTrue(TEXT("All failed retries leave Cart in place"), Cart->GetActorTransform().Equals(Before));
+	TestEqual(TEXT("All failed retries leave Waiting"), F.State->GetCurrentGamePhase(), ECh4GamePhase::Waiting);
+	TestTrue(TEXT("Separate start path fixture initializes"), F.Rule->RequestCargoInitialization(1));
+	TestTrue(TEXT("Separate start path fixture starts"), F.Rule->RequestGameStart());
+	TestFalse(TEXT("Already Playing rejects a second preparation start"), Point->TryStartMainGameplay());
+	TestEqual(TEXT("Rejected duplicate leaves Playing intact"), F.State->GetCurrentGamePhase(), ECh4GamePhase::Playing);
+	return true;
+}
+
 #endif

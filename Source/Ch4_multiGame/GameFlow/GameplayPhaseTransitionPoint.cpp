@@ -28,6 +28,9 @@ AGameplayPhaseTransitionPoint::AGameplayPhaseTransitionPoint()
 void AGameplayPhaseTransitionPoint::BeginPlay()
 {
 	Super::BeginPlay();
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] BeginPlay: Actor=%s Authority=%d AutoStart=%d Duration=%.2f Cart=%s CartDestination=%s PlayerDestinations=%d"),
+		*GetName(), HasAuthority(), bStartPreparationOnBeginPlay, PreparationDurationSeconds,
+		*GetNameSafe(CartActor), *GetNameSafe(CartDestination), PlayerDestinationPoints.Num());
 	if (HasAuthority() && bStartPreparationOnBeginPlay)
 	{
 		StartPreparationTimer();
@@ -77,12 +80,13 @@ bool AGameplayPhaseTransitionPoint::StartPreparationTimer()
 	{
 		PreparationTimer = GetWorldTimerManager().SetTimerForNextTick(this, &AGameplayPhaseTransitionPoint::OnPreparationExpired);
 	}
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Waiting for %.2f seconds"), PreparationDurationSeconds);
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Started: %.2fs; server timer active"), PreparationDurationSeconds);
 	return true;
 }
 
 void AGameplayPhaseTransitionPoint::OnPreparationExpired()
 {
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Completed: Actor=%s Authority=%d"), *GetName(), HasAuthority());
 	bPreparationElapsed = true;
 	TryStartMainGameplay();
 }
@@ -117,13 +121,14 @@ bool AGameplayPhaseTransitionPoint::BuildPlayerMoves()
 		}
 		if (!IsValid(Pawn))
 		{
-			UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] A connected Player has no Pawn yet; keep Waiting"));
+			UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Player %s has no Pawn yet; keep Waiting"), *GetNameSafe(PC));
 			PlayerMoves.Reset();
 			return false;
 		}
 		if (!Destinations.IsValidIndex(PlayerMoves.Num()))
 		{
-			UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Not enough distinct Player destinations; keep the entire group in Waiting"));
+			UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Not enough distinct Player destinations: configured=%d valid=%d, no destination for Controller=%s Pawn=%s (player %d); keep the entire group in Waiting"),
+				PlayerDestinationPoints.Num(), Destinations.Num(), *GetNameSafe(PC), *GetNameSafe(Pawn), PlayerMoves.Num() + 1);
 			PlayerMoves.Reset();
 			return false;
 		}
@@ -141,30 +146,40 @@ bool AGameplayPhaseTransitionPoint::TryStartMainGameplay()
 {
 	if (!HasAuthority() || GetNetMode() == NM_Client || !bPreparationElapsed || bTransitionStarted)
 	{
+		UE_LOG(LogCh4_multiGame, Verbose, TEXT("[Preparation] Transition guard: Authority=%d Elapsed=%d Started=%d"), HasAuthority(), bPreparationElapsed, bTransitionStarted);
 		return false;
 	}
 	ACh4_multiGameGameMode* Rule = GetGameRule();
 	const ACh4_multiGameGameState* State = GetWorld()->GetGameState<ACh4_multiGameGameState>();
 	if (!Rule || !State || State->GetCurrentGamePhase() != ECh4GamePhase::Waiting || State->GetInitialCargoCount() != 0)
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Transition rejected: another path already initialized or started GameFlow"));
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Transition rejected: GameMode=%s GameState=%s Phase=%d InitialCargo=%d; requires uninitialized Waiting"),
+			*GetNameSafe(Rule), *GetNameSafe(State), State ? static_cast<int32>(State->GetCurrentGamePhase()) : -1, State ? State->GetInitialCargoCount() : -1);
 		return false;
 	}
-	if (!IsValid(CartActor) || !IsValid(CartDestination) || CartActor->GetWorld() != GetWorld()
+	if (!IsValid(CartActor) || !IsValid(CartDestination))
+	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Transition blocked: CartActor=%s CartDestination=%s; assign level actor instances on %s"),
+			*GetNameSafe(CartActor), *GetNameSafe(CartDestination), *GetName());
+		return false;
+	}
+	if (CartActor->GetWorld() != GetWorld()
 		|| CartDestination->GetWorld() != GetWorld() || !CartActor->GetRootComponent()
 		|| CartActor->GetRootComponent()->Mobility != EComponentMobility::Movable
 		|| !CartActor->Implements<UGameFlowTargetInterface>())
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Configure a movable Cart target and a same-world Cart destination"));
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Invalid Cart target: Cart=%s Destination=%s; requires movable root, GameFlowTargetInterface and same-world references"),
+			*GetNameSafe(CartActor), *GetNameSafe(CartDestination));
 		return false;
 	}
 	TArray<UCartCargoTrackerComponent*> Trackers;
 	CartActor->GetComponents(Trackers);
-	if (Trackers.Num() != 1 || !BuildPlayerMoves())
+	if (Trackers.Num() != 1)
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Requires exactly one Cart tracker and valid Player destinations"));
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Cart %s has %d trackers; requires exactly one CartCargoTrackerComponent"), *GetNameSafe(CartActor), Trackers.Num());
 		return false;
 	}
+	if (!BuildPlayerMoves()) return false;
 	UCartCargoTrackerComponent* Tracker = Trackers[0];
 	Tracker->UpdateOverlaps();
 	TArray<ACargoActor*> CargoSnapshot = Tracker->GetTrackedCargoSnapshot();
@@ -173,14 +188,17 @@ bool AGameplayPhaseTransitionPoint::TryStartMainGameplay()
 	{
 		return Cargo->GetAttachParentActor() != nullptr;
 	});
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Active cart cargo: %d; Tracker=%s"), CargoSnapshot.Num(), *GetNameSafe(Tracker));
 	if (CargoSnapshot.IsEmpty())
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Empty Cart: no initialization or teleport; remain Waiting"));
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Empty Cart: 0 active Cargo; no initialization or teleport; remain Waiting"));
 		return false;
 	}
 	const FTransform OldCart = CartActor->GetActorTransform();
 	FTransform NewCart = CartDestination->GetActorTransform();
 	NewCart.SetScale3D(OldCart.GetScale3D());
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Cart location: %s -> %s; Distance=%.2f"),
+		*OldCart.GetLocation().ToString(), *NewCart.GetLocation().ToString(), FVector::Distance(OldCart.GetLocation(), NewCart.GetLocation()));
 	TArray<FCh4GameplayActorMove> Moves;
 	FCh4GameplayActorMove& CartMove = Moves.AddDefaulted_GetRef();
 	CartMove.Actor = CartActor;
@@ -212,10 +230,12 @@ bool AGameplayPhaseTransitionPoint::TryStartMainGameplay()
 	bTransitionStarted = true;
 	if (!Rule->InitializePreparationCargo(CargoSnapshot))
 	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Cargo initialization rejected: Snapshot=%d Phase=%d InitialCargo=%d"),
+			CargoSnapshot.Num(), static_cast<int32>(State->GetCurrentGamePhase()), State->GetInitialCargoCount());
 		bTransitionStarted = false;
 		return false;
 	}
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Snapshot fixed: %d Cargo, %d Players"), CargoSnapshot.Num(), PlayerMoves.Num());
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Cargo initialized: %d; moving Cart, %d Cargo and %d Players"), CargoSnapshot.Num(), CargoSnapshot.Num(), PlayerMoves.Num());
 	MulticastMoveLoad(Moves);
 	if (bTeleportSucceeded)
 	{
@@ -303,10 +323,12 @@ void AGameplayPhaseTransitionPoint::MulticastMoveLoad_Implementation(const TArra
 		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Teleport failed; restored original positions. Restart this match before retrying initialization"));
 	}
 	RestoreTimer = GetWorldTimerManager().SetTimerForNextTick(this, &AGameplayPhaseTransitionPoint::OnLoadRestoreTimer);
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Load move accepted=%d Authority=%d; physics restore scheduled"), bTeleportSucceeded, HasAuthority());
 }
 
 void AGameplayPhaseTransitionPoint::MovePlayers()
 {
+	int32 MovedPlayers = 0;
 	for (const FPlayerMove& Move : PlayerMoves)
 	{
 		APawn* Pawn = Move.Pawn.Get();
@@ -317,6 +339,10 @@ void AGameplayPhaseTransitionPoint::MovePlayers()
 			bTeleportSucceeded = false;
 			UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Player teleport failed: %s; keep Waiting"), *GetNameSafe(Pawn));
 		}
+		else
+		{
+			++MovedPlayers;
+		}
 		if (APlayerController* PC = Move.Controller.Get())
 		{
 			PC->SetControlRotation(Move.Destination.Rotator());
@@ -324,6 +350,7 @@ void AGameplayPhaseTransitionPoint::MovePlayers()
 		}
 		Pawn->ForceNetUpdate();
 	}
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Players moved: %d / %d; existing Pawns retained"), MovedPlayers, PlayerMoves.Num());
 	PlayerMoves.Reset();
 }
 
@@ -377,12 +404,17 @@ void AGameplayPhaseTransitionPoint::OnLoadRestoreTimer()
 		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] A load actor was destroyed before restoration; keep Waiting"));
 	}
 	RestoreLoadPhysics();
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Physics restored: Authority=%d MoveAccepted=%d"), HasAuthority(), bTeleportSucceeded);
 	if (HasAuthority() && bTeleportSucceeded)
 	{
 		if (ACh4_multiGameGameMode* Rule = GetGameRule())
 		{
 			bTransitionComplete = Rule->FinishPreparationTransition();
 			UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Physics restored; Game start accepted=%s"), bTransitionComplete ? TEXT("true") : TEXT("false"));
+		}
+		else
+		{
+			UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Game start rejected: GameMode unavailable after physics restore"));
 		}
 	}
 }
