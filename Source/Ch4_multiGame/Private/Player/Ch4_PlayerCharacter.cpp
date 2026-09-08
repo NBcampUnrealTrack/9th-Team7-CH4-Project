@@ -422,7 +422,8 @@ void ACh4_PlayerCharacter::InputActionCartGrab(const struct FInputActionValue& V
 		FCollisionQueryParams Params;
 		Params.AddIgnoredActor(this);
 		
-		if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+		if (GetWorld()->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Visibility,
+			FCollisionShape::MakeSphere(50.0f), Params))
 		{
 			if (ACartBase* Cart = Cast<ACartBase>(Hit.GetActor()))
 			{
