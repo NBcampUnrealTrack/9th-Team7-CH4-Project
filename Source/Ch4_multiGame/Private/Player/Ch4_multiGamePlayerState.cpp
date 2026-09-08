@@ -7,6 +7,17 @@
 #include "Player/Ch4_multiGameGameInstance.h"
 #include "Player/Ch4_PlayerCharacter.h"
 
+void ACh4_multiGamePlayerState::CopyProperties(APlayerState* NewPlayerState)
+{
+	Super::CopyProperties(NewPlayerState);
+	if (auto* NewState = Cast<ACh4_multiGamePlayerState>(NewPlayerState))
+	{
+		// UE swaps the Lobby/Gameplay controller and PlayerState during seamless travel.
+		// Transfer the server's existing selection; Ready is deliberately not copied.
+		NewState->CharacterType = CharacterType;
+	}
+}
+
 void ACh4_multiGamePlayerState::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
 {

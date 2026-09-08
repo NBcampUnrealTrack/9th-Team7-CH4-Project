@@ -11,6 +11,7 @@ class ACh4_PlayerCharacter;
 class UCh4LoadingScreenDataAsset;
 class UTexture2D;
 class UCh4RoomEntryData;
+class SWidget;
 struct FWorldContext;
 
 /**
@@ -64,6 +65,7 @@ public:
 	/** Explicit process-wide legacy mode: -Ch4DirectIP -nosteam. Never an automatic fallback. */
 	bool IsDirectIPDebugEnabled() const { return bDirectIPDebugEnabled; }
 	void HandleSteamConnectionFailure(UWorld* FailedWorld, const FString& Message);
+	void LogMatchTravel(const UWorld* World, const FString& Destination, bool bSeamless) const;
 
 	/** Records the owning local player's newest choice before its server RPC is confirmed. */
 	bool StoreLocalCharacterRequest(ECh4CharacterType CharacterType);
@@ -126,6 +128,9 @@ private:
 
 	void CacheLoadingScreenAssets();
 	void HandlePreLoadMap(const FWorldContext& LoadContext, const FString& MapName);
+	void HandleSeamlessTravelStart(UWorld* World, const FString& MapName);
+	void HandleSeamlessTravelTransition(UWorld* World);
+	void FinishSeamlessLoadingScreen();
 	void HandlePostLoadMap(UWorld* LoadedWorld);
 
 	UPROPERTY(Transient)
@@ -141,6 +146,10 @@ private:
 	TObjectPtr<UTexture2D> CachedLoadingScreenImage;
 
 	bool bLoadingScreenPrepared = false;
+	bool bSeamlessLoadingScreen = false;
+	double SeamlessLoadingScreenStarted = 0.0;
+	float SeamlessLoadingScreenMinimumTime = 0.0f;
+	TSharedPtr<SWidget> SeamlessLoadingWidget;
 
 	/** Shared appearance catalog. Array order follows ECh4CharacterType. */
 	UPROPERTY(EditDefaultsOnly, Category="Player|Character")

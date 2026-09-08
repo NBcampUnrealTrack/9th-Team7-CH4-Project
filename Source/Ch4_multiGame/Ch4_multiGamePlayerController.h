@@ -26,6 +26,8 @@ public:
 	// 마우스 회전 입력 가로채기 (마우스 감도 및 Y축 반전 적용)
 	virtual void AddPitchInput(float Val) override;
 	virtual void AddYawInput(float Val) override;
+	virtual bool IsMoveInputIgnored() const override;
+	virtual bool IsLookInputIgnored() const override;
 
 	/**
 	 * Safe development command for Hamachi direct-IP tests.
@@ -39,7 +41,7 @@ public:
 	void RequestCharacterType(ECh4CharacterType CharacterType);
 	
 	// [추가] PauseMenu 관련 공개 함수들 선언
-	// P 키(이후에 ESC키로 전환)를 눌렀을 때 열려있으면 닫고, 닫혀있으면 여는 토글 함수
+	// Local menu only: ESC and the existing IA_Pause mappings toggle this widget.
 	UFUNCTION(BlueprintCallable, Category = "UI|Pause Menu")
 	void TogglePauseMenu();
 	
@@ -73,6 +75,14 @@ protected:
 	// 에디터에서 디자인할 WBP_PauseMenu 위젯 클래스를 지정할 변수
 	UPROPERTY(EditAnywhere, Category = "Input|Pause Menu")
 	TSubclassOf<UUserWidget> PauseMenuWidgetClass;
+
+	/** Deferred MVVM fallback; the game module explicitly includes this widget package during Cook. */
+	UPROPERTY(EditDefaultsOnly, Category = "Input|Pause Menu")
+	TSoftClassPtr<UUserWidget> PauseMenuWidgetAsset = TSoftClassPtr<UUserWidget>(
+		FSoftObjectPath(TEXT("/Game/UI/WBP_PauseMenu.WBP_PauseMenu_C")));
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> PauseMenuMappingContext;
 	
 	// 화면에 생성된 실제 PauseMenu 위젯의 주소를 기억할 포인터 변수
 	UPROPERTY()
@@ -124,6 +134,7 @@ protected:
 
 	/** Gameplay initialization */
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnPossess(APawn* InPawn) override;
 	virtual void OnRep_PlayerState() override;
 
@@ -134,6 +145,13 @@ protected:
 	bool ShouldUseTouchControls() const;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FCh4PauseMenuRuntimeCommand;
+#endif
+	bool bPauseInputCaptured = false;
+	bool bInputBlockedBeforePause = false;
+	TWeakObjectPtr<UInputComponent> PauseBlockedInputComponent;
+
 	UFUNCTION(Server, Reliable)
 	void ServerRequestCharacterType(ECh4CharacterType CharacterType);
 

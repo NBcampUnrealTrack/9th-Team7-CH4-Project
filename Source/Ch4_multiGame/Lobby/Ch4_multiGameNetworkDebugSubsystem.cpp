@@ -5,6 +5,7 @@
 #include "Ch4_multiGame.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Lobby/Ch4_multiGameLobbyGameMode.h"
 #include "Player/Ch4_multiGameGameInstance.h"
 
 void UCh4_multiGameNetworkDebugSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -86,16 +87,22 @@ void UCh4_multiGameNetworkDebugSubsystem::HandleTravelFailure(
 {
 	if (World && World->GetGameInstance() != GetGameInstance()) return;
 	const FString FailureName = ETravelFailure::ToString(FailureType);
+	ACh4_multiGameLobbyGameMode* LobbyMode = World
+		? World->GetAuthGameMode<ACh4_multiGameLobbyGameMode>() : nullptr;
+	const FString Destination = LobbyMode ? LobbyMode->GetPendingTravelDestination()
+		: (World ? World->NextURL : FString());
 	const FString Details = FString::Printf(
 		TEXT("%s: %s\nCheck the map name. Lobby map: /Game/Lobby/L_Lobby"),
 		*FailureName,
 		ErrorString.IsEmpty() ? TEXT("No error details") : *ErrorString);
 
 	UE_LOG(LogCh4_multiGame, Error,
-		TEXT("[NetworkDebug] TRAVEL FAILURE | Type: %s | Error: %s | World: %s"),
+		TEXT("[NetworkDebug] TRAVEL FAILURE | Type: %s | Error: %s | CurrentMap: %s | DestinationMap: %s"),
 		*FailureName,
 		ErrorString.IsEmpty() ? TEXT("No error details") : *ErrorString,
-		*GetNameSafe(World));
+		World ? *World->GetPackage()->GetName() : TEXT("None"),
+		Destination.IsEmpty() ? TEXT("Unavailable (see travel request log)") : *Destination);
+	if (LobbyMode) LobbyMode->ResetTravelAfterFailure();
 	if (UCh4_multiGameGameInstance* SessionGI = Cast<UCh4_multiGameGameInstance>(GetGameInstance()))
 	{
 		SessionGI->HandleSteamConnectionFailure(World, FailureName + TEXT(": ") + ErrorString);

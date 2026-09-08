@@ -17,6 +17,7 @@ public:
 
 	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual void InitGameState() override;
+	virtual void InitSeamlessTravelPlayer(AController* NewController) override;
 	virtual void StartPlay() override;
 	virtual void PreLogin(
 		const FString& Options,
@@ -29,6 +30,8 @@ public:
 
 	/** Accepts a Ready toggle request from the owning lobby controller on the server. */
 	void HandlePlayerReady(APlayerController* RequestingPlayer);
+	void ResetTravelAfterFailure();
+	const FString& GetPendingTravelDestination() const { return PendingTravelDestination; }
 
 	UFUNCTION(BlueprintPure, Category="Lobby")
 	int32 GetMaxLobbyPlayers() const { return MaxLobbyPlayers; }
@@ -57,6 +60,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FCh4LobbyReadyTravelRulesTest;
 	friend class FCh4LobbyCharacterAssignmentTest;
+	friend class FCh4LobbyCookedMapValidationTest;
 #endif
 
 	class ACh4_multiGameLobbyGameState* GetLobbyGameState() const;
@@ -73,7 +77,7 @@ private:
 		const TArray<TSoftObjectPtr<UWorld>>& GameplayMapCandidates,
 		FString& OutMapPackage);
 	static int32 FindFirstAvailableCharacterSlot(const TArray<bool>& UnavailableSlots);
-	int32 AssignCharacterSlot(AController* Controller);
+	int32 AssignCharacterSlot(AController* Controller, bool bInitializeSelection = true);
 	int32 ReleaseCharacterSlot(AController* Controller);
 	int32 FindAssignedCharacterSlot(AController* Controller) const;
 	void StartGameTravel();
@@ -82,6 +86,7 @@ private:
 	FString GetPlayerLogLabel(const AController* Controller) const;
 
 	bool bTravelStarted = false;
+	FString PendingTravelDestination;
 	TMap<TWeakObjectPtr<AController>, int32> CharacterSlotsByController;
 	TSet<TWeakObjectPtr<AController>> ControllersAwaitingInitialCharacterSpawn;
 };

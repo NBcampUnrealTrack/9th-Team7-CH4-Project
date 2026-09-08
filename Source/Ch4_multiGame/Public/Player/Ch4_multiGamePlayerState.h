@@ -16,6 +16,8 @@ class CH4_MULTIGAME_API ACh4_multiGamePlayerState : public APlayerState
 	GENERATED_BODY()
 
 public:
+	virtual void CopyProperties(APlayerState* NewPlayerState) override;
+
 	UPROPERTY(BlueprintAssignable, Category="Player|Character|Events")
 	FCh4CharacterTypeChangedSignature OnCharacterTypeChanged;
 

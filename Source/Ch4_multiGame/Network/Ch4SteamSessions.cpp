@@ -18,6 +18,20 @@
 
 #define LOCTEXT_NAMESPACE "Ch4SteamSessions"
 
+void UCh4_multiGameGameInstance::LogMatchTravel(const UWorld* World, const FString& Destination, bool bSeamless) const
+{
+	const UNetDriver* Driver = World ? World->GetNetDriver() : nullptr;
+	const FString NetMode = World ? ToString(World->GetNetMode()) : TEXT("None");
+	const TCHAR* SessionState = SteamSessionInterface.IsValid()
+		? EOnlineSessionState::ToString(SteamSessionInterface->GetSessionState(NAME_GameSession)) : TEXT("Unavailable");
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[SteamTravel] Current=%s Destination=%s NetMode=%s NetDriverClass=%s NetDriver=%s Seamless=%s SessionState=%s"),
+		World ? *World->GetPackage()->GetName() : TEXT("None"), *Destination,
+		*NetMode,
+		Driver ? *Driver->GetClass()->GetPathName() : TEXT("None"), *GetNameSafe(Driver),
+		bSeamless ? TEXT("true") : TEXT("false"), SessionState);
+}
+
 void UCh4_multiGameGameInstance::InitializeSteamSessions()
 {
 	SteamPostLoadHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &ThisClass::HandleSteamPostLoadMap);

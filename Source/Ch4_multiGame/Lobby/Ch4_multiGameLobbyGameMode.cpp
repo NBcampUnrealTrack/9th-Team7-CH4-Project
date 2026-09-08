@@ -3,6 +3,7 @@
 #include "Lobby/Ch4_multiGameLobbyGameMode.h"
 
 #include "Ch4_multiGame.h"
+#include "AssetRegistry/AssetData.h"
 #include "EngineUtils.h"
 #include "Engine/Engine.h"
 #include "Engine/NetDriver.h"
@@ -15,8 +16,9 @@
 #include "Lobby/Ch4_multiGameLobbyPlayerController.h"
 #include "Lobby/Ch4_multiGameLobbyPlayerState.h"
 #include "Misc/PackageName.h"
-#include "Misc/Paths.h"
+#include "Misc/AssetRegistryInterface.h"
 #include "Player/Ch4CharacterTypes.h"
+#include "Player/Ch4_multiGameGameInstance.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -25,7 +27,7 @@ ACh4_multiGameLobbyGameMode::ACh4_multiGameLobbyGameMode()
 	GameStateClass = ACh4_multiGameLobbyGameState::StaticClass();
 	PlayerStateClass = ACh4_multiGameLobbyPlayerState::StaticClass();
 	PlayerControllerClass = ACh4_multiGameLobbyPlayerController::StaticClass();
-	bUseSeamlessTravel = false;
+	bUseSeamlessTravel = true;
 	GameplayMaps.Add(TSoftObjectPtr<UWorld>(
 		FSoftObjectPath(TEXT("/Game/Map/Level/ForestLevel.ForestLevel"))));
 
@@ -65,7 +67,9 @@ UClass* ACh4_multiGameLobbyGameMode::GetDefaultPawnClassForController_Implementa
 		return Super::GetDefaultPawnClassForController_Implementation(InController);
 	}
 
-	const int32 CharacterSlot = FindAssignedCharacterSlot(InController);
+	const auto* CharacterState = InController ? InController->GetPlayerState<ACh4_multiGameLobbyPlayerState>() : nullptr;
+	const int32 CharacterSlot = CharacterState && Ch4Character::IsValidType(CharacterState->GetCharacterType())
+		? Ch4Character::ToIndex(CharacterState->GetCharacterType()) : FindAssignedCharacterSlot(InController);
 	if (LobbyCharacterClasses.IsValidIndex(CharacterSlot))
 	{
 		if (UClass* AssignedPawnClass = LobbyCharacterClasses[CharacterSlot].Get())
@@ -133,6 +137,20 @@ void ACh4_multiGameLobbyGameMode::InitGameState()
 {
 	Super::InitGameState();
 	UpdateLobbyPlayerCount(GetNumPlayers());
+}
+
+void ACh4_multiGameLobbyGameMode::InitSeamlessTravelPlayer(AController* NewController)
+{
+	Super::InitSeamlessTravelPlayer(NewController);
+	if (auto* State = NewController ? NewController->GetPlayerState<ACh4_multiGameLobbyPlayerState>() : nullptr)
+	{
+		// A returning player keeps their selection, including duplicates, but must Ready again.
+		State->SetReadyState(false);
+		AssignCharacterSlot(NewController, false);
+		UpdateLobbyPlayerCount(GetNumPlayers());
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[SteamTravel] Lobby player initialized: Controller=%s Character=%s Ready=false"),
+			*GetNameSafe(NewController), *UEnum::GetValueAsString(State->GetCharacterType()));
+	}
 }
 
 void ACh4_multiGameLobbyGameMode::StartPlay()
@@ -399,6 +417,7 @@ bool ACh4_multiGameLobbyGameMode::TrySelectRandomGameplayMap(
 {
 	OutMapPackage.Reset();
 	TArray<FString> ValidMapPackages;
+	const IAssetRegistryInterface* AssetRegistry = IAssetRegistryInterface::GetPtr();
 
 	for (const TSoftObjectPtr<UWorld>& GameplayMapCandidate : GameplayMapCandidates)
 	{
@@ -409,17 +428,26 @@ bool ACh4_multiGameLobbyGameMode::TrySelectRandomGameplayMap(
 		}
 
 		const FString MapPackage = MapObjectPath.GetLongPackageName();
-		FString PackageFilename;
+		FAssetData MapAsset;
+		// IoStore packages deliberately have no local filename extension. Check the
+		// mounted package and its registered asset type instead of requiring .umap.
 		if (!FPackageName::IsValidLongPackageName(MapPackage)
-			|| !FPackageName::DoesPackageExist(MapPackage, &PackageFilename)
-			|| !FPaths::GetExtension(PackageFilename, true).Equals(
-				FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase))
+			|| !FPackageName::DoesPackageExist(MapPackage)
+			|| !AssetRegistry
+			|| AssetRegistry->TryGetAssetByObjectPath(MapObjectPath, MapAsset)
+				!= UE::AssetRegistry::EExists::Exists
+			|| MapAsset.AssetClassPath != UWorld::StaticClass()->GetClassPathName())
 		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[Lobby] Rejected gameplay map candidate: Object=%s Package=%s (missing package or non-World asset)"),
+				*MapObjectPath.ToString(), *MapPackage);
 			continue;
 		}
 
 		ValidMapPackages.AddUnique(MapPackage);
 	}
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Gameplay map candidates: Configured=%d Valid=%d"),
+		GameplayMapCandidates.Num(), ValidMapPackages.Num());
 
 	if (ValidMapPackages.IsEmpty())
 	{
@@ -444,7 +472,7 @@ int32 ACh4_multiGameLobbyGameMode::FindFirstAvailableCharacterSlot(
 	return INDEX_NONE;
 }
 
-int32 ACh4_multiGameLobbyGameMode::AssignCharacterSlot(AController* Controller)
+int32 ACh4_multiGameLobbyGameMode::AssignCharacterSlot(AController* Controller, bool bInitializeSelection)
 {
 	if (!HasAuthority() || !IsValid(Controller))
 	{
@@ -493,7 +521,7 @@ int32 ACh4_multiGameLobbyGameMode::AssignCharacterSlot(AController* Controller)
 	ACh4_multiGameLobbyPlayerState* LobbyPlayerState =
 		Controller->GetPlayerState<ACh4_multiGameLobbyPlayerState>();
 	if (!LobbyPlayerState
-		|| !LobbyPlayerState->SetCharacterTypeFromServer(CharacterType))
+		|| (bInitializeSelection && !LobbyPlayerState->SetCharacterTypeFromServer(CharacterType)))
 	{
 		UE_LOG(LogCh4_multiGame, Warning,
 			TEXT("[Lobby] Initial Character Assignment Failed | PlayerState unavailable for %s"),
@@ -580,6 +608,8 @@ void ACh4_multiGameLobbyGameMode::StartGameTravel()
 	}
 
 	FString MapPackage;
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Travel selection started: Current=%s"),
+		GetWorld() ? *GetWorld()->GetPackage()->GetName() : TEXT("None"));
 	if (!TrySelectRandomGameplayMap(GameplayMaps, MapPackage))
 	{
 		UE_LOG(LogCh4_multiGame, Error,
@@ -602,18 +632,34 @@ void ACh4_multiGameLobbyGameMode::StartGameTravel()
 		FColor::Green,
 		10.0f);
 
-	// Use an absolute URL so lobby-only options (especially ?game=LobbyGameMode)
-	// cannot leak into the gameplay map. Keep ?listen so non-seamless clients can
-	// reconnect to the same Listen Server after the map switch.
-	const FString TravelURL = MapPackage + TEXT("?listen");
-	if (!World->ServerTravel(TravelURL, true))
+	// Match travel keeps the existing NetDriver through seamless travel. Only the
+	// initial Steam room creation uses ?listen; absolute travel drops lobby options.
+	const FString TravelURL = MapPackage;
+	PendingTravelDestination = TravelURL;
+	if (const auto* GI = GetGameInstance<UCh4_multiGameGameInstance>())
 	{
-		bTravelStarted = false;
+		GI->LogMatchTravel(World, TravelURL, bUseSeamlessTravel);
+	}
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] ServerTravel call: Current=%s Destination=%s Absolute=true"),
+		*World->GetPackage()->GetName(), *TravelURL);
+	const bool bTravelAccepted = World->ServerTravel(TravelURL, true);
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] ServerTravel returned: Accepted=%s Destination=%s"),
+		bTravelAccepted ? TEXT("true") : TEXT("false"), *TravelURL);
+	if (!bTravelAccepted)
+	{
+		ResetTravelAfterFailure();
 		UE_LOG(LogCh4_multiGame, Error,
 			TEXT("[Lobby] ServerTravel failed for %s"),
 			*MapPackage);
 		ShowServerDebugStatus(TEXT("SERVER TRAVEL FAILED\nCheck Output Log"), FColor::Red, 15.0f);
 	}
+}
+
+void ACh4_multiGameLobbyGameMode::ResetTravelAfterFailure()
+{
+	if (!HasAuthority()) return;
+	bTravelStarted = false;
+	PendingTravelDestination.Reset();
 }
 
 void ACh4_multiGameLobbyGameMode::ShowServerDebugStatus(

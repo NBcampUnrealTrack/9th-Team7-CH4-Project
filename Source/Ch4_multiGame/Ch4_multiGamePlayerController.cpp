@@ -258,13 +258,9 @@ void ACh4_multiGamePlayerController::BeginPlay()
 			}
 		}
 
-		// 2. PauseAction 및 VoiceToggleAction 키 바인딩
+		// Voice input retains its existing binding. Pause is bound in SetupInputComponent.
 		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
 		{
-			if (PauseAction)
-			{
-				EnhancedInputComponent->BindAction(PauseAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::TogglePauseMenu);
-			}
 
 			if (VoiceToggleAction)
 			{
@@ -290,6 +286,19 @@ void ACh4_multiGamePlayerController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 	SynchronizeCharacterSelectionForCurrentWorld();
+}
+
+void ACh4_multiGamePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (bPauseInputCaptured) HidePauseMenu();
+	if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
+	{
+		if (auto* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
+		{
+			if (PauseMenuMappingContext) Subsystem->RemoveMappingContext(PauseMenuMappingContext);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void ACh4_multiGamePlayerController::OnRep_PlayerState()
@@ -382,6 +391,15 @@ void ACh4_multiGamePlayerController::SynchronizeCharacterSelectionForCurrentWorl
 	{
 		return;
 	}
+	if (Ch4Character::IsValidType(CharacterPlayerState->GetCharacterType())
+		&& !GameInstance->HasPendingCharacterRequest())
+	{
+		// Seamless travel already copied the authoritative PlayerState. The local
+		// re-registration below is only needed when a hard travel created empty state.
+		GameInstance->CacheAuthoritativeCharacterType(CharacterPlayerState->GetCharacterType());
+		bSubmittedPersistedCharacterType = true;
+		return;
+	}
 
 	ECh4CharacterType PersistedCharacterType = ECh4CharacterType::Invalid;
 	if (!GameInstance->TryGetLocalCharacterType(PersistedCharacterType))
@@ -414,9 +432,23 @@ void ACh4_multiGamePlayerController::SetupInputComponent()
 	// only add IMCs for local player controllers
 	if (IsLocalPlayerController())
 	{
+		if (auto* EnhancedInput = Cast<UEnhancedInputComponent>(InputComponent); EnhancedInput && PauseAction)
+		{
+			EnhancedInput->BindAction(PauseAction, ETriggerEvent::Started, this,
+				&ACh4_multiGamePlayerController::TogglePauseMenu);
+		}
 		// Add Input Mapping Contexts
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 		{
+			if (PauseAction)
+			{
+				if (!PauseMenuMappingContext)
+				{
+					PauseMenuMappingContext = NewObject<UInputMappingContext>(this);
+					PauseMenuMappingContext->MapKey(PauseAction, EKeys::Escape);
+				}
+				Subsystem->AddMappingContext(PauseMenuMappingContext, 1);
+			}
 			for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
 			{
 				if (CurrentContext)
@@ -476,11 +508,6 @@ void ACh4_multiGamePlayerController::TogglePauseMenu()
 {
 	if (!IsLocalPlayerController()) return;
 	
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, TEXT("[PauseMenu] P Key Pressed! TogglePauseMenu() Called"));
-	}
-
 	if (IsPauseMenuOpen())
 	{
 		HidePauseMenu();
@@ -491,18 +518,32 @@ void ACh4_multiGamePlayerController::TogglePauseMenu()
 	}
 }
 
+bool ACh4_multiGamePlayerController::IsMoveInputIgnored() const
+{
+	// ClientRestart resets the engine's ignore counters after possession. A menu
+	// opened during travel must keep its own lock, without altering those counters.
+	return bPauseInputCaptured || Super::IsMoveInputIgnored();
+}
+
+bool ACh4_multiGamePlayerController::IsLookInputIgnored() const
+{
+	return bPauseInputCaptured || Super::IsLookInputIgnored();
+}
+
 void ACh4_multiGamePlayerController::ShowPauseMenu()
 {
-	if (!IsLocalPlayerController()) return;
+	if (!IsLocalPlayerController() || IsPauseMenuOpen()) return;
 
 	if (!PauseMenuWidgetClass)
 	{
 		// C++ 생성자 대신 필요할 때 안전하게 지연 로드 (에디터 부팅 시점 MVVM 충돌 완전 방지)
-		PauseMenuWidgetClass = StaticLoadClass(UUserWidget::StaticClass(), nullptr, TEXT("/Game/UI/WBP_PauseMenu.WBP_PauseMenu_C"));
+		PauseMenuWidgetClass = PauseMenuWidgetAsset.LoadSynchronous();
 	}
 
 	if (!PauseMenuWidgetClass)
 	{
+		UE_LOG(LogCh4_multiGame, Error, TEXT("[PauseMenu] Failed to load %s; verify the widget was cooked."),
+			*PauseMenuWidgetAsset.ToSoftObjectPath().ToString());
 		if (GEngine)
 		{
 			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("[PauseMenu ERROR] PauseMenuWidgetClass is None!"));
@@ -524,22 +565,36 @@ void ACh4_multiGamePlayerController::ShowPauseMenu()
 	
 	if (PauseMenuWidget)
 	{
-		// 3. 위젯의 MVVM ViewModel Setter가 있다면 안전하게 주입
-		if (UFunction* SetVMFunc = PauseMenuWidget->FindFunction(FName("SetCh4PauseMenuViewModel")))
-		{
-			struct FSetVMParams
-			{
-				UCh4PauseMenuViewModel* InViewModel;
-			};
-			FSetVMParams Params;
-			Params.InViewModel = PauseMenuViewModel;
-			PauseMenuWidget->ProcessEvent(SetVMFunc, &Params);
-		}
-
 		if (!PauseMenuWidget->IsInViewport())
 		{
+			PauseMenuWidget->SetIsFocusable(true);
 			// 화면에 위젯 띄우기 (ZOrder: 100)
 			PauseMenuWidget->AddToViewport(100);
+			// Construct initializes the MVVM view. Reuse its instance when the asset
+			// creates one, otherwise assign the controller-owned instance through MVVM.
+			if (UMVVMView* View = UMVVMSubsystem::GetViewFromUserWidget(PauseMenuWidget))
+			{
+				if (auto* ExistingViewModel = Cast<UCh4PauseMenuViewModel>(
+					View->GetViewModel(TEXT("Ch4PauseMenuViewModel")).GetObject()))
+				{
+					PauseMenuViewModel = ExistingViewModel;
+				}
+				else
+				{
+					View->SetViewModel(TEXT("Ch4PauseMenuViewModel"), PauseMenuViewModel.Get());
+				}
+			}
+			PauseMenuViewModel->InitializeWithPlayerController(this);
+			if (!bPauseInputCaptured)
+			{
+				bPauseInputCaptured = true;
+				PauseBlockedInputComponent = InputComponent;
+				if (InputComponent)
+				{
+					bInputBlockedBeforePause = InputComponent->bBlockInput;
+					InputComponent->bBlockInput = true;
+				}
+			}
 			
 			// 마우스 커서 보이게 하기
 			bShowMouseCursor = true;
@@ -548,7 +603,10 @@ void ACh4_multiGamePlayerController::ShowPauseMenu()
 			FInputModeGameAndUI InputMode;
 			InputMode.SetWidgetToFocus(PauseMenuWidget->TakeWidget());
 			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			InputMode.SetHideCursorDuringCapture(false);
 			SetInputMode(InputMode);
+			UE_LOG(LogCh4_multiGame, Log, TEXT("[PauseMenu] Opened locally: Controller=%s WorldPaused=%s"),
+				*GetName(), GetWorld()->IsPaused() ? TEXT("true") : TEXT("false"));
 
 			if (GEngine)
 			{
@@ -566,6 +624,16 @@ void ACh4_multiGamePlayerController::HidePauseMenu()
 	{
 		// 1. 화면에서 위젯 내리기
 		PauseMenuWidget->RemoveFromParent();
+	}
+	if (bPauseInputCaptured)
+	{
+		bPauseInputCaptured = false;
+		if (UInputComponent* BlockedInput = PauseBlockedInputComponent.Get())
+		{
+			BlockedInput->bBlockInput = bInputBlockedBeforePause;
+		}
+		PauseBlockedInputComponent.Reset();
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[PauseMenu] Closed locally: Controller=%s"), *GetName());
 	}
 	
 	// 2. 마우스 커서 숨기기
