@@ -2,14 +2,19 @@
 
 #include "Ch4_multiGame.h"
 #include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/Pawn.h"
 #include "LoadingScreen/Ch4LoadingScreen.h"
 #include "LoadingScreen/Ch4LoadingScreenDataAsset.h"
 #include "LoadingScreen/Ch4LoadingScreenSettings.h"
 #include "Misc/App.h"
 #include "Misc/PackageName.h"
 #include "MoviePlayer.h"
+#include "PhysicsEngine/PhysicalAnimationComponent.h"
+#include "TimerManager.h"
 #include "Player/Ch4_PlayerCharacter.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -27,10 +32,13 @@ UCh4_multiGameGameInstance::UCh4_multiGameGameInstance()
 void UCh4_multiGameGameInstance::Init()
 {
 	Super::Init();
+	InitializeSteamSessions();
 
 	// Context-aware PreLoadMap runs before MoviePlayer's ordinary PreLoadMap playback hook.
 	FCoreUObjectDelegates::PreLoadMapWithContext.AddUObject(this, &ThisClass::HandlePreLoadMap);
 	FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &ThisClass::HandlePostLoadMap);
+	FWorldDelegates::OnSeamlessTravelStart.AddUObject(this, &ThisClass::HandleSeamlessTravelStart);
+	FWorldDelegates::OnSeamlessTravelTransition.AddUObject(this, &ThisClass::HandleSeamlessTravelTransition);
 	if (FApp::CanEverRender() && IsMoviePlayerEnabled())
 	{
 		CacheLoadingScreenAssets();
@@ -39,8 +47,17 @@ void UCh4_multiGameGameInstance::Init()
 
 void UCh4_multiGameGameInstance::Shutdown()
 {
+	ShutdownSteamSessions();
 	FCoreUObjectDelegates::PreLoadMapWithContext.RemoveAll(this);
 	FCoreUObjectDelegates::PostLoadMapWithWorld.RemoveAll(this);
+	FWorldDelegates::OnSeamlessTravelStart.RemoveAll(this);
+	FWorldDelegates::OnSeamlessTravelTransition.RemoveAll(this);
+	if (SeamlessLoadingWidget.IsValid() && GetGameViewportClient())
+	{
+		GetGameViewportClient()->RemoveViewportWidgetContent(SeamlessLoadingWidget.ToSharedRef());
+	}
+	SeamlessLoadingWidget.Reset();
+	bSeamlessLoadingScreen = false;
 	if (bLoadingScreenPrepared && IsMoviePlayerEnabled())
 	{
 		// Cancellation/shutdown may bypass PostLoadMap. Release only our local screen.
@@ -123,10 +140,61 @@ void UCh4_multiGameGameInstance::HandlePreLoadMap(const FWorldContext& LoadConte
 		*MapName, *GetNameSafe(CachedLoadingScreenImage));
 }
 
+void UCh4_multiGameGameInstance::HandleSeamlessTravelStart(UWorld* World, const FString& MapName)
+{
+	if (!World || World->GetGameInstance() != this || !GEngine || !GetGameViewportClient() || bLoadingScreenPrepared) return;
+	if (const FWorldContext* Context = GEngine->GetWorldContextFromWorld(World))
+	{
+		// Seamless travel skips PreLoadMap. Reuse the existing screen, image selection
+		// and Lobby-only rule, then let the final PostLoadMap finish its display.
+		HandlePreLoadMap(*Context, MapName);
+		if (bLoadingScreenPrepared)
+		{
+			// The world keeps ticking during seamless travel. Show the same Slate widget
+			// in the persistent viewport; MoviePlayer's nested engine tick trips UE 5.8's
+			// render-frame assertion. Hard travel retains the existing MoviePlayer path.
+			const FLoadingScreenAttributes Attributes = Ch4LoadingScreen::BuildAttributes(CachedLoadingScreenData, CachedLoadingScreenImage);
+			SeamlessLoadingScreenMinimumTime = Attributes.MinimumLoadingScreenDisplayTime;
+			GetMoviePlayer()->SetupLoadingScreen(FLoadingScreenAttributes());
+			SeamlessLoadingWidget = Attributes.WidgetLoadingScreen;
+			GetGameViewportClient()->AddViewportWidgetContent(SeamlessLoadingWidget.ToSharedRef(), 10000);
+			bSeamlessLoadingScreen = true;
+			SeamlessLoadingScreenStarted = FPlatformTime::Seconds();
+			UE_LOG(LogCh4_multiGame, Log, TEXT("[LoadingScreen] Seamless display started Destination=%s"), *MapName);
+		}
+	}
+}
+
+void UCh4_multiGameGameInstance::HandleSeamlessTravelTransition(UWorld* World)
+{
+	if (!World || World->GetGameInstance() != this) return;
+	// These GameModes carry controllers/states, not pawns. PhysicalAnimation's
+	// BeginDestroy can run in the *next* world's GC, after its old Chaos scene died.
+	// Release departing pawn constraints while that scene still exists (UE 5.8).
+	for (TActorIterator<APawn> It(World); It; ++It)
+	{
+		TInlineComponentArray<UPhysicalAnimationComponent*> Components(*It);
+		for (UPhysicalAnimationComponent* Component : Components)
+		{
+			if (Component->GetSkeletalMesh())
+			{
+				UE_LOG(LogCh4_multiGame, Log, TEXT("[SteamTravel] Releasing departing pawn physical animation: %s"),
+					*Component->GetPathName());
+				Component->SetSkeletalMeshComponent(nullptr);
+			}
+		}
+	}
+}
+
 void UCh4_multiGameGameInstance::HandlePostLoadMap(UWorld* LoadedWorld)
 {
 	if (!bLoadingScreenPrepared || (LoadedWorld && LoadedWorld->GetGameInstance() != this))
 	{
+		return;
+	}
+	if (bSeamlessLoadingScreen)
+	{
+		FinishSeamlessLoadingScreen();
 		return;
 	}
 	if (IsMoviePlayerEnabled() && GetMoviePlayer()->IsMovieCurrentlyPlaying())
@@ -137,6 +205,30 @@ void UCh4_multiGameGameInstance::HandlePostLoadMap(UWorld* LoadedWorld)
 	}
 	bLoadingScreenPrepared = false;
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[LoadingScreen] Local map loading finished: %s"), *GetNameSafe(LoadedWorld));
+}
+
+void UCh4_multiGameGameInstance::FinishSeamlessLoadingScreen()
+{
+	if (!bSeamlessLoadingScreen) return;
+	// A world timer can include the travel frame's delta. Recheck wall time when it
+	// fires so fast packaged loads still honor the data asset's minimum exactly.
+	const double Remaining = SeamlessLoadingScreenMinimumTime - (FPlatformTime::Seconds() - SeamlessLoadingScreenStarted);
+	if (UWorld* World = GetWorld(); World && Remaining > 0.0)
+	{
+		FTimerHandle FinishTimer;
+		World->GetTimerManager().SetTimer(FinishTimer, this,
+			&ThisClass::FinishSeamlessLoadingScreen, FMath::Max(static_cast<float>(Remaining), 0.001f), false);
+		return;
+	}
+	if (SeamlessLoadingWidget.IsValid() && GetGameViewportClient())
+	{
+		GetGameViewportClient()->RemoveViewportWidgetContent(SeamlessLoadingWidget.ToSharedRef());
+	}
+	SeamlessLoadingWidget.Reset();
+	bSeamlessLoadingScreen = false;
+	bLoadingScreenPrepared = false;
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[LoadingScreen] Seamless loading finished after %.2f seconds: %s"),
+		FPlatformTime::Seconds() - SeamlessLoadingScreenStarted, *GetNameSafe(GetWorld()));
 }
 
 bool UCh4_multiGameGameInstance::StoreLocalCharacterRequest(

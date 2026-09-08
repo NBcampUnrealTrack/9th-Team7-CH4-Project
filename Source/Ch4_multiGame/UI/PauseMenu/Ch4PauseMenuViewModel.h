@@ -12,6 +12,7 @@ class CH4_MULTIGAME_API UCh4PauseMenuViewModel : public UMVVMViewModelBase
 	GENERATED_BODY()
 	
 public:
+	void InitializeWithPlayerController(class ACh4_multiGamePlayerController* PlayerController);
 	// ----------------------------------------------------------------
 	// [State] View Binding용 데이터 속성
 	// ----------------------------------------------------------------
@@ -49,6 +50,7 @@ public:
 	void QuitGame();
 	
 private:
+	TWeakObjectPtr<class ACh4_multiGamePlayerController> OwningPlayerController;
 	class ACh4_multiGamePlayerController* GetOwningCh4PlayerController() const;
 	
 };

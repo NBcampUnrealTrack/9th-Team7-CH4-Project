@@ -184,6 +184,7 @@ void ACh4_multiGamePlayerState::CopyProperties(APlayerState* NewPlayerState)
 	Super::CopyProperties(NewPlayerState);
 	if (ACh4_multiGamePlayerState* TargetPS = Cast<ACh4_multiGamePlayerState>(NewPlayerState))
 	{
+		// Both selections survive the Lobby/Gameplay state swap; Ready is not copied.
 		TargetPS->CharacterType = CharacterType;
 		TargetPS->EquippedHeadwearID = EquippedHeadwearID;
 	}

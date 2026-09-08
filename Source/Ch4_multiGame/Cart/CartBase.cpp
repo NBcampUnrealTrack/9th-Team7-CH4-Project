@@ -17,10 +17,11 @@ ACartBase::ACartBase()
     SetRootComponent(CartMesh);
 
     CartMesh->SetSimulatePhysics(true);
-    CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
+    // Store defaults without updating physics before GEngine exists during native CDO construction.
+    CartMesh->BodyInstance.SetMassOverride(220.0f, true);
     CartMesh->SetLinearDamping(0.5f);
     CartMesh->SetAngularDamping(3.0f);
-    CartMesh->SetCenterOfMass(FVector(-20.0f, 0.0f, 0.0f));
+    CartMesh->BodyInstance.COMNudge = FVector(-20.0f, 0.0f, 0.0f);
 
     // 기획: 카트는 절대 전복되지 않는다. Yaw만 남기고 Roll/Pitch를 잠근다.
     CartMesh->BodyInstance.bLockXRotation = true;

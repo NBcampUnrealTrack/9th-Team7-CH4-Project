@@ -30,6 +30,9 @@ protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FCh4SeamlessStateTest;
+#endif
 	/** Server-only state change. Returns false if the requested state is already active. */
 	bool SetReadyState(bool bNewReady);
 

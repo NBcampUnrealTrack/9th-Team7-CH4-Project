@@ -1,14 +1,24 @@
 #include "UI/PauseMenu/Ch4PauseMenuViewModel.h"
 #include "Ch4_multiGamePlayerController.h"
-#include "Kismet/GameplayStatics.h"
+#include "Blueprint/UserWidget.h"
+
+void UCh4PauseMenuViewModel::InitializeWithPlayerController(ACh4_multiGamePlayerController* PlayerController)
+{
+	OwningPlayerController = PlayerController;
+}
 
 ACh4_multiGamePlayerController* UCh4PauseMenuViewModel::GetOwningCh4PlayerController() const
 {
-	if (UWorld* World = GetWorld())
+	ACh4_multiGamePlayerController* Controller = OwningPlayerController.Get();
+	if (!Controller) Controller = GetTypedOuter<ACh4_multiGamePlayerController>();
+	if (!Controller)
 	{
-		return Cast<ACh4_multiGamePlayerController>(World->GetFirstPlayerController());
+		if (const UUserWidget* Widget = GetTypedOuter<UUserWidget>())
+		{
+			Controller = Cast<ACh4_multiGamePlayerController>(Widget->GetOwningPlayer());
+		}
 	}
-	return nullptr;
+	return Controller && Controller->IsLocalController() ? Controller : nullptr;
 }
 
 // Settings 패널 표시 여부 변경 (FieldNotify 변경 알림 포함)

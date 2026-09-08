@@ -5,6 +5,8 @@
 #include "Lobby/Ch4_multiGameLobbyGameMode.h"
 
 #include "Misc/AutomationTest.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "Player/Ch4CharacterTypes.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -13,9 +15,41 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCh4LobbyCookedMapValidationTest,
+	"Ch4_multiGame.Lobby.CookedMapValidation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCh4LobbyCharacterAssignmentTest,
 	"Ch4_multiGame.Lobby.CharacterAssignment",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCh4LobbyCookedMapValidationTest::RunTest(const FString& Parameters)
+{
+	const FString ForestPackage = TEXT("/Game/Map/Level/ForestLevel");
+	const TSoftObjectPtr<UWorld> ForestMap(FSoftObjectPath(ForestPackage + TEXT(".ForestLevel")));
+	FString PackageFilename;
+	TestTrue(TEXT("Cooked Forest package exists"),
+		FPackageName::DoesPackageExist(ForestPackage, &PackageFilename));
+#if !WITH_EDITOR
+	// Run in the real IoStore package as well as the editor: the old filename
+	// extension check passes editor tests but rejects this cooked package.
+	TestTrue(TEXT("IoDispatcher package path deliberately has no filename extension"),
+		FPaths::GetExtension(PackageFilename).IsEmpty());
+#endif
+	FString SelectedPackage;
+	TestTrue(TEXT("A valid World in IoStore remains selectable"),
+		ACh4_multiGameLobbyGameMode::TrySelectRandomGameplayMap({ForestMap}, SelectedPackage));
+	TestEqual(TEXT("ServerTravel receives the long package path without an object suffix"),
+		SelectedPackage, ForestPackage);
+	TestFalse(TEXT("An existing package with a nonexistent World object is rejected"),
+		ACh4_multiGameLobbyGameMode::TrySelectRandomGameplayMap(
+			{TSoftObjectPtr<UWorld>(FSoftObjectPath(ForestPackage + TEXT(".MissingWorld")))}, SelectedPackage));
+	TestTrue(TEXT("Rejected selection leaves no stale destination"), SelectedPackage.IsEmpty());
+	TestTrue(TEXT("A subsequent valid attempt succeeds after a rejected selection"),
+		ACh4_multiGameLobbyGameMode::TrySelectRandomGameplayMap({ForestMap}, SelectedPackage));
+	return true;
+}
 
 bool FCh4LobbyCharacterAssignmentTest::RunTest(const FString& Parameters)
 {
