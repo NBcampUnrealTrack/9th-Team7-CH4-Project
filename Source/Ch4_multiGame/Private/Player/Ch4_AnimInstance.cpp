@@ -28,6 +28,6 @@ void UCh4_AnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	bShouldMove = ((OwnerCharacterMovementComponent->GetCurrentAcceleration().IsNearlyZero()) == false)
 	&& (3.f < GroundSpeed);
 	bIsFalling = OwnerCharacterMovementComponent->IsFalling();
-	bIsGrabbing = OwnerCharacter->GrabbedComponent != nullptr;
+	bIsGrabbing = (OwnerCharacter->GrabbedComponent != nullptr) || (OwnerCharacter->GrabbedCart != nullptr);
 }
 

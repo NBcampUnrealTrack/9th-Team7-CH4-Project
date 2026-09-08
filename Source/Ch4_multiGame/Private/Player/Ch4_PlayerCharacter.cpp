@@ -334,7 +334,7 @@ void ACh4_PlayerCharacter::InputActionLook(const struct FInputActionValue& Value
 
 void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
 {
-	if (bIsStunned)
+	if (bIsStunned || GrabbedCart)
 	{
 		return;
 	}
@@ -351,27 +351,67 @@ void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
 
 void ACh4_PlayerCharacter::InputActionEmote1(const struct FInputActionValue& Value)
 {
+	if (bIsStunned)
+	{
+		return;
+	}
+	
+	if (GrabbedComponent || GrabbedCart)
+	{
+		return;
+	}
+	
 	PlayEmotion(EEmotionType::Emote1);
 }
 
 void ACh4_PlayerCharacter::InputActionEmote2(const struct FInputActionValue& Value)
 {
+	if (bIsStunned)
+	{
+		return;
+	}
+	
+	if (GrabbedComponent || GrabbedCart)
+	{
+		return;
+	}
+	
 	PlayEmotion(EEmotionType::Emote2);
 }
 
 void ACh4_PlayerCharacter::InputActionEmote3(const struct FInputActionValue& Value)
 {
+	if (bIsStunned)
+	{
+		return;
+	}
+	
+	if (GrabbedComponent || GrabbedCart)
+	{
+		return;
+	}
+	
 	PlayEmotion(EEmotionType::Emote3);
 }
 
 void ACh4_PlayerCharacter::InputActionEmote4(const struct FInputActionValue& Value)
 {
+	if (bIsStunned)
+	{
+		return;
+	}
+	
+	if (GrabbedComponent || GrabbedCart)
+	{
+		return;
+	}
+	
 	PlayEmotion(EEmotionType::Emote4);
 }
 
 void ACh4_PlayerCharacter::InputActionGrab(const FInputActionValue& Value)
 {
-	if (bIsStunned)
+	if (bIsStunned || GrabbedCart)
 	{
 		return;
 	}
@@ -408,6 +448,11 @@ void ACh4_PlayerCharacter::InputActionGrab(const FInputActionValue& Value)
 
 void ACh4_PlayerCharacter::InputActionCartGrab(const struct FInputActionValue& Value)
 {
+	if (bIsStunned || GrabbedComponent)
+	{
+		return;
+	}
+	
 	if (GrabbedCart)
 	{
 		GrabbedCart->ServerRequestRelease(this);
