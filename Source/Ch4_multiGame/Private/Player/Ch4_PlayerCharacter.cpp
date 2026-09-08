@@ -678,6 +678,11 @@ void ACh4_PlayerCharacter::MulticastRPC_PlayEmotion_Implementation(EEmotionType 
 
 void ACh4_PlayerCharacter::InterruptEmotionMontage()
 {
+	if (IsEmotionMontagePlaying() == false)
+	{
+		return;   // 재생 중인 감정이 없으면 RPC를 보낼 필요가 없음
+	}
+	
 	StopEmotionMontages();
 
 	if (HasAuthority())
@@ -697,7 +702,7 @@ void ACh4_PlayerCharacter::StopEmotionMontages(float BlendOutTime)
 		return;
 	}
 
-	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 	if (AnimInstance == nullptr)
 	{
 		return;
@@ -710,6 +715,30 @@ void ACh4_PlayerCharacter::StopEmotionMontages(float BlendOutTime)
 			AnimInstance->Montage_Stop(BlendOutTime, EmotionData.EmoteMontage);
 		}
 	}
+}
+
+bool ACh4_PlayerCharacter::IsEmotionMontagePlaying() const
+{
+	if (EmotionDataAsset == nullptr)
+	{
+		return false;
+	}
+
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance == nullptr)
+	{
+		return false;
+	}
+
+	for (const FEmotionData& EmotionData : EmotionDataAsset->EmotionDataList)
+	{
+		if (EmotionData.EmoteMontage && AnimInstance->Montage_IsPlaying(EmotionData.EmoteMontage))
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
 void ACh4_PlayerCharacter::ServerRPC_InterruptEmotionMontage_Implementation()

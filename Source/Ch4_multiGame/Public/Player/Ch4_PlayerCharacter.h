@@ -195,6 +195,8 @@ protected:
 
 	void StopEmotionMontages(float BlendOutTime = 0.1f);
 
+	bool IsEmotionMontagePlaying() const;
+	
 	UFUNCTION(Server, Reliable)
 	void ServerRPC_PlayEmotion(EEmotionType EmotionType);
 
