@@ -36,6 +36,12 @@ public:
 	bool TryGetLocalCharacterType(ECh4CharacterType& OutCharacterType) const;
 	bool HasPendingCharacterRequest() const { return bHasPendingCharacterRequest; }
 
+	/** Records the owning local player's newest headwear choice before its server RPC is confirmed. */
+	bool StoreLocalHeadwearRequest(FName HeadwearID);
+	bool CacheAuthoritativeHeadwear(FName HeadwearID);
+	bool TryGetLocalHeadwear(FName& OutHeadwearID) const;
+	bool HasPendingHeadwearRequest() const { return bHasPendingHeadwearRequest; }
+
 	UFUNCTION(BlueprintPure, Category="Player|Character")
 	TSubclassOf<ACh4_PlayerCharacter> LoadCharacterClass(ECh4CharacterType CharacterType) const;
 
@@ -70,4 +76,13 @@ private:
 
 	UPROPERTY(Transient)
 	bool bHasPendingCharacterRequest = false;
+
+	UPROPERTY(Transient)
+	FName LocalHeadwearID = NAME_None;
+
+	UPROPERTY(Transient)
+	bool bHasPendingHeadwearRequest = false;
+
+	UPROPERTY(Transient)
+	bool bHasStoredHeadwear = false;
 };

@@ -111,6 +111,14 @@ ACh4_multiGamePlayerController::ACh4_multiGamePlayerController()
 	{
 		VoiceToggleAction = VoiceToggleActionFinder.Object;
 	}
+
+	// IMC_Default 로드 (본 게임 및 전체 레벨에서 P키 일시정지 및 보이스 토글 입력 보장)
+	static ConstructorHelpers::FObjectFinder<UInputMappingContext> DefaultContextFinder(
+		TEXT("/Game/Input/IMC_Default.IMC_Default"));
+	if (DefaultContextFinder.Succeeded())
+	{
+		DefaultMappingContexts.AddUnique(DefaultContextFinder.Object);
+	}
 }
 
 void ACh4_multiGamePlayerController::JoinHamachi(FString HostIPv4)
@@ -226,44 +234,7 @@ void ACh4_multiGamePlayerController::BeginPlay()
 			}
 		}
 
-		// 1. Enhanced Input Subsystem에 Mapping Context 등록 보장
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
-		{
-			for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
-			{
-				if (CurrentContext)
-				{
-					Subsystem->AddMappingContext(CurrentContext, 0);
-				}
-			}
-
-			if (!ShouldUseTouchControls())
-			{
-				for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
-				{
-					if (CurrentContext)
-					{
-						Subsystem->AddMappingContext(CurrentContext, 0);
-					}
-				}
-			}
-		}
-
-		// 2. PauseAction 및 VoiceToggleAction 키 바인딩
-		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
-		{
-			if (PauseAction)
-			{
-				EnhancedInputComponent->BindAction(PauseAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::TogglePauseMenu);
-			}
-
-			if (VoiceToggleAction)
-			{
-				EnhancedInputComponent->BindAction(VoiceToggleAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::ToggleVoice);
-			}
-		}
-
-		// 3. spawn touch controls on mobile platforms
+		// spawn touch controls on mobile platforms
 		if (ShouldUseTouchControls())
 		{
 			MobileControlsWidget = CreateWidget<UUserWidget>(this, MobileControlsWidgetClass);
@@ -342,6 +313,47 @@ void ACh4_multiGamePlayerController::ApplyServerCharacterType(
 	}
 }
 
+void ACh4_multiGamePlayerController::RequestHeadwear(const FName HeadwearID)
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	if (UCh4_multiGameGameInstance* GameInstance =
+		GetGameInstance<UCh4_multiGameGameInstance>())
+	{
+		GameInstance->StoreLocalHeadwearRequest(HeadwearID);
+	}
+
+	if (HasAuthority())
+	{
+		ApplyServerHeadwear(HeadwearID);
+	}
+	else
+	{
+		ServerRequestHeadwear(HeadwearID);
+	}
+}
+
+void ACh4_multiGamePlayerController::ServerRequestHeadwear_Implementation(const FName HeadwearID)
+{
+	ApplyServerHeadwear(HeadwearID);
+}
+
+void ACh4_multiGamePlayerController::ApplyServerHeadwear(const FName HeadwearID)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (ACh4_multiGamePlayerState* PS = GetPlayerState<ACh4_multiGamePlayerState>())
+	{
+		PS->SetEquippedHeadwearFromServer(HeadwearID);
+	}
+}
+
 void ACh4_multiGamePlayerController::SynchronizeCharacterSelectionForCurrentWorld()
 {
 	if (!IsLocalPlayerController())
@@ -366,36 +378,54 @@ void ACh4_multiGamePlayerController::SynchronizeCharacterSelectionForCurrentWorl
 		{
 			GameInstance->CacheAuthoritativeCharacterType(LobbyCharacterType);
 		}
+		const FName LobbyHeadwear = CharacterPlayerState->GetEquippedHeadwearID();
+		GameInstance->CacheAuthoritativeHeadwear(LobbyHeadwear);
 		return;
 	}
 
-	if (bSubmittedPersistedCharacterType)
+	if (!bSubmittedPersistedCharacterType)
 	{
-		return;
+		ECh4CharacterType PersistedCharacterType = ECh4CharacterType::Invalid;
+		if (GameInstance->TryGetLocalCharacterType(PersistedCharacterType))
+		{
+			GameInstance->StoreLocalCharacterRequest(PersistedCharacterType);
+			bSubmittedPersistedCharacterType = true;
+			if (HasAuthority())
+			{
+				ApplyServerCharacterType(PersistedCharacterType);
+			}
+			else
+			{
+				ServerRequestCharacterType(PersistedCharacterType);
+			}
+
+			UE_LOG(LogCh4_multiGame, Log,
+				TEXT("[CharacterSelection] Re-registered local selection after travel: %s"),
+				*UEnum::GetValueAsString(PersistedCharacterType));
+		}
 	}
 
-	ECh4CharacterType PersistedCharacterType = ECh4CharacterType::Invalid;
-	if (!GameInstance->TryGetLocalCharacterType(PersistedCharacterType))
+	if (!bSubmittedPersistedHeadwear)
 	{
-		return;
-	}
+		FName PersistedHeadwearID = NAME_None;
+		if (GameInstance->TryGetLocalHeadwear(PersistedHeadwearID))
+		{
+			GameInstance->StoreLocalHeadwearRequest(PersistedHeadwearID);
+			bSubmittedPersistedHeadwear = true;
+			if (HasAuthority())
+			{
+				ApplyServerHeadwear(PersistedHeadwearID);
+			}
+			else
+			{
+				ServerRequestHeadwear(PersistedHeadwearID);
+			}
 
-	// Protect the persisted choice from any older replication until the new world's
-	// PlayerState confirms this re-registration.
-	GameInstance->StoreLocalCharacterRequest(PersistedCharacterType);
-	bSubmittedPersistedCharacterType = true;
-	if (HasAuthority())
-	{
-		ApplyServerCharacterType(PersistedCharacterType);
+			UE_LOG(LogCh4_multiGame, Log,
+				TEXT("[HeadwearSelection] Re-registered local headwear after travel: %s"),
+				*PersistedHeadwearID.ToString());
+		}
 	}
-	else
-	{
-		ServerRequestCharacterType(PersistedCharacterType);
-	}
-
-	UE_LOG(LogCh4_multiGame, Log,
-		TEXT("[CharacterSelection] Re-registered local selection after travel: %s"),
-		*UEnum::GetValueAsString(PersistedCharacterType));
 }
 
 void ACh4_multiGamePlayerController::SetupInputComponent()
@@ -408,6 +438,12 @@ void ACh4_multiGamePlayerController::SetupInputComponent()
 		// Add Input Mapping Contexts
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 		{
+			// 1. IMC_Default 확실하게 런타임 로드 및 우선순위 등록 (CDO 의존 제거)
+			if (UInputMappingContext* DefaultIMC = LoadObject<UInputMappingContext>(nullptr, TEXT("/Game/Input/IMC_Default.IMC_Default")))
+			{
+				Subsystem->AddMappingContext(DefaultIMC, 1);
+			}
+
 			for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
 			{
 				if (CurrentContext)
@@ -427,6 +463,36 @@ void ACh4_multiGamePlayerController::SetupInputComponent()
 					}
 				}
 			}
+		}
+
+		// 2. PauseAction 및 VoiceToggleAction 런타임 로드 보장
+		if (!PauseAction)
+		{
+			PauseAction = LoadObject<UInputAction>(nullptr, TEXT("/Game/Input/Actions/IA_Pause.IA_Pause"));
+		}
+		if (!VoiceToggleAction)
+		{
+			VoiceToggleAction = LoadObject<UInputAction>(nullptr, TEXT("/Game/Input/Actions/IA_VoiceToggle.IA_VoiceToggle"));
+		}
+
+		// Enhanced Input 액션 바인딩
+		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
+		{
+			if (PauseAction)
+			{
+				EnhancedInputComponent->BindAction(PauseAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::TogglePauseMenu);
+			}
+
+			if (VoiceToggleAction)
+			{
+				EnhancedInputComponent->BindAction(VoiceToggleAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::ToggleVoice);
+			}
+		}
+
+		// 3. Fallback: P키 직접 바인딩 (Enhanced Input 매핑 누락이나 우선순위 충돌 시에도 100% 동작 보장)
+		if (InputComponent)
+		{
+			InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ACh4_multiGamePlayerController::TogglePauseMenu);
 		}
 	}
 }
@@ -466,7 +532,16 @@ void ACh4_multiGamePlayerController::ToggleVoice()
 void ACh4_multiGamePlayerController::TogglePauseMenu()
 {
 	if (!IsLocalPlayerController()) return;
-	
+
+	// 중복/동일 프레임 연속 호출 방지 (최소 0.2초 쿨다운 디바운스)
+	const double CurrentTime = FPlatformTime::Seconds();
+	static double LastToggleTime = 0.0;
+	if (CurrentTime - LastToggleTime < 0.2)
+	{
+		return;
+	}
+	LastToggleTime = CurrentTime;
+
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, TEXT("[PauseMenu] P Key Pressed! TogglePauseMenu() Called"));
@@ -488,7 +563,6 @@ void ACh4_multiGamePlayerController::ShowPauseMenu()
 
 	if (!PauseMenuWidgetClass)
 	{
-		// C++ 생성자 대신 필요할 때 안전하게 지연 로드 (에디터 부팅 시점 MVVM 충돌 완전 방지)
 		PauseMenuWidgetClass = StaticLoadClass(UUserWidget::StaticClass(), nullptr, TEXT("/Game/UI/WBP_PauseMenu.WBP_PauseMenu_C"));
 	}
 
@@ -507,15 +581,22 @@ void ACh4_multiGamePlayerController::ShowPauseMenu()
 		PauseMenuViewModel = NewObject<UCh4PauseMenuViewModel>(this);
 	}
 
-	// 2. 아직 위젯을 만든 적이 없다면 새로 생성
-	if (!PauseMenuWidget)
+	// 2. 아직 위젯을 만든 적이 없거나 월드가 바뀌어 유효하지 않다면 새로 생성
+	if (!IsValid(PauseMenuWidget) || PauseMenuWidget->GetWorld() != GetWorld())
 	{
 		PauseMenuWidget = CreateWidget<UUserWidget>(this, PauseMenuWidgetClass);
 	}
 	
 	if (PauseMenuWidget)
 	{
-		// 3. 위젯의 MVVM ViewModel Setter가 있다면 안전하게 주입
+		// 3. MVVM 공식 서브시스템을 통한 확실한 뷰모델 의존성 주입
+		if (UMVVMView* View = UMVVMSubsystem::GetViewFromUserWidget(PauseMenuWidget))
+		{
+			View->SetViewModel(FName("Ch4PauseMenuViewModel"), PauseMenuViewModel);
+			View->SetViewModelByClass(PauseMenuViewModel);
+			View->ExecuteViewModelBindings(FName("Ch4PauseMenuViewModel"));
+		}
+
 		if (UFunction* SetVMFunc = PauseMenuWidget->FindFunction(FName("SetCh4PauseMenuViewModel")))
 		{
 			struct FSetVMParams
@@ -531,20 +612,22 @@ void ACh4_multiGamePlayerController::ShowPauseMenu()
 		{
 			// 화면에 위젯 띄우기 (ZOrder: 100)
 			PauseMenuWidget->AddToViewport(100);
-			
-			// 마우스 커서 보이게 하기
-			bShowMouseCursor = true;
-			
-			// 입력 모드를 GameAndUI로 변경
-			FInputModeGameAndUI InputMode;
-			InputMode.SetWidgetToFocus(PauseMenuWidget->TakeWidget());
-			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-			SetInputMode(InputMode);
+		}
 
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, TEXT("[PauseMenu] Widget & ViewModel Loaded Successfully!"));
-			}
+		PauseMenuWidget->SetVisibility(ESlateVisibility::Visible);
+		
+		// 마우스 커서 보이게 하기
+		bShowMouseCursor = true;
+		
+		// 입력 모드를 GameAndUI로 변경
+		FInputModeGameAndUI InputMode;
+		InputMode.SetWidgetToFocus(PauseMenuWidget->TakeWidget());
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		SetInputMode(InputMode);
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, TEXT("[PauseMenu] Widget & ViewModel Loaded Successfully!"));
 		}
 	}
 }
@@ -556,6 +639,7 @@ void ACh4_multiGamePlayerController::HidePauseMenu()
 	if (PauseMenuWidget && PauseMenuWidget->IsInViewport())
 	{
 		// 1. 화면에서 위젯 내리기
+		PauseMenuWidget->SetVisibility(ESlateVisibility::Collapsed);
 		PauseMenuWidget->RemoveFromParent();
 	}
 	

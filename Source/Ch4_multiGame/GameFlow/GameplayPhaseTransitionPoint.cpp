@@ -58,7 +58,7 @@ bool AGameplayPhaseTransitionPoint::StartPreparationTimer()
 	{
 		return false;
 	}
-	const ACh4_multiGameGameState* State = GetWorld()->GetGameState<ACh4_multiGameGameState>();
+	ACh4_multiGameGameState* State = GetWorld()->GetGameState<ACh4_multiGameGameState>();
 	if (!GetGameRule() || !State || State->GetCurrentGamePhase() != ECh4GamePhase::Waiting
 		|| State->GetInitialCargoCount() != 0 || !FMath::IsFinite(PreparationDurationSeconds)
 		|| PreparationDurationSeconds < 0.0f || (GetNetMode() != NM_Standalone && !GetIsReplicated()))
@@ -67,6 +67,7 @@ bool AGameplayPhaseTransitionPoint::StartPreparationTimer()
 		return false;
 	}
 	bPreparationTimerStarted = true;
+	State->SetPreparationTimer(PreparationDurationSeconds);
 	if (PreparationDurationSeconds > 0.0f)
 	{
 		GetWorldTimerManager().SetTimer(PreparationTimer, this,

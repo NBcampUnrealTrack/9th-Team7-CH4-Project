@@ -181,6 +181,38 @@ bool UCh4_multiGameGameInstance::TryGetLocalCharacterType(ECh4CharacterType& Out
 	return true;
 }
 
+bool UCh4_multiGameGameInstance::StoreLocalHeadwearRequest(const FName HeadwearID)
+{
+	LocalHeadwearID = HeadwearID;
+	bHasPendingHeadwearRequest = true;
+	bHasStoredHeadwear = true;
+	return true;
+}
+
+bool UCh4_multiGameGameInstance::CacheAuthoritativeHeadwear(const FName HeadwearID)
+{
+	if (bHasPendingHeadwearRequest && HeadwearID != LocalHeadwearID)
+	{
+		return false;
+	}
+
+	LocalHeadwearID = HeadwearID;
+	bHasPendingHeadwearRequest = false;
+	bHasStoredHeadwear = true;
+	return true;
+}
+
+bool UCh4_multiGameGameInstance::TryGetLocalHeadwear(FName& OutHeadwearID) const
+{
+	if (!bHasStoredHeadwear)
+	{
+		return false;
+	}
+
+	OutHeadwearID = LocalHeadwearID;
+	return true;
+}
+
 TSubclassOf<ACh4_PlayerCharacter> UCh4_multiGameGameInstance::LoadCharacterClass(
 	const ECh4CharacterType CharacterType) const
 {

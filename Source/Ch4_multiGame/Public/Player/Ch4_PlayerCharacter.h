@@ -103,10 +103,13 @@ public:
 	TObjectPtr<class UStaticMeshComponent> HatMeshComponent;
 
 	UPROPERTY(EditDefaultsOnly, Category="Hat")
-	FName HatSocketName = TEXT("HatSocket");
+	FName HatSocketName = TEXT("S_Headwear");
 
 	UFUNCTION(BlueprintCallable, Category="Hat")
 	void SetHatMesh(class UStaticMesh* NewHat);
+
+	UFUNCTION(BlueprintCallable, Category="Hat")
+	void ApplyHeadwear(FName HeadwearID);
 	
 protected:
 	// 각 동물 BP의 Class Defaults에서 설정한다.
@@ -127,6 +130,9 @@ protected:
 
 	UPROPERTY(Transient)
 	ECh4CharacterType CurrentCharacterType = ECh4CharacterType::Invalid;
+
+	UPROPERTY(Transient)
+	FName CurrentHeadwearID = NAME_None;
 
 	void InitializeCharacterPhysics();
 

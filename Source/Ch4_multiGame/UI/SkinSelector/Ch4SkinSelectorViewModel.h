@@ -19,6 +19,8 @@ class CH4_MULTIGAME_API UCh4SkinSelectorViewModel : public UMVVMViewModelBase
 	GENERATED_BODY()
 
 public:
+	virtual UWorld* GetWorld() const override;
+
 	// ----------------------------------------------------------------
 	// [State] View Binding용 상태 프로퍼티 (FieldNotify)
 	// ----------------------------------------------------------------
@@ -157,11 +159,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SkinSelector|Actions")
 	void CloseFittingRoom();
 
+	virtual void BeginDestroy() override;
+
 private:
+	UUserWidget* GetOwningUserWidget() const;
 	ACh4_multiGamePlayerController* GetOwningCh4PlayerController() const;
 	ACh4_multiGamePlayerState* GetOwningCh4PlayerState() const;
 	ACh4_PlayerCharacter* GetOwningCh4Character() const;
 
+	void RestoreGameInputMode();
 	void UpdateAnimalSelectionBooleans();
 	void UpdateHatSelectionBooleans();
 	FName GetEquippedHeadwearIDFromCharacter() const;

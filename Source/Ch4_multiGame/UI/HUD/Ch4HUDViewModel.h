@@ -52,6 +52,34 @@ public:
 	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Voice")
 	ESlateVisibility MicOffVisibility = ESlateVisibility::Visible; // 꺼짐 아이콘 가시성
 
+	// --- 60초 카운트다운 타이머 -----
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Timer")
+	FText TimerText = FText::FromString(TEXT("60"));
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Timer")
+	float TimerRatio = 1.0f; // 0.0 ~ 1.0 (원형 프로그레스 바 Fill용)
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Timer")
+	bool bIsTimerActive = false;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Timer")
+	bool bIsUrgent = false; // 10초 이하 시 true (위기 알림용)
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Timer")
+	FSlateColor TimerColor = FSlateColor(FLinearColor(1.0f, 0.95f, 0.85f));
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Timer")
+	ESlateVisibility TimerVisibility = ESlateVisibility::Collapsed;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Timer")
+	FVector2D TimerScale = FVector2D(1.0f, 1.0f);
+
+	UFUNCTION(BlueprintCallable, Category = "HUD|Timer")
+	void StartTimerTick();
+
+	UFUNCTION(BlueprintCallable, Category = "HUD|Timer")
+	void StopTimerTick();
+
 	UFUNCTION(BlueprintCallable, Category = "HUD|Voice")
 	void ToggleMic();
 
@@ -68,11 +96,18 @@ private:
 	UFUNCTION()
 	void OnLobbyReadyChanged(bool bNewReady);
 
+	UFUNCTION()
+	void OnPreparationTimerUpdated(float RemainingSeconds, float TotalSeconds);
+
+	void UpdateTimerTick();
 	void TryBindLobbyPlayerState();
 	void AutoInitializeIfPossible();
 
 private:
 	TWeakObjectPtr<APlayerController> CachedPC;
 	FTimerHandle LobbyBindTimer;
+	FTimerHandle TimerTickHandle;
+	int32 LastDisplaySeconds = -1;
+	float CurrentScaleValue = 1.0f;
 	bool bIsInitialized = false;
 };

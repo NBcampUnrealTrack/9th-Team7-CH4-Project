@@ -115,6 +115,7 @@ void ACh4_PlayerCharacter::ApplyCharacterTypeFromPlayerState()
 		GetPlayerState<ACh4_multiGamePlayerState>())
 	{
 		ApplyCharacterType(CharacterPlayerState->GetCharacterType());
+		ApplyHeadwear(CharacterPlayerState->GetEquippedHeadwearID());
 	}
 }
 
@@ -212,6 +213,11 @@ void ACh4_PlayerCharacter::ApplyCharacterType(const ECh4CharacterType CharacterT
 	// 블루프린트 래그돌 초기화용 이벤트 발생
 	OnCharacterTypeApplied(CharacterType);
 	OnCharacterTypeChanged(MappedAnimalIndex);
+
+	if (!CurrentHeadwearID.IsNone())
+	{
+		ApplyHeadwear(CurrentHeadwearID);
+	}
 }
 
 void ACh4_PlayerCharacter::InitializeCharacterPhysics()
@@ -277,6 +283,23 @@ void ACh4_PlayerCharacter::SetHatMesh(class UStaticMesh* NewHat)
 		return;
 	}
 
+	FName EffectiveSocketName = HatSocketName;
+	if (GetMesh())
+	{
+		if (EffectiveSocketName.IsNone() || EffectiveSocketName == FName(TEXT("HatSocket")) || !GetMesh()->DoesSocketExist(EffectiveSocketName))
+		{
+			if (GetMesh()->DoesSocketExist(TEXT("S_Headwear")))
+			{
+				EffectiveSocketName = TEXT("S_Headwear");
+			}
+		}
+
+		HatMeshComponent->AttachToComponent(
+			GetMesh(),
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+			EffectiveSocketName);
+	}
+
 	if (NewHat)
 	{
 		HatMeshComponent->SetStaticMesh(NewHat);
@@ -286,6 +309,112 @@ void ACh4_PlayerCharacter::SetHatMesh(class UStaticMesh* NewHat)
 	{
 		HatMeshComponent->SetStaticMesh(nullptr);
 		HatMeshComponent->SetVisibility(false);
+	}
+}
+
+void ACh4_PlayerCharacter::ApplyHeadwear(FName HeadwearID)
+{
+	CurrentHeadwearID = HeadwearID;
+
+	FName EffectiveSocketName = HatSocketName;
+	if (GetMesh())
+	{
+		if (EffectiveSocketName.IsNone() || EffectiveSocketName == FName(TEXT("HatSocket")) || !GetMesh()->DoesSocketExist(EffectiveSocketName))
+		{
+			if (GetMesh()->DoesSocketExist(TEXT("S_Headwear")))
+			{
+				EffectiveSocketName = TEXT("S_Headwear");
+			}
+		}
+
+		if (HatMeshComponent)
+		{
+			HatMeshComponent->ComponentTags.AddUnique(FName(TEXT("Headwear")));
+			HatMeshComponent->AttachToComponent(
+				GetMesh(),
+				FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+				EffectiveSocketName);
+		}
+	}
+
+	for (UActorComponent* Comp : GetComponents())
+	{
+		if (Comp && Comp->GetClass()->GetName().Contains(TEXT("BPC_AccessoryEquipment")))
+		{
+			// BPC_AccessoryEquipment의 HeadwearComponent를 HatMeshComponent로 사전 바인딩하여 Accessed None 방지
+			if (FObjectProperty* MeshProp = CastField<FObjectProperty>(Comp->GetClass()->FindPropertyByName(TEXT("HeadwearComponent"))))
+			{
+				MeshProp->SetObjectPropertyValue_InContainer(Comp, HatMeshComponent);
+			}
+
+			if (FProperty* Prop = Comp->GetClass()->FindPropertyByName(TEXT("AnimalType")))
+			{
+				uint8 AnimalIndex = 3;
+				switch (CurrentCharacterType)
+				{
+				case ECh4CharacterType::Dog:     AnimalIndex = 0; break;
+				case ECh4CharacterType::Otter:   AnimalIndex = 1; break;
+				case ECh4CharacterType::Gorilla: AnimalIndex = 2; break;
+				case ECh4CharacterType::Cat:     AnimalIndex = 3; break;
+				default: break;
+				}
+
+				if (FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
+				{
+					ByteProp->SetPropertyValue_InContainer(Comp, AnimalIndex);
+				}
+				else if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+				{
+					if (FNumericProperty* UnderlyingProp = EnumProp->GetUnderlyingProperty())
+					{
+						UnderlyingProp->SetIntPropertyValue(
+							EnumProp->ContainerPtrToValuePtr<void>(Comp),
+							static_cast<int64>(AnimalIndex));
+					}
+				}
+			}
+
+			if (HeadwearID.IsNone())
+			{
+				// 현재 장착된 모자가 있었던 경우에만 UnequipHeadwear 호출
+				FName CurrentlyEquipped = NAME_None;
+				if (FProperty* HatProp = Comp->GetClass()->FindPropertyByName(TEXT("EquippedHeadwearID")))
+				{
+					if (FNameProperty* NameProp = CastField<FNameProperty>(HatProp))
+					{
+						CurrentlyEquipped = NameProp->GetPropertyValue_InContainer(Comp);
+					}
+				}
+
+				if (!CurrentlyEquipped.IsNone())
+				{
+					if (UFunction* UnequipFunc = Comp->FindFunction(TEXT("UnequipHeadwear")))
+					{
+						Comp->ProcessEvent(UnequipFunc, nullptr);
+					}
+				}
+
+				if (HatMeshComponent)
+				{
+					HatMeshComponent->SetStaticMesh(nullptr);
+					HatMeshComponent->SetVisibility(false);
+				}
+			}
+			else
+			{
+				if (UFunction* EquipFunc = Comp->FindFunction(TEXT("EquipHeadwear")))
+				{
+					struct { FName ID; } Params{ HeadwearID };
+					Comp->ProcessEvent(EquipFunc, &Params);
+					if (HatMeshComponent)
+					{
+						HatMeshComponent->SetVisibility(true);
+						HatMeshComponent->MarkRenderStateDirty();
+					}
+				}
+			}
+			return;
+		}
 	}
 }
 

@@ -14,6 +14,8 @@ void ACh4_multiGameGameState::GetLifetimeReplicatedProps(TArray<FLifetimePropert
 	DOREPLIFETIME(ACh4_multiGameGameState, FinalCargoScore);
 	DOREPLIFETIME(ACh4_multiGameGameState, GameEndReason);
 	DOREPLIFETIME(ACh4_multiGameGameState, CurrentGamePhase);
+	DOREPLIFETIME(ACh4_multiGameGameState, PreparationEndTime);
+	DOREPLIFETIME(ACh4_multiGameGameState, PreparationTotalDuration);
 }
 
 int32 ACh4_multiGameGameState::GetLostCargoCount() const
@@ -132,4 +134,40 @@ void ACh4_multiGameGameState::OnRep_CargoCounts()
 void ACh4_multiGameGameState::BroadcastCargoCountChanged()
 {
 	OnCargoCountChanged.Broadcast(RemainingCargoCount, InitialCargoCount);
+}
+
+void ACh4_multiGameGameState::SetPreparationTimer(float DurationSeconds)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	PreparationTotalDuration = DurationSeconds;
+	PreparationEndTime = GetServerWorldTimeSeconds() + DurationSeconds;
+	OnRep_PreparationEndTime();
+	ForceNetUpdate();
+}
+
+void ACh4_multiGameGameState::OnRep_PreparationEndTime()
+{
+	OnPreparationTimerUpdated.Broadcast(GetRemainingPreparationTime(), PreparationTotalDuration);
+}
+
+float ACh4_multiGameGameState::GetRemainingPreparationTime() const
+{
+	if (PreparationEndTime <= 0.0f || CurrentGamePhase != ECh4GamePhase::Waiting)
+	{
+		return 0.0f;
+	}
+	return FMath::Max(0.0f, PreparationEndTime - GetServerWorldTimeSeconds());
+}
+
+float ACh4_multiGameGameState::GetPreparationTimeRatio() const
+{
+	if (PreparationTotalDuration <= 0.0f)
+	{
+		return 0.0f;
+	}
+	return FMath::Clamp(GetRemainingPreparationTime() / PreparationTotalDuration, 0.0f, 1.0f);
 }
