@@ -8,7 +8,7 @@ void UGrabCheckNotify::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBas
 	{
 		if (ACh4_PlayerCharacter* Character = Cast<ACh4_PlayerCharacter>(Owner))
 		{
-			Character->OnGrabNotify();
+			Character->BeginGrabDetection();
 		}
 	}
 }

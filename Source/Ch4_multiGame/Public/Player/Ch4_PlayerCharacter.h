@@ -91,6 +91,7 @@ public:
 	
 	void BeginGrabDetection();
 	void EndGrabDetection();
+	void OnGrabNotify() { BeginGrabDetection(); }
 	void OnGrabReleaseNotify();
 	
 	UPROPERTY(VisibleAnywhere, Category="Hat")
