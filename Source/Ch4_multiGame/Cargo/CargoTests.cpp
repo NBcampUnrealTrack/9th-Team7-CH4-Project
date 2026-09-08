@@ -16,6 +16,7 @@
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "UObject/UnrealType.h"
+#include "UObject/Package.h"
 
 namespace Ch4CargoTests
 {

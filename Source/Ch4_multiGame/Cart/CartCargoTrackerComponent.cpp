@@ -121,6 +121,27 @@ int32 UCartCargoTrackerComponent::GetTrackedCargoScore() const
 	return BuildDeliveryScoreSummary().DeliveredCargoScore;
 }
 
+TArray<ACargoActor*> UCartCargoTrackerComponent::GetTrackedCargoSnapshot() const
+{
+	TArray<ACargoActor*> Snapshot;
+	if (!HasServerAuthority())
+	{
+		return Snapshot;
+	}
+	for (auto It = TrackedCargo.CreateIterator(); It; ++It)
+	{
+		ACargoActor* Cargo = It->Get();
+		if (!IsValid(Cargo) || Cargo->IsActorBeingDestroyed() || Cargo->IsLost()
+			|| Cargo->GetWorld() != GetWorld())
+		{
+			It.RemoveCurrent();
+			continue;
+		}
+		Snapshot.Add(Cargo);
+	}
+	return Snapshot;
+}
+
 FCh4DeliveryScoreSummary UCartCargoTrackerComponent::BuildDeliveryScoreSummary() const
 {
 	FCh4DeliveryScoreSummary Summary;
@@ -128,18 +149,10 @@ FCh4DeliveryScoreSummary UCartCargoTrackerComponent::BuildDeliveryScoreSummary()
 	{
 		return Summary;
 	}
-
 	Summary.bHasScoreData = true;
 	int64 TotalScore = 0;
-	for (auto It = TrackedCargo.CreateIterator(); It; ++It)
+	for (const ACargoActor* Cargo : GetTrackedCargoSnapshot())
 	{
-		const ACargoActor* Cargo = It->Get();
-		if (!IsValid(Cargo) || Cargo->IsActorBeingDestroyed() || Cargo->IsLost())
-		{
-			It.RemoveCurrent();
-			continue;
-		}
-
 		++Summary.DeliveredCargoCount;
 		TotalScore += Cargo->GetDeliveryScore();
 	}

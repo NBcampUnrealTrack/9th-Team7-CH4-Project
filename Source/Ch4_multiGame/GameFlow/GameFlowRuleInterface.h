@@ -23,6 +23,9 @@ class CH4_MULTIGAME_API IGameFlowRuleInterface
 	GENERATED_BODY()
 
 public:
+	/** Count-based debug flows accept all Cargo. Production can restrict losses to its initial load. */
+	virtual bool IsCargoPartOfMatch(const AActor* CargoActor) const { return true; }
+
 	/** Registers a positive initial Cargo count once during Waiting. Returns false without mutation otherwise. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow|Rule")
 	virtual bool RequestCargoInitialization(int32 InitialCargoCount) = 0;
