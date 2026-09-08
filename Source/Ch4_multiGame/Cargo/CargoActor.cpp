@@ -6,6 +6,7 @@
 #include "Ch4_multiGame.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFlow/GameFlowRuleInterface.h"
 #include "GameFramework/GameModeBase.h"
@@ -56,6 +57,11 @@ void ACargoActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ACargoActor, CargoState);
+}
+
+UPrimitiveComponent* ACargoActor::GetGrabbableComponent()
+{
+	return CargoMesh;
 }
 
 int32 ACargoActor::GetDeliveryScore() const
@@ -337,6 +343,12 @@ bool ACargoActor::MarkAsLost()
 		UE_LOG(LogCh4_multiGame, Warning,
 			TEXT("[Cargo] %s requires an authoritative IGameFlowRuleInterface to become Lost"),
 			*GetNameSafe(this));
+		return false;
+	}
+
+	// Cargo left in the shop was not included in the production initial count.
+	if (!GameFlowRule->IsCargoPartOfMatch(this))
+	{
 		return false;
 	}
 
