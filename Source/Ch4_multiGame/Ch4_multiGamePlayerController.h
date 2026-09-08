@@ -37,6 +37,10 @@ public:
 	/** Saves the local choice for travel and asks the server to update replicated PlayerState. */
 	UFUNCTION(BlueprintCallable, Category="Player|Character")
 	void RequestCharacterType(ECh4CharacterType CharacterType);
+
+	/** Saves the local headwear choice for travel and asks the server to update replicated PlayerState. */
+	UFUNCTION(BlueprintCallable, Category="Player|Character")
+	void RequestHeadwear(FName HeadwearID);
 	
 	// [추가] PauseMenu 관련 공개 함수들 선언
 	// P 키(이후에 ESC키로 전환)를 눌렀을 때 열려있으면 닫고, 닫혀있으면 여는 토글 함수
@@ -138,8 +142,15 @@ private:
 	void ServerRequestCharacterType(ECh4CharacterType CharacterType);
 
 	void ApplyServerCharacterType(ECh4CharacterType CharacterType);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestHeadwear(FName HeadwearID);
+
+	void ApplyServerHeadwear(FName HeadwearID);
+
 	void SynchronizeCharacterSelectionForCurrentWorld();
 
 	bool bSubmittedPersistedCharacterType = false;
+	bool bSubmittedPersistedHeadwear = false;
 
 };
