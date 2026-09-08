@@ -13,14 +13,16 @@ public:
 	virtual void StartupModule() override
 	{
 #if WITH_EDITOR
-		// This widget is loaded lazily to avoid constructing MVVM UI during native
-		// CDO initialization. Include its exact package without resaving a Blueprint
+		// These widgets load lazily to avoid constructing MVVM UI during native
+		// CDO initialization. Include their exact packages without resaving a Blueprint
 		// or making unrelated UI directories always cook.
 		ModifyCookHandle = FGameDelegates::Get().GetModifyCookDelegate().AddLambda(
 			[](TConstArrayView<const ITargetPlatform*>, TArray<FName>& PackagesToCook, TArray<FName>&)
 			{
 				PackagesToCook.AddUnique(FName(TEXT("/Game/UI/WBP_PauseMenu")));
+				PackagesToCook.AddUnique(FName(TEXT("/Game/UI/WBP_HUD")));
 				UE_LOG(LogCh4_multiGame, Log, TEXT("[PauseMenuCook] Including /Game/UI/WBP_PauseMenu"));
+				UE_LOG(LogCh4_multiGame, Log, TEXT("[HUDCook] Including /Game/UI/WBP_HUD"));
 			});
 #endif
 	}

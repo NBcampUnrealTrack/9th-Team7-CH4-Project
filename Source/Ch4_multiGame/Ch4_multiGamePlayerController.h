@@ -70,6 +70,8 @@ public:
 	void QuitGame();
 
 protected:
+	/** Lobby animals own their movement mappings; only reuse menu/voice keys there. */
+	bool bUseTemplateInputMappings = true;
 	
 	// [추가] 에디터에서 설정할 프로퍼티와 위젯 인스턴스 변수
 	// 에디터에서 만든 IA_Pause를 넣어줄 변수

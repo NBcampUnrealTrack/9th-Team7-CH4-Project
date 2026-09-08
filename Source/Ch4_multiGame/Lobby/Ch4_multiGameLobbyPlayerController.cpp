@@ -13,6 +13,7 @@
 
 ACh4_multiGameLobbyPlayerController::ACh4_multiGameLobbyPlayerController()
 {
+	bUseTemplateInputMappings = false;
 	// The possessed animal supplies the team's existing IMC_Player. The lobby
 	// controller adds only the Ready layer so template mappings cannot compete
 	// with IA_PlayerMove / IA_PlayerLook at the same priority.

@@ -453,13 +453,30 @@ void ACh4_multiGamePlayerController::SetupInputComponent()
 	if (auto* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{
 		UInputMappingContext* DefaultIMC = LoadObject<UInputMappingContext>(nullptr, TEXT("/Game/Input/IMC_Default.IMC_Default"));
-		if (DefaultIMC) Subsystem->AddMappingContext(DefaultIMC, 1);
+		if (DefaultIMC)
+		{
+			if (bUseTemplateInputMappings) Subsystem->AddMappingContext(DefaultIMC, 1);
+			else Subsystem->RemoveMappingContext(DefaultIMC);
+		}
 		if (PauseAction)
 		{
 			if (!PauseMenuMappingContext)
 			{
 				PauseMenuMappingContext = NewObject<UInputMappingContext>(this);
 				PauseMenuMappingContext->MapKey(PauseAction, EKeys::Escape);
+				if (!bUseTemplateInputMappings && DefaultIMC)
+				{
+					// Reuse the exact existing P/voice mappings and their modifiers,
+					// without template Move/Jump actions consuming the animal's keys.
+					for (const FEnhancedActionKeyMapping& Mapping : DefaultIMC->GetMappings())
+					{
+						if ((Mapping.Action == PauseAction || Mapping.Action == VoiceToggleAction)
+							&& !(Mapping.Action == PauseAction && Mapping.Key == EKeys::Escape))
+						{
+							PauseMenuMappingContext->MapKey(Mapping.Action, Mapping.Key) = Mapping;
+						}
+					}
+				}
 			}
 			Subsystem->AddMappingContext(PauseMenuMappingContext, 1);
 		}
