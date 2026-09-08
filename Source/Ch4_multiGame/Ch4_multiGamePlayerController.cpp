@@ -13,15 +13,13 @@
 // [추가}
 #include "EnhancedInputComponent.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "OnlineSubsystem.h"
-#include "Interfaces/OnlineSessionInterface.h"
+#include "Player/Ch4_multiGameGameInstance.h"
 #include "Lobby/Ch4_multiGameLobbyPlayerState.h"
 #include "UI/PauseMenu/Ch4PauseMenuViewModel.h"
 #include "UI/HUD/Ch4HUDViewModel.h"
 #include "View/MVVMView.h"
 #include "MVVMSubsystem.h"
 #include "UObject/ConstructorHelpers.h"
-#include "Player/Ch4_multiGameGameInstance.h"
 #include "Player/Ch4_multiGamePlayerState.h"
 
 namespace
@@ -111,12 +109,30 @@ ACh4_multiGamePlayerController::ACh4_multiGamePlayerController()
 	{
 		VoiceToggleAction = VoiceToggleActionFinder.Object;
 	}
+
+	// IMC_Default 로드 (본 게임 및 전체 레벨에서 P키 일시정지 및 보이스 토글 입력 보장)
+	static ConstructorHelpers::FObjectFinder<UInputMappingContext> DefaultContextFinder(
+		TEXT("/Game/Input/IMC_Default.IMC_Default"));
+	if (DefaultContextFinder.Succeeded())
+	{
+		DefaultMappingContexts.AddUnique(DefaultContextFinder.Object);
+	}
 }
 
 void ACh4_multiGamePlayerController::JoinHamachi(FString HostIPv4)
 {
 	if (!IsLocalPlayerController())
 	{
+		return;
+	}
+
+	const UCh4_multiGameGameInstance* SessionGI = GetGameInstance<UCh4_multiGameGameInstance>();
+	if (!SessionGI || !SessionGI->IsDirectIPDebugEnabled()
+		|| SessionGI->HasActiveSteamSession() || SessionGI->IsSteamSessionBusy())
+	{
+		const FString Message = TEXT("[NetworkDebug] Direct IP is disabled while using Steam. For legacy testing restart both games with -Ch4DirectIP -nosteam and DefaultPlatformService=Null.");
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("%s"), *Message);
+		ShowNetworkCommandMessage(Message, FColor::Red);
 		return;
 	}
 
@@ -226,44 +242,7 @@ void ACh4_multiGamePlayerController::BeginPlay()
 			}
 		}
 
-		// 1. Enhanced Input Subsystem에 Mapping Context 등록 보장
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
-		{
-			for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
-			{
-				if (CurrentContext)
-				{
-					Subsystem->AddMappingContext(CurrentContext, 0);
-				}
-			}
-
-			if (!ShouldUseTouchControls())
-			{
-				for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
-				{
-					if (CurrentContext)
-					{
-						Subsystem->AddMappingContext(CurrentContext, 0);
-					}
-				}
-			}
-		}
-
-		// 2. PauseAction 및 VoiceToggleAction 키 바인딩
-		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
-		{
-			if (PauseAction)
-			{
-				EnhancedInputComponent->BindAction(PauseAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::TogglePauseMenu);
-			}
-
-			if (VoiceToggleAction)
-			{
-				EnhancedInputComponent->BindAction(VoiceToggleAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::ToggleVoice);
-			}
-		}
-
-		// 3. spawn touch controls on mobile platforms
+		// spawn touch controls on mobile platforms
 		if (ShouldUseTouchControls())
 		{
 			MobileControlsWidget = CreateWidget<UUserWidget>(this, MobileControlsWidgetClass);
@@ -281,6 +260,19 @@ void ACh4_multiGamePlayerController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 	SynchronizeCharacterSelectionForCurrentWorld();
+}
+
+void ACh4_multiGamePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (bPauseInputCaptured) HidePauseMenu();
+	if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
+	{
+		if (auto* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
+		{
+			if (PauseMenuMappingContext) Subsystem->RemoveMappingContext(PauseMenuMappingContext);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void ACh4_multiGamePlayerController::OnRep_PlayerState()
@@ -342,93 +334,157 @@ void ACh4_multiGamePlayerController::ApplyServerCharacterType(
 	}
 }
 
-void ACh4_multiGamePlayerController::SynchronizeCharacterSelectionForCurrentWorld()
+void ACh4_multiGamePlayerController::RequestHeadwear(const FName HeadwearID)
 {
 	if (!IsLocalPlayerController())
 	{
 		return;
 	}
 
-	UCh4_multiGameGameInstance* GameInstance =
-		GetGameInstance<UCh4_multiGameGameInstance>();
-	ACh4_multiGamePlayerState* CharacterPlayerState =
-		GetPlayerState<ACh4_multiGamePlayerState>();
-	if (!GameInstance || !CharacterPlayerState)
+	if (UCh4_multiGameGameInstance* GameInstance =
+		GetGameInstance<UCh4_multiGameGameInstance>())
+	{
+		GameInstance->StoreLocalHeadwearRequest(HeadwearID);
+	}
+
+	if (HasAuthority())
+	{
+		ApplyServerHeadwear(HeadwearID);
+	}
+	else
+	{
+		ServerRequestHeadwear(HeadwearID);
+	}
+}
+
+void ACh4_multiGamePlayerController::ServerRequestHeadwear_Implementation(const FName HeadwearID)
+{
+	ApplyServerHeadwear(HeadwearID);
+}
+
+void ACh4_multiGamePlayerController::ApplyServerHeadwear(const FName HeadwearID)
+{
+	if (!HasAuthority())
 	{
 		return;
 	}
 
+	if (ACh4_multiGamePlayerState* PS = GetPlayerState<ACh4_multiGamePlayerState>())
+	{
+		PS->SetEquippedHeadwearFromServer(HeadwearID);
+	}
+}
+
+void ACh4_multiGamePlayerController::SynchronizeCharacterSelectionForCurrentWorld()
+{
+	if (!IsLocalPlayerController()) return;
+	UCh4_multiGameGameInstance* GameInstance = GetGameInstance<UCh4_multiGameGameInstance>();
+	ACh4_multiGamePlayerState* CharacterPlayerState = GetPlayerState<ACh4_multiGamePlayerState>();
+	if (!GameInstance || !CharacterPlayerState) return;
+
 	if (CharacterPlayerState->IsA<ACh4_multiGameLobbyPlayerState>())
 	{
-		const ECh4CharacterType LobbyCharacterType =
-			CharacterPlayerState->GetCharacterType();
+		const ECh4CharacterType LobbyCharacterType = CharacterPlayerState->GetCharacterType();
 		if (Ch4Character::IsValidType(LobbyCharacterType))
 		{
 			GameInstance->CacheAuthoritativeCharacterType(LobbyCharacterType);
 		}
+		GameInstance->CacheAuthoritativeHeadwear(CharacterPlayerState->GetEquippedHeadwearID());
 		return;
 	}
 
-	if (bSubmittedPersistedCharacterType)
+	if (!bSubmittedPersistedCharacterType)
 	{
-		return;
+		if (Ch4Character::IsValidType(CharacterPlayerState->GetCharacterType())
+			&& !GameInstance->HasPendingCharacterRequest())
+		{
+			// Seamless travel has already transferred the server's choice. Still run
+			// the independent headwear synchronization below instead of returning.
+			GameInstance->CacheAuthoritativeCharacterType(CharacterPlayerState->GetCharacterType());
+			bSubmittedPersistedCharacterType = true;
+		}
+		else
+		{
+			ECh4CharacterType PersistedCharacterType = ECh4CharacterType::Invalid;
+			if (GameInstance->TryGetLocalCharacterType(PersistedCharacterType))
+			{
+				GameInstance->StoreLocalCharacterRequest(PersistedCharacterType);
+				bSubmittedPersistedCharacterType = true;
+				if (HasAuthority()) ApplyServerCharacterType(PersistedCharacterType);
+				else ServerRequestCharacterType(PersistedCharacterType);
+				UE_LOG(LogCh4_multiGame, Log,
+					TEXT("[CharacterSelection] Re-registered local selection after travel: %s"),
+					*UEnum::GetValueAsString(PersistedCharacterType));
+			}
+		}
 	}
 
-	ECh4CharacterType PersistedCharacterType = ECh4CharacterType::Invalid;
-	if (!GameInstance->TryGetLocalCharacterType(PersistedCharacterType))
+	if (!bSubmittedPersistedHeadwear)
 	{
-		return;
+		FName PersistedHeadwearID = NAME_None;
+		if (GameInstance->TryGetLocalHeadwear(PersistedHeadwearID))
+		{
+			GameInstance->StoreLocalHeadwearRequest(PersistedHeadwearID);
+			bSubmittedPersistedHeadwear = true;
+			if (HasAuthority()) ApplyServerHeadwear(PersistedHeadwearID);
+			else ServerRequestHeadwear(PersistedHeadwearID);
+			UE_LOG(LogCh4_multiGame, Log,
+				TEXT("[HeadwearSelection] Re-registered local headwear after travel: %s"),
+				*PersistedHeadwearID.ToString());
+		}
 	}
-
-	// Protect the persisted choice from any older replication until the new world's
-	// PlayerState confirms this re-registration.
-	GameInstance->StoreLocalCharacterRequest(PersistedCharacterType);
-	bSubmittedPersistedCharacterType = true;
-	if (HasAuthority())
-	{
-		ApplyServerCharacterType(PersistedCharacterType);
-	}
-	else
-	{
-		ServerRequestCharacterType(PersistedCharacterType);
-	}
-
-	UE_LOG(LogCh4_multiGame, Log,
-		TEXT("[CharacterSelection] Re-registered local selection after travel: %s"),
-		*UEnum::GetValueAsString(PersistedCharacterType));
 }
 
 void ACh4_multiGamePlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
+	if (!IsLocalPlayerController()) return;
 
-	// only add IMCs for local player controllers
-	if (IsLocalPlayerController())
+	// Retain dev's runtime fallbacks before registering or binding the actions.
+	if (!PauseAction)
 	{
-		// Add Input Mapping Contexts
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
-		{
-			for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
-			{
-				if (CurrentContext)
-				{
-					Subsystem->AddMappingContext(CurrentContext, 0);
-				}
-			}
+		PauseAction = LoadObject<UInputAction>(nullptr, TEXT("/Game/Input/Actions/IA_Pause.IA_Pause"));
+	}
+	if (!VoiceToggleAction)
+	{
+		VoiceToggleAction = LoadObject<UInputAction>(nullptr, TEXT("/Game/Input/Actions/IA_VoiceToggle.IA_VoiceToggle"));
+	}
 
-			// only add these IMCs if we're not using mobile touch input
-			if (!ShouldUseTouchControls())
+	if (auto* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+	{
+		UInputMappingContext* DefaultIMC = LoadObject<UInputMappingContext>(nullptr, TEXT("/Game/Input/IMC_Default.IMC_Default"));
+		if (DefaultIMC) Subsystem->AddMappingContext(DefaultIMC, 1);
+		if (PauseAction)
+		{
+			if (!PauseMenuMappingContext)
 			{
-				for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
-				{
-					if (CurrentContext)
-					{
-						Subsystem->AddMappingContext(CurrentContext, 0);
-					}
-				}
+				PauseMenuMappingContext = NewObject<UInputMappingContext>(this);
+				PauseMenuMappingContext->MapKey(PauseAction, EKeys::Escape);
+			}
+			Subsystem->AddMappingContext(PauseMenuMappingContext, 1);
+		}
+		for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
+		{
+			// Do not re-register dev's IMC_Default at the lower priority.
+			if (CurrentContext && CurrentContext != DefaultIMC) Subsystem->AddMappingContext(CurrentContext, 0);
+		}
+		if (!ShouldUseTouchControls())
+		{
+			for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
+			{
+				if (CurrentContext && CurrentContext != DefaultIMC) Subsystem->AddMappingContext(CurrentContext, 0);
 			}
 		}
 	}
+
+	// One binding per action: BeginPlay must not bind these again.
+	if (auto* EnhancedInput = Cast<UEnhancedInputComponent>(InputComponent))
+	{
+		if (PauseAction) EnhancedInput->BindAction(PauseAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::TogglePauseMenu);
+		if (VoiceToggleAction) EnhancedInput->BindAction(VoiceToggleAction, ETriggerEvent::Started, this, &ACh4_multiGamePlayerController::ToggleVoice);
+	}
+	// Retain dev's P-key fallback; per-controller debounce handles overlapping mappings.
+	if (InputComponent) InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ACh4_multiGamePlayerController::TogglePauseMenu);
 }
 
 bool ACh4_multiGamePlayerController::ShouldUseTouchControls() const
@@ -466,87 +522,85 @@ void ACh4_multiGamePlayerController::ToggleVoice()
 void ACh4_multiGamePlayerController::TogglePauseMenu()
 {
 	if (!IsLocalPlayerController()) return;
-	
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, TEXT("[PauseMenu] P Key Pressed! TogglePauseMenu() Called"));
-	}
+	const double CurrentTime = FPlatformTime::Seconds();
+	if (CurrentTime - LastPauseToggleTime < 0.2) return;
+	LastPauseToggleTime = CurrentTime;
+	if (IsPauseMenuOpen()) HidePauseMenu();
+	else ShowPauseMenu();
+}
 
-	if (IsPauseMenuOpen())
-	{
-		HidePauseMenu();
-	}
-	else
-	{
-		ShowPauseMenu();
-	}
+bool ACh4_multiGamePlayerController::IsMoveInputIgnored() const
+{
+	// ClientRestart resets the engine's ignore counters after possession. A menu
+	// opened during travel must keep its own lock, without altering those counters.
+	return bPauseInputCaptured || Super::IsMoveInputIgnored();
+}
+
+bool ACh4_multiGamePlayerController::IsLookInputIgnored() const
+{
+	return bPauseInputCaptured || Super::IsLookInputIgnored();
 }
 
 void ACh4_multiGamePlayerController::ShowPauseMenu()
 {
-	if (!IsLocalPlayerController()) return;
-
+	if (!IsLocalPlayerController() || IsPauseMenuOpen()) return;
+	if (!PauseMenuWidgetClass) PauseMenuWidgetClass = PauseMenuWidgetAsset.LoadSynchronous();
 	if (!PauseMenuWidgetClass)
 	{
-		// C++ 생성자 대신 필요할 때 안전하게 지연 로드 (에디터 부팅 시점 MVVM 충돌 완전 방지)
-		PauseMenuWidgetClass = StaticLoadClass(UUserWidget::StaticClass(), nullptr, TEXT("/Game/UI/WBP_PauseMenu.WBP_PauseMenu_C"));
-	}
-
-	if (!PauseMenuWidgetClass)
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("[PauseMenu ERROR] PauseMenuWidgetClass is None!"));
-		}
+		UE_LOG(LogCh4_multiGame, Error, TEXT("[PauseMenu] Failed to load %s; verify the widget was cooked."),
+			*PauseMenuWidgetAsset.ToSoftObjectPath().ToString());
 		return;
 	}
-	
-	// 1. ViewModel 인스턴스가 없다면 확실하게 생성
-	if (!PauseMenuViewModel)
-	{
-		PauseMenuViewModel = NewObject<UCh4PauseMenuViewModel>(this);
-	}
-
-	// 2. 아직 위젯을 만든 적이 없다면 새로 생성
-	if (!PauseMenuWidget)
+	if (!IsValid(PauseMenuViewModel)) PauseMenuViewModel = NewObject<UCh4PauseMenuViewModel>(this);
+	// Preserve dev's world/validity check when a controller survives travel.
+	if (!IsValid(PauseMenuWidget) || PauseMenuWidget->GetWorld() != GetWorld())
 	{
 		PauseMenuWidget = CreateWidget<UUserWidget>(this, PauseMenuWidgetClass);
 	}
-	
-	if (PauseMenuWidget)
+	if (!PauseMenuWidget) return;
+	PauseMenuWidget->SetIsFocusable(true);
+	PauseMenuWidget->SetVisibility(ESlateVisibility::Visible);
+	PauseMenuWidget->AddToViewport(100);
+
+	// Construct initializes MVVM. Bind one effective instance after construction,
+	// retaining dev's explicit binding refresh and Blueprint setter fallback.
+	UMVVMView* View = UMVVMSubsystem::GetViewFromUserWidget(PauseMenuWidget);
+	bool bViewModelBound = false;
+	if (View)
 	{
-		// 3. 위젯의 MVVM ViewModel Setter가 있다면 안전하게 주입
-		if (UFunction* SetVMFunc = PauseMenuWidget->FindFunction(FName("SetCh4PauseMenuViewModel")))
+		if (auto* Existing = Cast<UCh4PauseMenuViewModel>(View->GetViewModel(TEXT("Ch4PauseMenuViewModel")).GetObject()))
 		{
-			struct FSetVMParams
-			{
-				UCh4PauseMenuViewModel* InViewModel;
-			};
-			FSetVMParams Params;
-			Params.InViewModel = PauseMenuViewModel;
-			PauseMenuWidget->ProcessEvent(SetVMFunc, &Params);
+			PauseMenuViewModel = Existing;
+			bViewModelBound = true;
 		}
+		else bViewModelBound = View->SetViewModel(TEXT("Ch4PauseMenuViewModel"), PauseMenuViewModel.Get());
+	}
+	PauseMenuViewModel->InitializeWithPlayerController(this);
+	if (bViewModelBound) View->ExecuteViewModelBindings(TEXT("Ch4PauseMenuViewModel"));
+	else if (UFunction* Setter = PauseMenuWidget->FindFunction(TEXT("SetCh4PauseMenuViewModel")))
+	{
+		struct FSetVMParams { UCh4PauseMenuViewModel* InViewModel; } Params{PauseMenuViewModel.Get()};
+		PauseMenuWidget->ProcessEvent(Setter, &Params);
+	}
 
-		if (!PauseMenuWidget->IsInViewport())
+	if (!bPauseInputCaptured)
+	{
+		bPauseInputCaptured = true;
+		PauseBlockedInputComponent = InputComponent;
+		if (InputComponent)
 		{
-			// 화면에 위젯 띄우기 (ZOrder: 100)
-			PauseMenuWidget->AddToViewport(100);
-			
-			// 마우스 커서 보이게 하기
-			bShowMouseCursor = true;
-			
-			// 입력 모드를 GameAndUI로 변경
-			FInputModeGameAndUI InputMode;
-			InputMode.SetWidgetToFocus(PauseMenuWidget->TakeWidget());
-			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-			SetInputMode(InputMode);
-
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, TEXT("[PauseMenu] Widget & ViewModel Loaded Successfully!"));
-			}
+			bInputBlockedBeforePause = InputComponent->bBlockInput;
+			InputComponent->bBlockInput = true;
 		}
 	}
+	bShowMouseCursor = true;
+	FInputModeGameAndUI InputMode;
+	InputMode.SetWidgetToFocus(PauseMenuWidget->TakeWidget());
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	InputMode.SetHideCursorDuringCapture(false);
+	SetInputMode(InputMode);
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[PauseMenu] Opened locally: Controller=%s WorldPaused=%s"),
+		*GetName(), GetWorld()->IsPaused() ? TEXT("true") : TEXT("false"));
 }
 
 void ACh4_multiGamePlayerController::HidePauseMenu()
@@ -556,7 +610,18 @@ void ACh4_multiGamePlayerController::HidePauseMenu()
 	if (PauseMenuWidget && PauseMenuWidget->IsInViewport())
 	{
 		// 1. 화면에서 위젯 내리기
+		PauseMenuWidget->SetVisibility(ESlateVisibility::Collapsed);
 		PauseMenuWidget->RemoveFromParent();
+	}
+	if (bPauseInputCaptured)
+	{
+		bPauseInputCaptured = false;
+		if (UInputComponent* BlockedInput = PauseBlockedInputComponent.Get())
+		{
+			BlockedInput->bBlockInput = bInputBlockedBeforePause;
+		}
+		PauseBlockedInputComponent.Reset();
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[PauseMenu] Closed locally: Controller=%s"), *GetName());
 	}
 	
 	// 2. 마우스 커서 숨기기
@@ -576,18 +641,11 @@ void ACh4_multiGamePlayerController::ReturnToMainMenu()
 {
 	if (!IsLocalPlayerController()) return;
 	
-	// 온라인 세션이 활성화되어 있다면 세션 정리
-	if (IOnlineSubsystem* Subsystem = IOnlineSubsystem::Get())
+	// The persistent owner waits for Steam cleanup before opening the configured main menu.
+	if (UCh4_multiGameGameInstance* SessionGI = GetGameInstance<UCh4_multiGameGameInstance>())
 	{
-		IOnlineSessionPtr Session = Subsystem->GetSessionInterface();
-		if (Session.IsValid() && Session->GetNamedSession(NAME_GameSession) != nullptr)
-		{
-			Session->DestroySession(NAME_GameSession);
-		}
+		SessionGI->DestroySteamSession();
 	}
-	
-	// 메인 메뉴 레벨로 안전하게 이동
-	ClientTravel(TEXT("/Game/Maps/L_MainMenu"), TRAVEL_Absolute);
 }
 
 void ACh4_multiGamePlayerController::QuitGame()

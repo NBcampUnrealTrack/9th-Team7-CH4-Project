@@ -13,6 +13,7 @@ void ACh4_multiGamePlayerState::GetLifetimeReplicatedProps(
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ACh4_multiGamePlayerState, CharacterType);
+	DOREPLIFETIME(ACh4_multiGamePlayerState, EquippedHeadwearID);
 }
 
 bool ACh4_multiGamePlayerState::SetCharacterTypeFromServer(
@@ -102,5 +103,89 @@ void ACh4_multiGamePlayerState::CacheCharacterTypeForOwningLocalPlayer() const
 			}
 			return;
 		}
+	}
+}
+
+bool ACh4_multiGamePlayerState::SetEquippedHeadwearFromServer(const FName NewHeadwearID)
+{
+	if (!HasAuthority())
+	{
+		return false;
+	}
+
+	if (EquippedHeadwearID == NewHeadwearID)
+	{
+		CacheHeadwearForOwningLocalPlayer();
+		ApplyHeadwearToPawn();
+		return true;
+	}
+
+	EquippedHeadwearID = NewHeadwearID;
+	CacheHeadwearForOwningLocalPlayer();
+	ApplyHeadwearToPawn();
+	OnHeadwearChanged.Broadcast(EquippedHeadwearID);
+	ForceNetUpdate();
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HeadwearSelection] Server accepted headwear %s for %s"),
+		*EquippedHeadwearID.ToString(),
+		*GetPlayerName());
+	return true;
+}
+
+void ACh4_multiGamePlayerState::OnRep_EquippedHeadwearID()
+{
+	ApplyHeadwearToPawn();
+	CacheHeadwearForOwningLocalPlayer();
+	OnHeadwearChanged.Broadcast(EquippedHeadwearID);
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HeadwearSelection] Replicated headwear %s for %s"),
+		*EquippedHeadwearID.ToString(),
+		*GetPlayerName());
+}
+
+void ACh4_multiGamePlayerState::ApplyHeadwearToPawn() const
+{
+	if (ACh4_PlayerCharacter* PlayerCharacter = Cast<ACh4_PlayerCharacter>(GetPawn()))
+	{
+		PlayerCharacter->ApplyHeadwear(EquippedHeadwearID);
+	}
+}
+
+void ACh4_multiGamePlayerState::CacheHeadwearForOwningLocalPlayer() const
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	for (FConstPlayerControllerIterator ControllerIt = GetWorld()->GetPlayerControllerIterator();
+		ControllerIt;
+		++ControllerIt)
+	{
+		APlayerController* PlayerController = ControllerIt->Get();
+		if (IsValid(PlayerController)
+			&& PlayerController->IsLocalController()
+			&& PlayerController->PlayerState == this)
+		{
+			if (UCh4_multiGameGameInstance* GameInstance =
+				GetWorld()->GetGameInstance<UCh4_multiGameGameInstance>())
+			{
+				GameInstance->CacheAuthoritativeHeadwear(EquippedHeadwearID);
+			}
+			return;
+		}
+	}
+}
+
+void ACh4_multiGamePlayerState::CopyProperties(APlayerState* NewPlayerState)
+{
+	Super::CopyProperties(NewPlayerState);
+	if (ACh4_multiGamePlayerState* TargetPS = Cast<ACh4_multiGamePlayerState>(NewPlayerState))
+	{
+		// Both selections survive the Lobby/Gameplay state swap; Ready is not copied.
+		TargetPS->CharacterType = CharacterType;
+		TargetPS->EquippedHeadwearID = EquippedHeadwearID;
 	}
 }

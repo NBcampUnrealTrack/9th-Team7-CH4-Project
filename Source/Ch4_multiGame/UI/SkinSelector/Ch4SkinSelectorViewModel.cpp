@@ -6,6 +6,36 @@
 #include "Player/Ch4_PlayerCharacter.h"
 #include "UObject/UnrealType.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
+
+UWorld* UCh4SkinSelectorViewModel::GetWorld() const
+{
+	if (HasAnyFlags(RF_ClassDefaultObject | RF_BeginDestroyed | RF_FinishDestroyed))
+	{
+		return nullptr;
+	}
+
+	for (UObject* CurrOuter = GetOuter(); CurrOuter; CurrOuter = CurrOuter->GetOuter())
+	{
+		if (UWorld* World = CurrOuter->GetWorld())
+		{
+			return World;
+		}
+	}
+
+	if (GEngine && GEngine->GetWorldContexts().Num() > 0)
+	{
+		for (const FWorldContext& Context : GEngine->GetWorldContexts())
+		{
+			if (Context.WorldType == EWorldType::PIE || Context.WorldType == EWorldType::Game)
+			{
+				return Context.World();
+			}
+		}
+	}
+
+	return Super::GetWorld();
+}
 
 void UCh4SkinSelectorViewModel::InitializeFromPlayerState()
 {
@@ -154,6 +184,17 @@ void UCh4SkinSelectorViewModel::StopPreviewStudio()
 		ActivePreviewStudio->Destroy();
 		ActivePreviewStudio = nullptr;
 	}
+	RestoreGameInputMode();
+}
+
+void UCh4SkinSelectorViewModel::BeginDestroy()
+{
+	if (ActivePreviewStudio && IsValid(ActivePreviewStudio))
+	{
+		ActivePreviewStudio->Destroy();
+		ActivePreviewStudio = nullptr;
+	}
+	Super::BeginDestroy();
 }
 
 void UCh4SkinSelectorViewModel::AddPreviewYaw(float DeltaYaw)
@@ -196,16 +237,18 @@ void UCh4SkinSelectorViewModel::SelectHeadwear(FName HeadwearID)
 
 void UCh4SkinSelectorViewModel::SaveSelection()
 {
-	// 1. 서버 RPC 호출로 캐릭터 스킨 영구 저장
+	// 1. 서버 RPC 호출로 캐릭터 스킨 및 모자 영구 저장
 	if (ACh4_multiGamePlayerController* PC = GetOwningCh4PlayerController())
 	{
 		PC->RequestCharacterType(PendingCharacterType);
+		PC->RequestHeadwear(PendingHeadwearID);
 	}
 
 	// 2. 실제 인게임 캐릭터에 최종 모자 장착
 	ApplyHeadwearToInGameCharacter(PendingHeadwearID);
 
-	StopPreviewStudio();
+	// 3. UI 닫기 및 인풋 모드 복원
+	CloseFittingRoom();
 }
 
 void UCh4SkinSelectorViewModel::ResetSelection()
@@ -233,23 +276,68 @@ void UCh4SkinSelectorViewModel::ResetSelection()
 void UCh4SkinSelectorViewModel::CloseFittingRoom()
 {
 	StopPreviewStudio();
+	RestoreGameInputMode();
+
+	if (UUserWidget* Widget = GetOwningUserWidget())
+	{
+		Widget->RemoveFromParent();
+	}
 }
 
 // ----------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------
 
+UUserWidget* UCh4SkinSelectorViewModel::GetOwningUserWidget() const
+{
+	for (UObject* CurrOuter = const_cast<UCh4SkinSelectorViewModel*>(this)->GetOuter(); CurrOuter; CurrOuter = CurrOuter->GetOuter())
+	{
+		if (UUserWidget* Widget = Cast<UUserWidget>(CurrOuter))
+		{
+			return Widget;
+		}
+	}
+	return nullptr;
+}
+
+void UCh4SkinSelectorViewModel::RestoreGameInputMode()
+{
+	if (HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed))
+	{
+		return;
+	}
+
+	if (ACh4_multiGamePlayerController* PC = GetOwningCh4PlayerController())
+	{
+		PC->bShowMouseCursor = false;
+		FInputModeGameOnly InputMode;
+		PC->SetInputMode(InputMode);
+	}
+}
+
 ACh4_multiGamePlayerController* UCh4SkinSelectorViewModel::GetOwningCh4PlayerController() const
 {
-	if (const UUserWidget* Widget = Cast<UUserWidget>(GetOuter()))
+	if (HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed))
+	{
+		return nullptr;
+	}
+
+	if (const UUserWidget* Widget = GetOwningUserWidget())
 	{
 		if (ACh4_multiGamePlayerController* PC = Cast<ACh4_multiGamePlayerController>(Widget->GetOwningPlayer()))
 		{
 			return PC;
 		}
 	}
-	if (UWorld* World = GetWorld())
+	if (const UWorld* World = GetWorld())
 	{
+		if (GEngine)
+		{
+			if (APlayerController* LocalPC = GEngine->GetFirstLocalPlayerController(World))
+			{
+				return Cast<ACh4_multiGamePlayerController>(LocalPC);
+			}
+		}
 		return Cast<ACh4_multiGamePlayerController>(World->GetFirstPlayerController());
 	}
 	return nullptr;
@@ -299,27 +387,6 @@ void UCh4SkinSelectorViewModel::ApplyHeadwearToInGameCharacter(FName HeadwearID)
 {
 	if (ACh4_PlayerCharacter* Character = GetOwningCh4Character())
 	{
-		for (UActorComponent* Comp : Character->GetComponents())
-		{
-			if (Comp && Comp->GetClass()->GetName().Contains(TEXT("BPC_AccessoryEquipment")))
-			{
-				if (HeadwearID.IsNone())
-				{
-					if (UFunction* UnequipFunc = Comp->FindFunction(TEXT("UnequipHeadwear")))
-					{
-						Comp->ProcessEvent(UnequipFunc, nullptr);
-					}
-				}
-				else
-				{
-					if (UFunction* EquipFunc = Comp->FindFunction(TEXT("EquipHeadwear")))
-					{
-						struct { FName ID; } Params{ HeadwearID };
-						Comp->ProcessEvent(EquipFunc, &Params);
-					}
-				}
-				break;
-			}
-		}
+		Character->ApplyHeadwear(HeadwearID);
 	}
 }

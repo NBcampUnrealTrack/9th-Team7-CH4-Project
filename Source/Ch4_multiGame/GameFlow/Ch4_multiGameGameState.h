@@ -9,13 +9,14 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCh4GamePhaseChangedSignature, ECh4GamePhase, NewGamePhase);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCh4CargoCountChangedSignature, int32, RemainingCargoCount, int32, InitialCargoCount);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCh4PreparationTimerUpdatedSignature, float, RemainingSeconds, float, TotalSeconds);
 
 /**
  * Replicated data store for the authoritative game flow.
  * Only ACh4_multiGameGameMode is allowed to mutate these values.
  */
 UCLASS()
-class ACh4_multiGameGameState : public AGameStateBase
+class CH4_MULTIGAME_API ACh4_multiGameGameState : public AGameStateBase
 {
 	GENERATED_BODY()
 
@@ -30,11 +31,30 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Game Flow|Events")
 	FCh4CargoCountChangedSignature OnCargoCountChanged;
 
+	/** Fired on the server and clients whenever the preparation timer is set or updated. */
+	UPROPERTY(BlueprintAssignable, Category="Game Flow|Events")
+	FCh4PreparationTimerUpdatedSignature OnPreparationTimerUpdated;
+
 	UFUNCTION(BlueprintPure, Category="Game Flow")
 	ECh4GamePhase GetCurrentGamePhase() const { return CurrentGamePhase; }
 
 	UFUNCTION(BlueprintPure, Category="Game Flow|Result")
 	ECh4GameEndReason GetGameEndReason() const { return GameEndReason; }
+
+	UFUNCTION(BlueprintPure, Category="Game Flow|Timer")
+	float GetPreparationEndTime() const { return PreparationEndTime; }
+
+	UFUNCTION(BlueprintPure, Category="Game Flow|Timer")
+	float GetPreparationTotalDuration() const { return PreparationTotalDuration; }
+
+	UFUNCTION(BlueprintPure, Category="Game Flow|Timer")
+	float GetRemainingPreparationTime() const;
+
+	UFUNCTION(BlueprintPure, Category="Game Flow|Timer")
+	float GetPreparationTimeRatio() const;
+
+	/** Called on server to initialize the preparation countdown. */
+	void SetPreparationTimer(float DurationSeconds);
 
 	UFUNCTION(BlueprintPure, Category="Game Flow|Cargo")
 	int32 GetInitialCargoCount() const { return InitialCargoCount; }
@@ -74,6 +94,9 @@ private:
 	UFUNCTION()
 	void OnRep_CargoCounts();
 
+	UFUNCTION()
+	void OnRep_PreparationEndTime();
+
 	void BroadcastCargoCountChanged();
 
 private:
@@ -96,4 +119,10 @@ private:
 
 	UPROPERTY(ReplicatedUsing=OnRep_CurrentGamePhase, BlueprintReadOnly, Category="Game Flow", meta=(AllowPrivateAccess="true"))
 	ECh4GamePhase CurrentGamePhase = ECh4GamePhase::Waiting;
+
+	UPROPERTY(ReplicatedUsing=OnRep_PreparationEndTime, BlueprintReadOnly, Category="Game Flow|Timer", meta=(AllowPrivateAccess="true"))
+	float PreparationEndTime = 0.0f;
+
+	UPROPERTY(Replicated, BlueprintReadOnly, Category="Game Flow|Timer", meta=(AllowPrivateAccess="true"))
+	float PreparationTotalDuration = 60.0f;
 };

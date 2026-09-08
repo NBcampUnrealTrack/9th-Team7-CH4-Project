@@ -180,6 +180,16 @@ void ACh4_CharacterPreviewStudio::BeginPlay()
 
 	if (CaptureComponent)
 	{
+		// 렌더 타깃이 비어있다면 런타임에 안전하게 재로드 및 지정
+		if (!CaptureComponent->TextureTarget)
+		{
+			if (!PreviewRenderTarget)
+			{
+				PreviewRenderTarget = LoadObject<UTextureRenderTarget2D>(nullptr, TEXT("/Game/UI/RenderTarget/RT_CharacterPreview.RT_CharacterPreview"));
+			}
+			CaptureComponent->TextureTarget = PreviewRenderTarget;
+		}
+
 		CaptureComponent->CaptureSource = CaptureSource;
 		CaptureComponent->LODDistanceFactor = 0.001f;
 
@@ -187,6 +197,12 @@ void ACh4_CharacterPreviewStudio::BeginPlay()
 		CaptureComponent->ShowFlags.SetAmbientOcclusion(false);
 		CaptureComponent->PostProcessSettings.bOverride_AmbientOcclusionIntensity = true;
 		CaptureComponent->PostProcessSettings.AmbientOcclusionIntensity = 0.0f;
+
+		// 마네킹과 모자 및 배경만 캡처하도록 ShowOnly 목록 갱신
+		CaptureComponent->ShowOnlyComponents.Empty();
+		if (PreviewMeshComponent) CaptureComponent->ShowOnlyComponents.Add(PreviewMeshComponent);
+		if (HatMeshComponent) CaptureComponent->ShowOnlyComponents.Add(HatMeshComponent);
+		if (BackdropMeshComponent && bUseBackdrop) CaptureComponent->ShowOnlyComponents.Add(BackdropMeshComponent);
 	}
 
 	// 2. 림 라이트: 과도한 역광 대비를 방지하고 모자/머리 윤곽에만 은은하게 1.0f 강도로 비춤
@@ -308,15 +324,28 @@ void ACh4_CharacterPreviewStudio::UpdateCameraTransform()
 {
 	if (CaptureComponent)
 	{
-		// 카메라 위치: 캐릭터 얼굴과 머리가 화면 상단에 닿지 않고 적절한 여백(헤드룸)을 가지도록 조절
+		// [투영 모드 비교 토글]
+		// false: 기존 퍼스펙티브(Perspective, 원근 투영)
+		// true:  오쏘그래픽(Orthographic, 직교 투영 - 왜곡 없는 2D 일러스트 룩)
+		constexpr bool bUseOrthographic = true;
+
 		const float SafeDistance = 215.0f;
 		const float SafeHeight = 12.0f;
 		const float SafePitch = 0.0f;
-		const float SafeFOV = 36.0f;
+
+		if (bUseOrthographic)
+		{
+			CaptureComponent->ProjectionType = ECameraProjectionMode::Orthographic;
+			CaptureComponent->OrthoWidth = 145.0f; // 캐릭터 전신과 머리 공간이 512x768 세로 비율에 알맞게 들어오는 폭
+		}
+		else
+		{
+			CaptureComponent->ProjectionType = ECameraProjectionMode::Perspective;
+			CaptureComponent->FOVAngle = 36.0f; // 기존 SafeFOV (왜곡 적은 표준 망원 화각)
+		}
 
 		CaptureComponent->SetRelativeLocation(FVector(SafeDistance, 0.0f, SafeHeight));
 		CaptureComponent->SetRelativeRotation(FRotator(SafePitch, 180.0f, 0.0f));
-		CaptureComponent->FOVAngle = SafeFOV;
 		CaptureComponent->LODDistanceFactor = 0.001f;
 
 		CaptureComponent->ShowFlags.SetAmbientOcclusion(false);

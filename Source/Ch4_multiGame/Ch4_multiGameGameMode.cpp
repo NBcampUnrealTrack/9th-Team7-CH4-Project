@@ -3,18 +3,21 @@
 #include "Ch4_multiGameGameMode.h"
 
 #include "Ch4_multiGame.h"
+#include "AssetRegistry/AssetData.h"
 #include "Cargo/CargoActor.h"
 #include "Cart/CartCargoTrackerComponent.h"
 #include "Engine/World.h"
 #include "Misc/PackageName.h"
-#include "Misc/Paths.h"
+#include "Misc/AssetRegistryInterface.h"
 #include "TimerManager.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
 #include "GameFlow/GameFlowTargetInterface.h"
 #include "Player/Ch4_multiGamePlayerState.h"
+#include "Player/Ch4_multiGameGameInstance.h"
 
 ACh4_multiGameGameMode::ACh4_multiGameGameMode()
 {
+	bUseSeamlessTravel = true;
 	GameStateClass = ACh4_multiGameGameState::StaticClass();
 	PlayerStateClass = ACh4_multiGamePlayerState::StaticClass();
 	LobbyMap = TSoftObjectPtr<UWorld>(FSoftObjectPath(TEXT("/Game/Lobby/L_Lobby.L_Lobby")));
@@ -615,19 +618,18 @@ bool ACh4_multiGameGameMode::FinishPreparationTransition()
 bool ACh4_multiGameGameMode::GetLobbyTravelURL(FString& OutURL) const
 {
 	const FString Package = LobbyMap.ToSoftObjectPath().GetLongPackageName();
-	FString Filename;
+	FAssetData MapAsset;
+	const IAssetRegistryInterface* AssetRegistry = IAssetRegistryInterface::GetPtr();
 	if (!FPackageName::IsValidLongPackageName(Package)
-		|| !FPackageName::DoesPackageExist(Package, &Filename)
-		|| !FPaths::GetExtension(Filename, true).Equals(FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase))
+		|| !FPackageName::DoesPackageExist(Package)
+		|| !AssetRegistry
+		|| AssetRegistry->TryGetAssetByObjectPath(LobbyMap.ToSoftObjectPath(), MapAsset) != UE::AssetRegistry::EExists::Exists
+		|| MapAsset.AssetClassPath != UWorld::StaticClass()->GetClassPathName())
 	{
 		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Lobby return rejected: configure a valid Lobby World asset"));
 		return false;
 	}
 	OutURL = Package;
-	if (GetNetMode() == NM_ListenServer)
-	{
-		OutURL += TEXT("?listen");
-	}
 	return true;
 }
 
@@ -686,6 +688,10 @@ bool ACh4_multiGameGameMode::ReturnToLobby()
 		return false;
 	}
 	bLobbyTravelStarted = true;
+	if (const auto* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+	{
+		GI->LogMatchTravel(GetWorld(), URL, bUseSeamlessTravel);
+	}
 #if WITH_DEV_AUTOMATION_TESTS
 	const bool bAccepted = LobbyTravelForTesting ? LobbyTravelForTesting(URL) : GetWorld()->ServerTravel(URL, true);
 #else
