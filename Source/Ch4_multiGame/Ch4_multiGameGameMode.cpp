@@ -671,12 +671,29 @@ void ACh4_multiGameGameMode::OnReturnToLobbyTimer()
 
 bool ACh4_multiGameGameMode::ReturnToLobby()
 {
-	if (!HasAuthority() || !GetWorld() || bLobbyTravelStarted)
+	const ACh4_multiGameGameState* State = GetGameFlowGameState();
+	if (!State || State->GetCurrentGamePhase() != ECh4GamePhase::Cleared)
 	{
 		return false;
 	}
+	return StartLobbyTravel();
+}
+
+bool ACh4_multiGameGameMode::ReturnToLobbyFromPreparation()
+{
 	const ACh4_multiGameGameState* State = GetGameFlowGameState();
-	if (!State || State->GetCurrentGamePhase() != ECh4GamePhase::Cleared)
+	if (!State || State->GetCurrentGamePhase() != ECh4GamePhase::Waiting
+		|| State->GetInitialCargoCount() != 0 || bUsesPreparationCargoRoster
+		|| bPreparationTransitionPending)
+	{
+		return false;
+	}
+	return StartLobbyTravel();
+}
+
+bool ACh4_multiGameGameMode::StartLobbyTravel()
+{
+	if (!HasAuthority() || !GetWorld() || bLobbyTravelStarted)
 	{
 		return false;
 	}

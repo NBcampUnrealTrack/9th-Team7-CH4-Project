@@ -144,6 +144,26 @@ bool FCh4LobbyReturnTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Rejected ServerTravel reports failure"), Disabled.Rule->ReturnToLobby());
 	TestTrue(TEXT("A rejected request can be retried manually"), Disabled.Rule->ReturnToLobby());
 	TestFalse(TEXT("Successful retry is guarded"), Disabled.Rule->ReturnToLobby());
+
+	FWorldFixture PreparationAbort;
+	if (!PreparationAbort.Initialize()) return false;
+	int32 PreparationTravels = 0;
+	FString PreparationURL;
+	PreparationAbort.Rule->LobbyTravelForTesting = [&PreparationTravels, &PreparationURL](const FString& URL)
+	{
+		++PreparationTravels;
+		PreparationURL = URL;
+		return true;
+	};
+	TestTrue(TEXT("Uninitialized Waiting can use the dedicated preparation-abort route"),
+		PreparationAbort.Rule->ReturnToLobbyFromPreparation());
+	TestEqual(TEXT("Preparation abort dispatches one Lobby travel"), PreparationTravels, 1);
+	TestEqual(TEXT("Preparation abort uses the configured Lobby package"),
+		PreparationURL, FString(TEXT("/Game/Lobby/L_Lobby")));
+	TestEqual(TEXT("Preparation abort does not change Waiting to a terminal phase"),
+		PreparationAbort.State->GetCurrentGamePhase(), ECh4GamePhase::Waiting);
+	TestFalse(TEXT("Preparation abort travel is guarded against duplicates"),
+		PreparationAbort.Rule->ReturnToLobbyFromPreparation());
 	return true;
 }
 
@@ -281,14 +301,26 @@ bool FCh4PreparationEmptyTest::RunTest(const FString& Parameters)
 	Point->CartDestination = F.World->SpawnActor<ATargetPoint>();
 	Point->CartDestination->SetActorLocation(FVector(5000, 0, 1000));
 	Point->PreparationDurationSeconds = 0.0f;
+	int32 LobbyTravels = 0;
+	FString LobbyURL;
+	F.Rule->LobbyTravelForTesting = [&LobbyTravels, &LobbyURL](const FString& URL)
+	{
+		++LobbyTravels;
+		LobbyURL = URL;
+		return true;
+	};
 	const FTransform Before = Cart->GetActorTransform();
 	Point->StartPreparationTimer();
 	F.TickTimers();
 	F.TickTimers();
-	TestEqual(TEXT("Empty preparation keeps Waiting"), F.State->GetCurrentGamePhase(), ECh4GamePhase::Waiting);
+	TestEqual(TEXT("Empty preparation remains non-terminal Waiting during Lobby travel"),
+		F.State->GetCurrentGamePhase(), ECh4GamePhase::Waiting);
 	TestEqual(TEXT("Empty preparation never initializes Cargo"), F.State->GetInitialCargoCount(), 0);
 	TestTrue(TEXT("Empty Cart never teleports"), Cart->GetActorTransform().Equals(Before));
 	TestFalse(TEXT("Empty transition remains incomplete"), Point->IsTransitionComplete());
+	TestEqual(TEXT("Empty preparation dispatches exactly one Lobby return"), LobbyTravels, 1);
+	TestEqual(TEXT("Empty preparation uses the configured Lobby package"),
+		LobbyURL, FString(TEXT("/Game/Lobby/L_Lobby")));
 	AFinalDeliveryZone* Goal = F.World->SpawnActor<AFinalDeliveryZone>();
 	TArray<UBoxComponent*> Boxes;
 	Goal->GetComponents(Boxes);
@@ -319,21 +351,17 @@ bool FCh4PreparationValidationTest::RunTest(const FString&)
 	F.TickTimers();
 	TestFalse(TEXT("Missing Cart rejects transition safely"), Point->TryStartMainGameplay());
 	Point->CartActor = Cart;
-	TestFalse(TEXT("Missing Cart destination rejects transition safely"), Point->TryStartMainGameplay());
-	Point->CartDestination = F.World->SpawnActor<ATargetPoint>();
-	for (int32 Index = 0; Index < 4; ++Index)
+	int32 RejectedLobbyTravels = 0;
+	F.Rule->LobbyTravelForTesting = [&RejectedLobbyTravels](const FString&)
 	{
-		auto* PC = F.World->SpawnActor<APlayerController>();
-		auto* Pawn = F.World->SpawnActor<ACharacter>();
-		PC->Possess(Pawn);
-		TestFalse(TEXT("Insufficient destinations reject the group before any move or initialization"), Point->TryStartMainGameplay());
-		auto* Destination = F.World->SpawnActor<ATargetPoint>();
-		Destination->SetActorLocation(FVector(5000, Index * 300, 800));
-		Point->PlayerDestinationPoints.Add(Destination);
-		TestFalse(TEXT("One to four valid destinations still cannot start an empty Cart"), Point->TryStartMainGameplay());
-		TestTrue(TEXT("Existing possession retained on rejected transition"), Pawn->GetController() == PC);
-		TestEqual(TEXT("Validation never partially initializes Cargo"), F.State->GetInitialCargoCount(), 0);
-	}
+		++RejectedLobbyTravels;
+		return false;
+	};
+	TestFalse(TEXT("Rejected empty-Cart Lobby travel reports failure and allows a retry"),
+		Point->TryStartMainGameplay());
+	TestEqual(TEXT("Empty-Cart validation attempted the dedicated Lobby route once"),
+		RejectedLobbyTravels, 1);
+	TestEqual(TEXT("Validation never partially initializes Cargo"), F.State->GetInitialCargoCount(), 0);
 	TestTrue(TEXT("All failed retries leave Cart in place"), Cart->GetActorTransform().Equals(Before));
 	TestEqual(TEXT("All failed retries leave Waiting"), F.State->GetCurrentGamePhase(), ECh4GamePhase::Waiting);
 	TestTrue(TEXT("Separate start path fixture initializes"), F.Rule->RequestCargoInitialization(1));

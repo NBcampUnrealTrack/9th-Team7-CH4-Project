@@ -157,19 +157,16 @@ bool AGameplayPhaseTransitionPoint::TryStartMainGameplay()
 			*GetNameSafe(Rule), *GetNameSafe(State), State ? static_cast<int32>(State->GetCurrentGamePhase()) : -1, State ? State->GetInitialCargoCount() : -1);
 		return false;
 	}
-	if (!IsValid(CartActor) || !IsValid(CartDestination))
+	if (!IsValid(CartActor))
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Transition blocked: CartActor=%s CartDestination=%s; assign level actor instances on %s"),
-			*GetNameSafe(CartActor), *GetNameSafe(CartDestination), *GetName());
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Transition blocked: CartActor is not assigned on %s"),
+			*GetName());
 		return false;
 	}
-	if (CartActor->GetWorld() != GetWorld()
-		|| CartDestination->GetWorld() != GetWorld() || !CartActor->GetRootComponent()
-		|| CartActor->GetRootComponent()->Mobility != EComponentMobility::Movable
-		|| !CartActor->Implements<UGameFlowTargetInterface>())
+	if (CartActor->GetWorld() != GetWorld())
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Invalid Cart target: Cart=%s Destination=%s; requires movable root, GameFlowTargetInterface and same-world references"),
-			*GetNameSafe(CartActor), *GetNameSafe(CartDestination));
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Invalid Cart target: Cart=%s is not in the transition World"),
+			*GetNameSafe(CartActor));
 		return false;
 	}
 	TArray<UCartCargoTrackerComponent*> Trackers;
@@ -179,7 +176,6 @@ bool AGameplayPhaseTransitionPoint::TryStartMainGameplay()
 		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Cart %s has %d trackers; requires exactly one CartCargoTrackerComponent"), *GetNameSafe(CartActor), Trackers.Num());
 		return false;
 	}
-	if (!BuildPlayerMoves()) return false;
 	UCartCargoTrackerComponent* Tracker = Trackers[0];
 	Tracker->UpdateOverlaps();
 	TArray<ACargoActor*> CargoSnapshot = Tracker->GetTrackedCargoSnapshot();
@@ -191,9 +187,29 @@ bool AGameplayPhaseTransitionPoint::TryStartMainGameplay()
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Active cart cargo: %d; Tracker=%s"), CargoSnapshot.Num(), *GetNameSafe(Tracker));
 	if (CargoSnapshot.IsEmpty())
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Empty Cart: 0 active Cargo; no initialization or teleport; remain Waiting"));
+		bTransitionStarted = true;
+		GetWorldTimerManager().ClearTimer(PreparationTimer);
+		GetWorldTimerManager().ClearTimer(RestoreTimer);
+		PlayerMoves.Reset();
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] No cargo loaded; returning to lobby"));
+		if (!Rule->ReturnToLobbyFromPreparation())
+		{
+			bTransitionStarted = false;
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[Preparation] Lobby return was rejected; preparation remains Waiting and retry is allowed"));
+		}
 		return false;
 	}
+	if (!IsValid(CartDestination)
+		|| CartDestination->GetWorld() != GetWorld() || !CartActor->GetRootComponent()
+		|| CartActor->GetRootComponent()->Mobility != EComponentMobility::Movable
+		|| !CartActor->Implements<UGameFlowTargetInterface>())
+	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Invalid Cart target: Cart=%s Destination=%s; requires movable root, GameFlowTargetInterface and same-world references"),
+			*GetNameSafe(CartActor), *GetNameSafe(CartDestination));
+		return false;
+	}
+	if (!BuildPlayerMoves()) return false;
 	const FTransform OldCart = CartActor->GetActorTransform();
 	FTransform NewCart = CartDestination->GetActorTransform();
 	NewCart.SetScale3D(OldCart.GetScale3D());
