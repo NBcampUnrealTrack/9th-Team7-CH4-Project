@@ -99,6 +99,9 @@ public:
 	UPROPERTY(Replicated)
 	TObjectPtr<class ACartBase> GrabbedCart;
 	
+	UPROPERTY(Replicated)
+	FVector2D CartMoveInput;
+	
 	UPROPERTY(VisibleAnywhere, Category="Hat")
 	TObjectPtr<class UStaticMeshComponent> HatMeshComponent;
 

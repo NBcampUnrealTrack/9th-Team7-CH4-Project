@@ -345,4 +345,6 @@ void ACartBase::ServerSetMoveInput_Implementation(ACh4_PlayerCharacter* Player, 
     }
 
     PlayerInputs.Add(Player, Input);
+    
+    Player->CartMoveInput = Input;
 }
