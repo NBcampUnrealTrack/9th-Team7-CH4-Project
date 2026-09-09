@@ -1,10 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Cart/CartStabilizationMath.h"
 #include "GameFramework/Actor.h"
 #include "CartBase.generated.h"
 
 class ACh4_PlayerCharacter;
+class UPhysicsConstraintComponent;
 
 UCLASS()
 class CH4_MULTIGAME_API ACartBase : public AActor
@@ -36,6 +38,10 @@ protected:
 
     UPROPERTY(VisibleAnywhere, Category="Cart")
     TObjectPtr<UStaticMeshComponent> CartMesh;
+
+    /** World-up angular safety net. Translation and yaw remain unrestricted. */
+    UPROPERTY(VisibleAnywhere, Category="Cart|Stabilization")
+    TObjectPtr<UPhysicsConstraintComponent> UprightSafetyConstraint;
 
     UPROPERTY(VisibleAnywhere, Category="Cart|Wheels")
     TArray<TObjectPtr<USceneComponent>> Wheels;
@@ -70,9 +76,42 @@ protected:
     UPROPERTY(EditAnywhere, Category="Cart|Grab")
     float GrabDistance = 150.0f;
     
-    // ── 자세 복원 ──
-    UPROPERTY(EditAnywhere, Category="Cart|Upright")
-    float UprightTorque = 3900.0f;
+    // ── 자세 안정화 ──
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization")
+    FVector CartCenterOfMassOffset = FVector(-20.0f, 0.0f, -18.0f);
+
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization")
+    FVector CartInertiaTensorScale = FVector(2.0f, 2.0f, 1.0f);
+
+    /** Degrees per second. UPrimitiveComponent converts this for Chaos. */
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
+    float MaximumAngularVelocityDegrees = 240.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0", ClampMax="89.0", Units="Degrees"))
+    float StabilizationDeadZoneDegrees = 8.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0", ClampMax="89.0", Units="Degrees"))
+    float StabilizationFullAssistDegrees = 30.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
+    float StabilizationProportionalGain = 6.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
+    float StabilizationDerivativeGain = 3.0f;
+
+    /** Maximum correction passed to AddTorqueInRadians with acceleration change enabled. */
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
+    float MaximumCorrectionAngularAcceleration = 8.0f;
+
+    /** World-up correction only starts at this angle while fewer than two wheels touch ground. */
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0", ClampMax="89.0", Units="Degrees"))
+    float EmergencyWorldUpTiltDegrees = 30.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="1.0", ClampMax="89.0", Units="Degrees"))
+    float MaximumTiltAngleDegrees = 55.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Debug")
+    bool bDrawCartPhysicsDebug = false;
 
 private:
     /** 앵커 인덱스별 점유자. 클라이언트도 손 위치 맞추려면 알아야 하므로 복제. */
@@ -82,12 +121,20 @@ private:
     /** 서버 전용. 플레이어별 최신 입력값. */
     TMap<TObjectPtr<ACh4_PlayerCharacter>, FVector2D> PlayerInputs;
 
+    /** Current server-frame suspension contacts, reused by stabilization. */
+    TArray<FVector> SuspensionContactNormals;
+
+    FVector LastStabilizationTargetUp = FVector::ZeroVector;
+    float LastStabilizationTiltDegrees = 0.0f;
+
     void ApplySuspension(float DeltaTime);
     void ApplyGrip(float DeltaTime);
     void ApplyPlayerForces(float DeltaTime);
 
     int32 FindClosestFreeAnchor(const ACh4_PlayerCharacter* Player) const;
     void ReleaseAnchorFor(const ACh4_PlayerCharacter* Player);
-    
-    void ApplyUprightTorque(float DeltaTime);
+
+    void ApplyUprightStabilization(float DeltaTime);
+    void ConfigureUprightSafetyConstraint();
+    void DrawCartPhysicsDebug() const;
 };

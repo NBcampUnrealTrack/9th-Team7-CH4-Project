@@ -1,7 +1,10 @@
 #include "Cart/CartBase.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "DrawDebugHelpers.h"
 #include "Net/UnrealNetwork.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "Player/Ch4_PlayerCharacter.h"
 
 ACartBase::ACartBase()
@@ -15,14 +18,12 @@ ACartBase::ACartBase()
     // ── 카트 본체 ──
     CartMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CartMesh"));
     SetRootComponent(CartMesh);
+
+    UprightSafetyConstraint = CreateDefaultSubobject<UPhysicsConstraintComponent>(TEXT("UprightSafetyConstraint"));
+    UprightSafetyConstraint->SetupAttachment(CartMesh);
     
     CartMesh->SetLinearDamping(0.5f);
     CartMesh->SetAngularDamping(3.0f);
-
-    // 기획: 카트는 절대 전복되지 않는다. Yaw만 남기고 Roll/Pitch를 잠근다.
-    // // 축 잠금은 물리 바디 초기화가 깨져서 사용하지 않음. ApplyUprightTorque로 대체.
-   // CartMesh->BodyInstance.bLockXRotation = true;
-    //CartMesh->BodyInstance.bLockYRotation = true;
 
     CartMesh->SetCollisionObjectType(ECC_PhysicsBody);
     CartMesh->SetCollisionResponseToAllChannels(ECR_Block);
@@ -97,7 +98,21 @@ void ACartBase::BeginPlay()
     {
         CartMesh->SetSimulatePhysics(true);
         CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
-        CartMesh->SetCenterOfMass(FVector(-20.0f, 0.0f, 0.0f));
+
+        FBodyInstance* BodyInstance = CartMesh->GetBodyInstance();
+        if (BodyInstance)
+        {
+            BodyInstance->InertiaTensorScale = FVector(
+                FMath::Max(CartInertiaTensorScale.X, UE_KINDA_SMALL_NUMBER),
+                FMath::Max(CartInertiaTensorScale.Y, UE_KINDA_SMALL_NUMBER),
+                FMath::Max(CartInertiaTensorScale.Z, UE_KINDA_SMALL_NUMBER));
+            BodyInstance->UpdateMassProperties();
+        }
+
+        CartMesh->SetCenterOfMass(CartCenterOfMassOffset);
+        CartMesh->SetPhysicsMaxAngularVelocityInDegrees(
+            FMath::Max(MaximumAngularVelocityDegrees, 0.0f), false, NAME_None);
+        ConfigureUprightSafetyConstraint();
     }
     else
     {
@@ -109,15 +124,27 @@ void ACartBase::BeginPlay()
 void ACartBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
+
+    if (!HasAuthority() || !CartMesh || !CartMesh->IsSimulatingPhysics())
+    {
+        return;
+    }
+
     ApplySuspension(DeltaTime);
     ApplyGrip(DeltaTime);
-    ApplyUprightTorque(DeltaTime);
+    ApplyUprightStabilization(DeltaTime);
     ApplyPlayerForces(DeltaTime);
+
+    if (bDrawCartPhysicsDebug)
+    {
+        DrawCartPhysicsDebug();
+    }
 }
 
 void ACartBase::ApplySuspension(float DeltaTime)
 {
+    SuspensionContactNormals.Reset(Wheels.Num());
+
     UWorld* World = GetWorld();
     if (!World || !CartMesh)
     {
@@ -142,14 +169,24 @@ void ACartBase::ApplySuspension(float DeltaTime)
         FHitResult Hit;
         const bool bHit = World->LineTraceSingleByChannel(
             Hit, Start, End, ECC_Visibility, Params);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Wheel %s | Hit:%d | Dist:%.1f"),
-    *Wheel->GetName(), bHit ? 1 : 0, bHit ? Hit.Distance : -1.0f);
-        DrawDebugLine(World, Start, End, bHit ? FColor::Green : FColor::Red, false, -1, 0, 2);
+        if (bDrawCartPhysicsDebug)
+        {
+            UE_LOG(LogTemp, VeryVerbose, TEXT("[CartPhysics] Wheel %s | Hit:%d | Dist:%.1f"),
+                *Wheel->GetName(), bHit ? 1 : 0, bHit ? Hit.Distance : -1.0f);
+            DrawDebugLine(World, Start, End, bHit ? FColor::Green : FColor::Red, false, 0.0f, 0, 2.0f);
+        }
 
         if (!bHit)
         {
             continue;   // 바퀴가 떠 있으면 힘을 주지 않는다.
+        }
+
+        const FVector ContactNormal = Hit.ImpactNormal.GetSafeNormal();
+        if (!ContactNormal.ContainsNaN()
+            && !ContactNormal.IsNearlyZero()
+            && FVector::DotProduct(ContactNormal, FVector::UpVector) >= 0.2f)
+        {
+            SuspensionContactNormals.Add(ContactNormal);
         }
 
         // 눌린 정도: 지면이 가까울수록 크다.
@@ -195,18 +232,138 @@ void ACartBase::ApplyGrip(float DeltaTime)
     }
 }
 
-void ACartBase::ApplyUprightTorque(float DeltaTime)
+void ACartBase::ApplyUprightStabilization(float DeltaTime)
 {
     if (!CartMesh)
     {
         return;
     }
 
-    // 카트의 위쪽과 진짜 위쪽이 벌어진 만큼 되돌리는 토크를 준다.
     const FVector CartUp = CartMesh->GetUpVector();
-    const FVector Torque = FVector::CrossProduct(CartUp, FVector::UpVector) * UprightTorque;
+    const FVector AngularVelocityRadians = CartMesh->GetPhysicsAngularVelocityInRadians();
 
-    CartMesh->AddTorqueInRadians(Torque);
+    FVector TargetUp = FVector::ZeroVector;
+    const bool bHasGroundReference = Ch4CartStabilization::TryCalculateAverageGroundNormal(
+        SuspensionContactNormals, 2, 0.2f, TargetUp);
+
+    if (!bHasGroundReference)
+    {
+        const Ch4CartStabilization::FCorrectionResult WorldUpResult =
+            Ch4CartStabilization::CalculateCorrection(
+                CartUp,
+                FVector::UpVector,
+                AngularVelocityRadians,
+                StabilizationDeadZoneDegrees,
+                StabilizationFullAssistDegrees,
+                StabilizationProportionalGain,
+                StabilizationDerivativeGain,
+                MaximumCorrectionAngularAcceleration);
+
+        if (!WorldUpResult.bIsValid
+            || WorldUpResult.TiltAngleDegrees < FMath::Max(EmergencyWorldUpTiltDegrees, 0.0f))
+        {
+            LastStabilizationTargetUp = FVector::ZeroVector;
+            LastStabilizationTiltDegrees = WorldUpResult.TiltAngleDegrees;
+            return;
+        }
+
+        TargetUp = FVector::UpVector;
+    }
+
+    const Ch4CartStabilization::FCorrectionResult Correction =
+        Ch4CartStabilization::CalculateCorrection(
+            CartUp,
+            TargetUp,
+            AngularVelocityRadians,
+            StabilizationDeadZoneDegrees,
+            StabilizationFullAssistDegrees,
+            StabilizationProportionalGain,
+            StabilizationDerivativeGain,
+            MaximumCorrectionAngularAcceleration);
+
+    LastStabilizationTargetUp = TargetUp;
+    LastStabilizationTiltDegrees = Correction.TiltAngleDegrees;
+
+    if (!Correction.bIsValid || Correction.AngularAcceleration.IsNearlyZero())
+    {
+        return;
+    }
+
+    CartMesh->AddTorqueInRadians(Correction.AngularAcceleration, NAME_None, true);
+}
+
+void ACartBase::ConfigureUprightSafetyConstraint()
+{
+    if (!UprightSafetyConstraint || !CartMesh)
+    {
+        return;
+    }
+
+    const float SafeMaximumTilt = FMath::Clamp(MaximumTiltAngleDegrees, 1.0f, 89.0f);
+
+    UprightSafetyConstraint->TermComponentConstraint();
+    UprightSafetyConstraint->SetLinearXLimit(LCM_Free, 0.0f);
+    UprightSafetyConstraint->SetLinearYLimit(LCM_Free, 0.0f);
+    UprightSafetyConstraint->SetLinearZLimit(LCM_Free, 0.0f);
+    UprightSafetyConstraint->SetAngularTwistLimit(ACM_Free, 0.0f);
+    UprightSafetyConstraint->SetAngularSwing1Limit(ACM_Limited, SafeMaximumTilt);
+    UprightSafetyConstraint->SetAngularSwing2Limit(ACM_Limited, SafeMaximumTilt);
+    UprightSafetyConstraint->ConstraintInstance.SetSoftSwingLimitParams(false, 0.0f, 0.0f, 0.0f, 0.0f);
+    UprightSafetyConstraint->SetAngularBreakable(false, 0.0f);
+    UprightSafetyConstraint->SetProjectionEnabled(false);
+    UprightSafetyConstraint->SetDisableCollision(true);
+
+    FVector HorizontalForward = FVector::VectorPlaneProject(CartMesh->GetForwardVector(), FVector::UpVector).GetSafeNormal();
+    if (HorizontalForward.IsNearlyZero())
+    {
+        HorizontalForward = FVector::ForwardVector;
+    }
+
+    UprightSafetyConstraint->SetWorldLocation(CartMesh->GetCenterOfMass());
+    UprightSafetyConstraint->SetWorldRotation(FRotationMatrix::MakeFromXY(FVector::UpVector, HorizontalForward).Rotator());
+    UprightSafetyConstraint->SetConstrainedComponents(CartMesh, NAME_None, nullptr, NAME_None);
+
+    // Primary is the twist axis. Local Z against World Z keeps yaw free while both swing axes cap tilt.
+    UprightSafetyConstraint->SetConstraintReferenceOrientation(
+        EConstraintFrame::Frame1, FVector::UpVector, FVector::ForwardVector);
+    UprightSafetyConstraint->SetConstraintReferenceOrientation(
+        EConstraintFrame::Frame2, FVector::UpVector, HorizontalForward);
+
+    UE_LOG(LogTemp, Log,
+        TEXT("[CartPhysics] %s stabilization initialized | ConstraintValid=%d | MaxTilt=%.1f | MaxAngularVelocity=%.1f deg/s"),
+        *GetNameSafe(this), UprightSafetyConstraint->ConstraintInstance.IsValidConstraintInstance() ? 1 : 0,
+        SafeMaximumTilt, FMath::Max(MaximumAngularVelocityDegrees, 0.0f));
+}
+
+void ACartBase::DrawCartPhysicsDebug() const
+{
+#if ENABLE_DRAW_DEBUG
+    UWorld* World = GetWorld();
+    if (!World || !CartMesh)
+    {
+        return;
+    }
+
+    const FVector CenterOfMass = CartMesh->GetCenterOfMass();
+    const FVector CartUp = CartMesh->GetUpVector();
+    DrawDebugSphere(World, CenterOfMass, 7.0f, 12, FColor::Yellow, false, 0.0f, 0, 1.5f);
+    DrawDebugLine(World, CenterOfMass, CenterOfMass + CartUp * 100.0f, FColor::Blue, false, 0.0f, 0, 2.5f);
+
+    if (!LastStabilizationTargetUp.IsNearlyZero())
+    {
+        DrawDebugLine(World, CenterOfMass, CenterOfMass + LastStabilizationTargetUp * 100.0f,
+            FColor::Green, false, 0.0f, 0, 2.5f);
+    }
+
+    const float SafeMaximumTilt = FMath::Clamp(MaximumTiltAngleDegrees, 1.0f, 89.0f);
+    DrawDebugCone(World, CenterOfMass, FVector::UpVector, 80.0f,
+        FMath::DegreesToRadians(SafeMaximumTilt), FMath::DegreesToRadians(SafeMaximumTilt),
+        24, FColor::Purple, false, 0.0f, 0, 0.75f);
+    DrawDebugString(World, CenterOfMass + FVector(0.0f, 0.0f, 25.0f),
+        FString::Printf(TEXT("Tilt %.1f / Limit %.1f | Contacts %d"),
+            LastStabilizationTiltDegrees, SafeMaximumTilt, SuspensionContactNormals.Num()),
+        nullptr, FColor::White, 0.0f, false, 1.0f);
+#endif
 }
 
 void ACartBase::ApplyPlayerForces(float DeltaTime)
