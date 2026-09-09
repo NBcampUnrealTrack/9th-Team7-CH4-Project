@@ -1,5 +1,6 @@
 #include "Cart/CartBase.h"
 
+#include "Ch4_multiGame.h"
 #include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Net/UnrealNetwork.h"
@@ -23,7 +24,7 @@ ACartBase::ACartBase()
     UprightSafetyConstraint->SetupAttachment(CartMesh);
     
     CartMesh->SetLinearDamping(0.5f);
-    CartMesh->SetAngularDamping(3.0f);
+    CartMesh->SetAngularDamping(CartAngularDamping);
 
     CartMesh->SetCollisionObjectType(ECC_PhysicsBody);
     CartMesh->SetCollisionResponseToAllChannels(ECR_Block);
@@ -94,10 +95,13 @@ void ACartBase::BeginPlay()
         return;
     }
 
+    InitializeStabilizationSettings();
+
     if (HasAuthority())
     {
         CartMesh->SetSimulatePhysics(true);
         CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
+        CartMesh->SetAngularDamping(FMath::Max(CartAngularDamping, 0.0f));
 
         FBodyInstance* BodyInstance = CartMesh->GetBodyInstance();
         if (BodyInstance)
@@ -244,7 +248,10 @@ void ACartBase::ApplyUprightStabilization(float DeltaTime)
 
     FVector TargetUp = FVector::ZeroVector;
     const bool bHasGroundReference = Ch4CartStabilization::TryCalculateAverageGroundNormal(
-        SuspensionContactNormals, 2, 0.2f, TargetUp);
+        SuspensionContactNormals,
+        FMath::Clamp(MinimumGroundContactCount, 1, FMath::Max(Wheels.Num(), 1)),
+        FMath::Clamp(MinimumGroundNormalWorldUpDot, 0.0f, 1.0f),
+        TargetUp);
 
     if (!bHasGroundReference)
     {
@@ -253,8 +260,8 @@ void ACartBase::ApplyUprightStabilization(float DeltaTime)
                 CartUp,
                 FVector::UpVector,
                 AngularVelocityRadians,
-                StabilizationDeadZoneDegrees,
-                StabilizationFullAssistDegrees,
+                EffectiveStabilizationDeadZoneDegrees,
+                EffectiveStabilizationFullAssistDegrees,
                 StabilizationProportionalGain,
                 StabilizationDerivativeGain,
                 MaximumCorrectionAngularAcceleration);
@@ -270,16 +277,39 @@ void ACartBase::ApplyUprightStabilization(float DeltaTime)
         TargetUp = FVector::UpVector;
     }
 
-    const Ch4CartStabilization::FCorrectionResult Correction =
+    const Ch4CartStabilization::FCorrectionResult BaseCorrection =
         Ch4CartStabilization::CalculateCorrection(
             CartUp,
             TargetUp,
             AngularVelocityRadians,
-            StabilizationDeadZoneDegrees,
-            StabilizationFullAssistDegrees,
+            EffectiveStabilizationDeadZoneDegrees,
+            EffectiveStabilizationFullAssistDegrees,
             StabilizationProportionalGain,
             StabilizationDerivativeGain,
             MaximumCorrectionAngularAcceleration);
+
+    const FVector SafeCartUp = CartUp.GetSafeNormal();
+    const float ConstraintTiltDegrees = SafeCartUp.IsNearlyZero() ? 0.0f : FMath::RadiansToDegrees(
+        FMath::Acos(FMath::Clamp(FVector::DotProduct(SafeCartUp, FVector::UpVector), -1.0f, 1.0f)));
+    const float LimitApproachAlpha = bEnableUprightSafetyConstraint
+        ? Ch4CartStabilization::CalculateAssistAlpha(
+            ConstraintTiltDegrees,
+            EffectiveStabilizationFullAssistDegrees,
+            EffectiveMaximumTiltAngleDegrees)
+        : 0.0f;
+    const float EffectiveDerivativeGain = FMath::Max(StabilizationDerivativeGain, 0.0f)
+        * FMath::Lerp(1.0f, FMath::Max(LimitApproachDampingMultiplier, 1.0f), LimitApproachAlpha);
+    const Ch4CartStabilization::FCorrectionResult Correction = LimitApproachAlpha > 0.0f
+        ? Ch4CartStabilization::CalculateCorrection(
+            CartUp,
+            TargetUp,
+            AngularVelocityRadians,
+            EffectiveStabilizationDeadZoneDegrees,
+            EffectiveStabilizationFullAssistDegrees,
+            StabilizationProportionalGain,
+            EffectiveDerivativeGain,
+            MaximumCorrectionAngularAcceleration)
+        : BaseCorrection;
 
     LastStabilizationTargetUp = TargetUp;
     LastStabilizationTiltDegrees = Correction.TiltAngleDegrees;
@@ -292,6 +322,27 @@ void ACartBase::ApplyUprightStabilization(float DeltaTime)
     CartMesh->AddTorqueInRadians(Correction.AngularAcceleration, NAME_None, true);
 }
 
+void ACartBase::InitializeStabilizationSettings()
+{
+    const Ch4CartStabilization::FAngleSettings AngleSettings =
+        Ch4CartStabilization::SanitizeAngleSettings(
+            StabilizationDeadZoneDegrees,
+            StabilizationFullAssistDegrees,
+            MaximumTiltAngleDegrees);
+    EffectiveStabilizationDeadZoneDegrees = AngleSettings.DeadZoneDegrees;
+    EffectiveStabilizationFullAssistDegrees = AngleSettings.FullAssistDegrees;
+    EffectiveMaximumTiltAngleDegrees = AngleSettings.MaximumTiltDegrees;
+
+    if (HasAuthority() && AngleSettings.bWasAdjusted)
+    {
+        UE_LOG(LogCh4_multiGame, Warning,
+            TEXT("[CartPhysics] Invalid stabilization angle order on %s: Dead=%.2f Full=%.2f Max=%.2f; using Dead=%.2f Full=%.2f Max=%.2f"),
+            *GetNameSafe(this), StabilizationDeadZoneDegrees, StabilizationFullAssistDegrees,
+            MaximumTiltAngleDegrees, EffectiveStabilizationDeadZoneDegrees,
+            EffectiveStabilizationFullAssistDegrees, EffectiveMaximumTiltAngleDegrees);
+    }
+}
+
 void ACartBase::ConfigureUprightSafetyConstraint()
 {
     if (!UprightSafetyConstraint || !CartMesh)
@@ -299,16 +350,36 @@ void ACartBase::ConfigureUprightSafetyConstraint()
         return;
     }
 
-    const float SafeMaximumTilt = FMath::Clamp(MaximumTiltAngleDegrees, 1.0f, 89.0f);
-
     UprightSafetyConstraint->TermComponentConstraint();
+    if (!bEnableUprightSafetyConstraint)
+    {
+        UE_LOG(LogCh4_multiGame, Log, TEXT("[CartPhysics] %s upright safety constraint disabled"),
+            *GetNameSafe(this));
+        return;
+    }
+
+    const float SafeStiffness = FMath::Max(SoftAngularLimitStiffness, 0.0f);
+    const float SafeDamping = FMath::Max(SoftAngularLimitDamping, 0.0f);
+    const bool bUseSafeSoftLimit = bUseSoftAngularLimit && (SafeStiffness > 0.0f || SafeDamping > 0.0f);
+    if (bUseSoftAngularLimit && !bUseSafeSoftLimit)
+    {
+        UE_LOG(LogCh4_multiGame, Warning,
+            TEXT("[CartPhysics] %s soft angular limit has zero stiffness and damping; using the hard safety limit"),
+            *GetNameSafe(this));
+    }
+
     UprightSafetyConstraint->SetLinearXLimit(LCM_Free, 0.0f);
     UprightSafetyConstraint->SetLinearYLimit(LCM_Free, 0.0f);
     UprightSafetyConstraint->SetLinearZLimit(LCM_Free, 0.0f);
     UprightSafetyConstraint->SetAngularTwistLimit(ACM_Free, 0.0f);
-    UprightSafetyConstraint->SetAngularSwing1Limit(ACM_Limited, SafeMaximumTilt);
-    UprightSafetyConstraint->SetAngularSwing2Limit(ACM_Limited, SafeMaximumTilt);
-    UprightSafetyConstraint->ConstraintInstance.SetSoftSwingLimitParams(false, 0.0f, 0.0f, 0.0f, 0.0f);
+    UprightSafetyConstraint->SetAngularSwing1Limit(ACM_Limited, EffectiveMaximumTiltAngleDegrees);
+    UprightSafetyConstraint->SetAngularSwing2Limit(ACM_Limited, EffectiveMaximumTiltAngleDegrees);
+    UprightSafetyConstraint->ConstraintInstance.SetSoftSwingLimitParams(
+        bUseSafeSoftLimit,
+        SafeStiffness,
+        SafeDamping,
+        FMath::Clamp(ConstraintRestitution, 0.0f, 1.0f),
+        0.0f);
     UprightSafetyConstraint->SetAngularBreakable(false, 0.0f);
     UprightSafetyConstraint->SetProjectionEnabled(false);
     UprightSafetyConstraint->SetDisableCollision(true);
@@ -329,10 +400,11 @@ void ACartBase::ConfigureUprightSafetyConstraint()
     UprightSafetyConstraint->SetConstraintReferenceOrientation(
         EConstraintFrame::Frame2, FVector::UpVector, HorizontalForward);
 
-    UE_LOG(LogTemp, Log,
-        TEXT("[CartPhysics] %s stabilization initialized | ConstraintValid=%d | MaxTilt=%.1f | MaxAngularVelocity=%.1f deg/s"),
+    UE_LOG(LogCh4_multiGame, Log,
+        TEXT("[CartPhysics] %s stabilization initialized | ConstraintValid=%d | MaxTilt=%.1f | Limit=%s | SoftK=%.1f SoftD=%.1f | MaxAngularVelocity=%.1f deg/s"),
         *GetNameSafe(this), UprightSafetyConstraint->ConstraintInstance.IsValidConstraintInstance() ? 1 : 0,
-        SafeMaximumTilt, FMath::Max(MaximumAngularVelocityDegrees, 0.0f));
+        EffectiveMaximumTiltAngleDegrees, bUseSafeSoftLimit ? TEXT("Soft") : TEXT("Hard"),
+        SafeStiffness, SafeDamping, FMath::Max(MaximumAngularVelocityDegrees, 0.0f));
 }
 
 void ACartBase::DrawCartPhysicsDebug() const
@@ -355,13 +427,14 @@ void ACartBase::DrawCartPhysicsDebug() const
             FColor::Green, false, 0.0f, 0, 2.5f);
     }
 
-    const float SafeMaximumTilt = FMath::Clamp(MaximumTiltAngleDegrees, 1.0f, 89.0f);
     DrawDebugCone(World, CenterOfMass, FVector::UpVector, 80.0f,
-        FMath::DegreesToRadians(SafeMaximumTilt), FMath::DegreesToRadians(SafeMaximumTilt),
+        FMath::DegreesToRadians(EffectiveMaximumTiltAngleDegrees), FMath::DegreesToRadians(EffectiveMaximumTiltAngleDegrees),
         24, FColor::Purple, false, 0.0f, 0, 0.75f);
     DrawDebugString(World, CenterOfMass + FVector(0.0f, 0.0f, 25.0f),
-        FString::Printf(TEXT("Tilt %.1f / Limit %.1f | Contacts %d"),
-            LastStabilizationTiltDegrees, SafeMaximumTilt, SuspensionContactNormals.Num()),
+        FString::Printf(TEXT("Tilt %.1f | Dead %.1f Full %.1f Max %.1f | Contacts %d"),
+            LastStabilizationTiltDegrees, EffectiveStabilizationDeadZoneDegrees,
+            EffectiveStabilizationFullAssistDegrees, EffectiveMaximumTiltAngleDegrees,
+            SuspensionContactNormals.Num()),
         nullptr, FColor::White, 0.0f, false, 1.0f);
 #endif
 }

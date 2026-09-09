@@ -44,6 +44,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow|Lobby Return")
 	bool ReturnToLobby();
 
+	/** Immediate Waiting-phase return used only when preparation expires with an empty tracked Cart. */
+	bool ReturnToLobbyFromPreparation();
+
 	UFUNCTION(BlueprintPure, Category="Game Flow|Lobby Return")
 	bool IsReturnToLobbyScheduled() const { return bReturnToLobbyScheduled; }
 
@@ -112,6 +115,7 @@ private:
 	bool EndGameAsClear(ECh4GameEndReason EndReason, int32 FinalCargoScore);
 	void EndGameAsGameOver(ECh4GameEndReason EndReason);
 	bool GetLobbyTravelURL(FString& OutURL) const;
+	bool StartLobbyTravel();
 	void OnReturnToLobbyTimer();
 	FTimerHandle ReturnToLobbyTimer;
 	bool bReturnToLobbyScheduled = false;

@@ -4,6 +4,14 @@
 
 namespace Ch4CartStabilization
 {
+	struct FAngleSettings
+	{
+		float DeadZoneDegrees = 0.0f;
+		float FullAssistDegrees = 0.0f;
+		float MaximumTiltDegrees = 0.0f;
+		bool bWasAdjusted = false;
+	};
+
 	struct FCorrectionResult
 	{
 		FVector AngularAcceleration = FVector::ZeroVector;
@@ -11,6 +19,33 @@ namespace Ch4CartStabilization
 		float AssistAlpha = 0.0f;
 		bool bIsValid = false;
 	};
+
+	inline FAngleSettings SanitizeAngleSettings(
+		const float DeadZoneDegrees,
+		const float FullAssistDegrees,
+		const float MaximumTiltDegrees)
+	{
+		constexpr float MinimumAngleGap = 0.1f;
+		FAngleSettings Result;
+		const float FiniteMaximumTilt = FMath::IsFinite(MaximumTiltDegrees) ? MaximumTiltDegrees : 55.0f;
+		Result.MaximumTiltDegrees = FMath::Clamp(FiniteMaximumTilt, 1.0f, 89.0f);
+
+		const float FiniteDeadZone = FMath::IsFinite(DeadZoneDegrees) ? DeadZoneDegrees : 0.0f;
+		Result.DeadZoneDegrees = FMath::Clamp(
+			FiniteDeadZone, 0.0f, Result.MaximumTiltDegrees - MinimumAngleGap * 2.0f);
+
+		const float FiniteFullAssist = FMath::IsFinite(FullAssistDegrees)
+			? FullAssistDegrees : Result.MaximumTiltDegrees - MinimumAngleGap;
+		Result.FullAssistDegrees = FMath::Clamp(
+			FiniteFullAssist,
+			Result.DeadZoneDegrees + MinimumAngleGap,
+			Result.MaximumTiltDegrees - MinimumAngleGap);
+
+		Result.bWasAdjusted = !FMath::IsNearlyEqual(Result.DeadZoneDegrees, DeadZoneDegrees)
+			|| !FMath::IsNearlyEqual(Result.FullAssistDegrees, FullAssistDegrees)
+			|| !FMath::IsNearlyEqual(Result.MaximumTiltDegrees, MaximumTiltDegrees);
+		return Result;
+	}
 
 	inline float CalculateAssistAlpha(
 		const float TiltAngleDegrees,

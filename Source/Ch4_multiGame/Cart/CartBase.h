@@ -77,43 +77,79 @@ protected:
     float GrabDistance = 150.0f;
     
     // ── 자세 안정화 ──
-    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization")
     FVector CartCenterOfMassOffset = FVector(-20.0f, 0.0f, -18.0f);
 
-    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization", meta=(ClampMin="0.01"))
     FVector CartInertiaTensorScale = FVector(2.0f, 2.0f, 1.0f);
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
+    float CartAngularDamping = 3.0f;
+
     /** Degrees per second. UPrimitiveComponent converts this for Chaos. */
-    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0", Units="DegreesPerSecond"))
     float MaximumAngularVelocityDegrees = 240.0f;
 
-    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0", ClampMax="89.0", Units="Degrees"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0", ClampMax="89.0", Units="Degrees"))
     float StabilizationDeadZoneDegrees = 8.0f;
 
-    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0", ClampMax="89.0", Units="Degrees"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0", ClampMax="89.0", Units="Degrees"))
     float StabilizationFullAssistDegrees = 30.0f;
 
-    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
     float StabilizationProportionalGain = 6.0f;
 
-    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
     float StabilizationDerivativeGain = 3.0f;
 
     /** Maximum correction passed to AddTorqueInRadians with acceleration change enabled. */
-    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0"))
     float MaximumCorrectionAngularAcceleration = 8.0f;
 
     /** World-up correction only starts at this angle while fewer than two wheels touch ground. */
-    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="0.0", ClampMax="89.0", Units="Degrees"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization|Ground Reference", meta=(ClampMin="0.0", ClampMax="89.0", Units="Degrees"))
     float EmergencyWorldUpTiltDegrees = 30.0f;
 
-    UPROPERTY(EditDefaultsOnly, Category="Cart|Stabilization", meta=(ClampMin="1.0", ClampMax="89.0", Units="Degrees"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization|Ground Reference", meta=(ClampMin="1", ClampMax="4"))
+    int32 MinimumGroundContactCount = 2;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization|Ground Reference", meta=(ClampMin="0.0", ClampMax="1.0"))
+    float MinimumGroundNormalWorldUpDot = 0.2f;
+
+    /** Extra continuous damping near the safety limit lowers the impact speed before the hard wall. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization|Constraint", meta=(ClampMin="1.0"))
+    float LimitApproachDampingMultiplier = 2.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization|Constraint")
+    bool bEnableUprightSafetyConstraint = true;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization|Constraint", meta=(ClampMin="1.0", ClampMax="89.0", Units="Degrees"))
     float MaximumTiltAngleDegrees = 55.0f;
 
-    UPROPERTY(EditDefaultsOnly, Category="Cart|Debug")
+    /** Off preserves the non-compliant 55-degree final safety wall. Enable for PIE comparison only. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization|Constraint")
+    bool bUseSoftAngularLimit = false;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization|Constraint",
+        meta=(ClampMin="0.0", EditCondition="bUseSoftAngularLimit"))
+    float SoftAngularLimitStiffness = 50.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization|Constraint",
+        meta=(ClampMin="0.0", EditCondition="bUseSoftAngularLimit"))
+    float SoftAngularLimitDamping = 5.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Stabilization|Constraint",
+        meta=(ClampMin="0.0", ClampMax="1.0"))
+    float ConstraintRestitution = 0.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Cart|Debug")
     bool bDrawCartPhysicsDebug = false;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FCh4CartStabilizationConfigurationTest;
+#endif
+
     /** 앵커 인덱스별 점유자. 클라이언트도 손 위치 맞추려면 알아야 하므로 복제. */
     UPROPERTY(Replicated)
     TArray<TObjectPtr<ACh4_PlayerCharacter>> AnchorOccupants;
@@ -126,6 +162,9 @@ private:
 
     FVector LastStabilizationTargetUp = FVector::ZeroVector;
     float LastStabilizationTiltDegrees = 0.0f;
+    float EffectiveStabilizationDeadZoneDegrees = 8.0f;
+    float EffectiveStabilizationFullAssistDegrees = 30.0f;
+    float EffectiveMaximumTiltAngleDegrees = 55.0f;
 
     void ApplySuspension(float DeltaTime);
     void ApplyGrip(float DeltaTime);
@@ -135,6 +174,7 @@ private:
     void ReleaseAnchorFor(const ACh4_PlayerCharacter* Player);
 
     void ApplyUprightStabilization(float DeltaTime);
+    void InitializeStabilizationSettings();
     void ConfigureUprightSafetyConstraint();
     void DrawCartPhysicsDebug() const;
 };
