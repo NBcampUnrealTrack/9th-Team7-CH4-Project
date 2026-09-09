@@ -35,4 +35,7 @@ protected:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	bool bIsGrabbing;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	bool bIsPushingCart;
 };

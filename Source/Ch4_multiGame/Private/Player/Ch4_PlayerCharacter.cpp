@@ -255,7 +255,8 @@ void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProp
 	
 	DOREPLIFETIME(ThisClass, bIsStunned);
 	DOREPLIFETIME(ThisClass, GrabbedComponent);
-	DOREPLIFETIME(ACh4_PlayerCharacter, GrabbedCart);
+	DOREPLIFETIME(ThisClass, GrabbedCart);
+	DOREPLIFETIME(ThisClass, CartMoveInput);
 }
 
 void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -265,6 +266,7 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 	if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent))
 	{
 		if (MoveAction) EIC->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ACh4_PlayerCharacter::InputActionMove);
+		if (MoveAction) EIC->BindAction(MoveAction, ETriggerEvent::Completed, this, &ACh4_PlayerCharacter::InputActionMove);
 		if (LookAction) EIC->BindAction(LookAction, ETriggerEvent::Triggered, this, &ACh4_PlayerCharacter::InputActionLook);
 		if (JumpAction) EIC->BindAction(JumpAction, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionJump);
 		if (Emote1Action) EIC->BindAction(Emote1Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote1);
