@@ -563,7 +563,10 @@ void ACartBase::ServerRequestRelease_Implementation(ACh4_PlayerCharacter* Player
 
     ReleaseAnchorFor(Player);
     PlayerInputs.Remove(Player);
-
+    
+    Player->CartMoveInput = FVector2D::ZeroVector;
+    Player->bIsBraking = false;
+    
     Player->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 }
 
@@ -576,5 +579,8 @@ void ACartBase::ServerSetMoveInput_Implementation(ACh4_PlayerCharacter* Player, 
 
     PlayerInputs.Add(Player, Input);
     
+    const bool bBraking = Input.Y < 0.0f;
+
     Player->CartMoveInput = Input;
+    Player->bIsBraking = bBraking;
 }
