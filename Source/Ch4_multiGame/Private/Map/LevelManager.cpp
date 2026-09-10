@@ -48,20 +48,6 @@ void ALevelManager::BeginPlay()
         // 3. 서버 본인 레벨 배치 실행
         ArrangePlacedZones();
     }
-    else
-    {
-        // 클라이언트: MiddleZoneOrder가 비어있으면 기본 순서로 초기화하고 배치 실행
-        if (MiddleZoneOrder.Num() == 0)
-        {
-            MiddleZoneOrder.Empty();
-            for (int32 i = 0; i < MiddleRoadActors.Num(); ++i)
-            {
-                MiddleZoneOrder.Add(i);
-            }
-
-            ArrangePlacedZones();
-        }
-    }
 }
 
 void ALevelManager::OnRep_MiddleZoneOrder()
