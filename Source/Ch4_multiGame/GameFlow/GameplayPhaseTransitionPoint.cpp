@@ -3,6 +3,7 @@
 #include "GameFlow/GameplayPhaseTransitionPoint.h"
 
 #include "Cargo/CargoActor.h"
+#include "Cart/CartBase.h"
 #include "Cart/CartCargoTrackerComponent.h"
 #include "Ch4_multiGame.h"
 #include "Ch4_multiGameGameMode.h"
@@ -68,6 +69,21 @@ bool AGameplayPhaseTransitionPoint::StartPreparationTimer()
 	{
 		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Timer rejected: requires uninitialized Waiting, a finite non-negative duration and a replicated transition actor in multiplayer"));
 		return false;
+	}
+	if (ACartBase* PreparationCart = Cast<ACartBase>(CartActor))
+	{
+		if (PreparationCart->GetWorld() != GetWorld() || !PreparationCart->SetPreparationLocked(true))
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[Preparation] Timer rejected: failed to lock configured Cart %s"), *GetNameSafe(CartActor));
+			return false;
+		}
+	}
+	else
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[Preparation] Cart lock unavailable: assign the ForestLevel ACartBase instance to CartActor on %s"),
+			*GetName());
 	}
 	bPreparationTimerStarted = true;
 	State->SetPreparationTimer(PreparationDurationSeconds);
@@ -200,12 +216,13 @@ bool AGameplayPhaseTransitionPoint::TryStartMainGameplay()
 		}
 		return false;
 	}
-	if (!IsValid(CartDestination)
+	ACartBase* PreparationCart = Cast<ACartBase>(CartActor);
+	if (!IsValid(PreparationCart) || !IsValid(CartDestination)
 		|| CartDestination->GetWorld() != GetWorld() || !CartActor->GetRootComponent()
 		|| CartActor->GetRootComponent()->Mobility != EComponentMobility::Movable
 		|| !CartActor->Implements<UGameFlowTargetInterface>())
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Invalid Cart target: Cart=%s Destination=%s; requires movable root, GameFlowTargetInterface and same-world references"),
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Preparation] Invalid Cart target: Cart=%s Destination=%s; requires ACartBase, movable root, GameFlowTargetInterface and same-world references"),
 			*GetNameSafe(CartActor), *GetNameSafe(CartDestination));
 		return false;
 	}
@@ -423,6 +440,16 @@ void AGameplayPhaseTransitionPoint::OnLoadRestoreTimer()
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Physics restored: Authority=%d MoveAccepted=%d"), HasAuthority(), bTeleportSucceeded);
 	if (HasAuthority() && bTeleportSucceeded)
 	{
+		ACartBase* PreparationCart = Cast<ACartBase>(CartActor);
+		if (!PreparationCart || !PreparationCart->SetPreparationLocked(false))
+		{
+			bTeleportSucceeded = false;
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[Preparation] Cart unlock failed after load restoration; keep Waiting"));
+			return;
+		}
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] Cart unlocked at Main Area: %s"),
+			*GetNameSafe(PreparationCart));
 		if (ACh4_multiGameGameMode* Rule = GetGameRule())
 		{
 			bTransitionComplete = Rule->FinishPreparationTransition();

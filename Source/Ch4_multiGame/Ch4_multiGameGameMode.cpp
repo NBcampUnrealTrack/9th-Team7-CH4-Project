@@ -36,6 +36,11 @@ void ACh4_multiGameGameMode::SetDeliveryScoreSummaryForTesting(
 	DeliveryScoreTargetOverrideForTesting = TargetActor;
 	DeliveryScoreSummaryOverrideForTesting = NewDeliveryScoreSummary;
 }
+
+void ACh4_multiGameGameMode::SetEmptyCartGameOverDelayForTesting(const float NewDelaySeconds)
+{
+	EmptyCartGameOverDelaySeconds = NewDelaySeconds;
+}
 #endif
 
 bool ACh4_multiGameGameMode::RequestCargoInitialization(const int32 InitialCargoCount)
@@ -298,6 +303,11 @@ bool ACh4_multiGameGameMode::NotifyGoalReached(AActor* ReachingActor)
 			DeliveryScoreSummary.DeliveredCargoCount,
 			GameFlowState->GetRemainingCargoCount());
 	}
+	if (DeliveryScoreSummary.bHasScoreData && DeliveryScoreSummary.DeliveredCargoCount == 0)
+	{
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Goal reached with empty cart"));
+		return ScheduleEmptyCartFailure();
+	}
 
 	return EvaluateGameOutcome(
 		EGameRuleEvaluationEvent::GoalReached,
@@ -530,7 +540,12 @@ bool ACh4_multiGameGameMode::TryTransitionGamePhase(
 		return false;
 	}
 
-	return GameFlowState->SetGamePhaseState(NewPhase, EndReason, FinalCargoScore);
+	const bool bTransitioned = GameFlowState->SetGamePhaseState(NewPhase, EndReason, FinalCargoScore);
+	if (bTransitioned && (NewPhase == ECh4GamePhase::Cleared || NewPhase == ECh4GamePhase::GameOver))
+	{
+		ClearEmptyCartFailure();
+	}
+	return bTransitioned;
 }
 
 bool ACh4_multiGameGameMode::EndGameAsClear(
@@ -564,6 +579,70 @@ void ACh4_multiGameGameMode::EndGameAsGameOver(const ECh4GameEndReason EndReason
 	{
 		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] GAME OVER"));
 	}
+}
+
+bool ACh4_multiGameGameMode::ScheduleEmptyCartFailure()
+{
+	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
+	if (!HasAuthority() || !GetWorld() || !GameFlowState
+		|| GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Playing)
+	{
+		return false;
+	}
+	if (bEmptyCartFailurePending)
+	{
+		return true;
+	}
+
+	const float DelaySeconds = FMath::IsFinite(EmptyCartGameOverDelaySeconds)
+		? FMath::Max(EmptyCartGameOverDelaySeconds, 0.0f)
+		: 0.0f;
+	if (!FMath::IsFinite(EmptyCartGameOverDelaySeconds))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Invalid empty cart delay; using the next server tick"));
+	}
+
+	bEmptyCartFailurePending = true;
+	if (DelaySeconds > 0.0f)
+	{
+		GetWorldTimerManager().SetTimer(EmptyCartFailureTimer, this,
+			&ACh4_multiGameGameMode::OnEmptyCartFailureTimer, DelaySeconds, false);
+	}
+	else
+	{
+		EmptyCartFailureTimer = GetWorldTimerManager().SetTimerForNextTick(
+			this, &ACh4_multiGameGameMode::OnEmptyCartFailureTimer);
+	}
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Empty cart failure scheduled: %.2fs"), DelaySeconds);
+	return true;
+}
+
+void ACh4_multiGameGameMode::OnEmptyCartFailureTimer()
+{
+	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
+	if (!bEmptyCartFailurePending || !HasAuthority() || !GameFlowState
+		|| GameFlowState->GetCurrentGamePhase() != ECh4GamePhase::Playing)
+	{
+		ClearEmptyCartFailure();
+		return;
+	}
+
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Empty cart failure triggered"));
+	EndGameAsGameOver(ECh4GameEndReason::CargoRuleFailed);
+	if (bEmptyCartFailurePending)
+	{
+		ClearEmptyCartFailure();
+	}
+}
+
+void ACh4_multiGameGameMode::ClearEmptyCartFailure()
+{
+	if (GetWorld())
+	{
+		GetWorldTimerManager().ClearTimer(EmptyCartFailureTimer);
+	}
+	bEmptyCartFailurePending = false;
 }
 
 bool ACh4_multiGameGameMode::InitializePreparationCargo(const TArray<ACargoActor*>& CargoSnapshot)
@@ -727,6 +806,7 @@ bool ACh4_multiGameGameMode::StartLobbyTravel()
 void ACh4_multiGameGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	GetWorldTimerManager().ClearTimer(ReturnToLobbyTimer);
+	ClearEmptyCartFailure();
 	bReturnToLobbyScheduled = false;
 	Super::EndPlay(EndPlayReason);
 }

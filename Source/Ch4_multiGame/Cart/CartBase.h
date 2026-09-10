@@ -18,17 +18,17 @@ public:
     virtual void Tick(float DeltaTime) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-    /** 잡기 요청. 서버가 가장 가까운 빈 앵커를 찾아 배정한다. */
-    UFUNCTION(Server, Reliable)
-    void ServerRequestGrab(ACh4_PlayerCharacter* Player);
+    /** Server-only Cart operations. Remote clients reach these through their owned Character RPC. */
+    bool TryGrabPlayer(ACh4_PlayerCharacter* Player);
+    bool ReleasePlayer(ACh4_PlayerCharacter* Player);
+    bool SetPlayerMoveInput(ACh4_PlayerCharacter* Player, const FVector2D& Input);
 
-    /** 놓기 요청. */
-    UFUNCTION(Server, Reliable)
-    void ServerRequestRelease(ACh4_PlayerCharacter* Player);
+    /** Explicit preparation ownership; Waiting alone never locks the Cart. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Cart|Preparation")
+    bool SetPreparationLocked(bool bLocked);
 
-    /** 매 프레임 입력 전달. 유실돼도 다음 프레임에 갱신되므로 Unreliable. */
-    UFUNCTION(Server, Unreliable)
-    void ServerSetMoveInput(ACh4_PlayerCharacter* Player, FVector2D Input);
+    UFUNCTION(BlueprintPure, Category="Cart|Preparation")
+    bool IsPreparationLocked() const { return bPreparationLocked; }
 
     /** 이 플레이어가 배정받은 앵커. 없으면 nullptr. */
     USceneComponent* GetAnchorFor(const ACh4_PlayerCharacter* Player) const;
@@ -154,6 +154,11 @@ private:
     UPROPERTY(Replicated)
     TArray<TObjectPtr<ACh4_PlayerCharacter>> AnchorOccupants;
 
+    UPROPERTY(Replicated)
+    bool bPreparationLocked = false;
+
+    bool bWasSimulatingBeforePreparationLock = true;
+
     /** 서버 전용. 플레이어별 최신 입력값. */
     TMap<TObjectPtr<ACh4_PlayerCharacter>, FVector2D> PlayerInputs;
 
@@ -172,6 +177,7 @@ private:
 
     int32 FindClosestFreeAnchor(const ACh4_PlayerCharacter* Player) const;
     void ReleaseAnchorFor(const ACh4_PlayerCharacter* Player);
+    void CleanupInvalidPlayers();
 
     void ApplyUprightStabilization(float DeltaTime);
     void InitializeStabilizationSettings();
