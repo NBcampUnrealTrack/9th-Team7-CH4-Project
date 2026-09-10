@@ -5,6 +5,7 @@
 #include "Misc/AutomationTest.h"
 #include "Cargo/CargoActor.h"
 #include "Cargo/CargoDataAsset.h"
+#include "Cart/CartBase.h"
 #include "Cart/CartCargoTrackerComponent.h"
 #include "Ch4_multiGameGameMode.h"
 #include "Components/StaticMeshComponent.h"
@@ -19,6 +20,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Map/FinalDeliveryZoneComponent.h"
 #include "TimerManager.h"
+#include "UObject/UnrealType.h"
 
 namespace Ch4GameplayLoopTests
 {
@@ -73,7 +75,7 @@ bool FCh4DeliveredCargoRuleTest::RunTest(const FString& Parameters)
 	FCh4DeliveryScoreSummary Summary;
 	Summary.bHasScoreData = true;
 	F.Rule->SetDeliveryScoreSummaryForTesting(Target, Summary);
-	TestFalse(TEXT("Five active Cargo elsewhere cannot clear an empty Cart"), F.Rule->NotifyGoalReached(Target));
+	TestTrue(TEXT("An empty scored Cart starts the delayed failure instead of clearing"), F.Rule->NotifyGoalReached(Target));
 	Summary.DeliveredCargoCount = 1;
 	Summary.DeliveredCargoScore = 100;
 	F.Rule->SetDeliveryScoreSummaryForTesting(Target, Summary);
@@ -90,6 +92,73 @@ bool FCh4DeliveredCargoRuleTest::RunTest(const FString& Parameters)
 	F.Rule->SetDeliveryScoreSummaryForTesting(Target, Summary);
 	TestFalse(TEXT("Duplicate terminal score is rejected"), F.Rule->NotifyGoalReached(Target));
 	TestEqual(TEXT("Terminal score stays immutable"), F.State->GetFinalCargoScore(), 400);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCh4EmptyCartGoalFailureTest,
+	"Ch4_multiGame.GameFlow.EmptyCartGoalFailure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCh4EmptyCartGoalFailureTest::RunTest(const FString& Parameters)
+{
+	using namespace Ch4GameplayLoopTests;
+	FWorldFixture F;
+	if (!F.Initialize()) return false;
+	F.Rule->SetEmptyCartGameOverDelayForTesting(1.0f);
+	F.Rule->RequestCargoInitialization(3);
+	F.Rule->RequestGameStart();
+	AActor* Target = F.World->SpawnActor<AActor>();
+	FCh4DeliveryScoreSummary EmptySummary;
+	EmptySummary.bHasScoreData = true;
+	F.Rule->SetDeliveryScoreSummaryForTesting(Target, EmptySummary);
+
+	TestTrue(TEXT("Empty scored Goal notification is accepted once as a pending failure"),
+		F.Rule->NotifyGoalReached(Target));
+	TestEqual(TEXT("Empty Goal remains Playing during the delay"),
+		F.State->GetCurrentGamePhase(), ECh4GamePhase::Playing);
+	TestEqual(TEXT("Pending empty Goal keeps final score zero"), F.State->GetFinalCargoScore(), 0);
+	// A synthetic world's first manual TimerManager tick establishes its internal time base.
+	F.TickTimers(0.0f);
+	F.TickTimers(0.6f);
+	TestEqual(TEXT("Empty Goal has not failed before the configured delay"),
+		F.State->GetCurrentGamePhase(), ECh4GamePhase::Playing);
+	TestTrue(TEXT("Duplicate empty Goal notification reuses the existing countdown"),
+		F.Rule->NotifyGoalReached(Target));
+	F.TickTimers(0.5f);
+	TestEqual(TEXT("Original one-shot countdown reaches GameOver without being restarted"),
+		F.State->GetCurrentGamePhase(), ECh4GamePhase::GameOver);
+	TestEqual(TEXT("Empty Cart GameOver uses the existing cargo-rule reason"),
+		F.State->GetGameEndReason(), ECh4GameEndReason::CargoRuleFailed);
+	TestEqual(TEXT("Empty Cart GameOver finalizes score at zero"), F.State->GetFinalCargoScore(), 0);
+	TestFalse(TEXT("Terminal GameOver rejects further Goal notifications"),
+		F.Rule->NotifyGoalReached(Target));
+
+	FWorldFixture Terminal;
+	if (!Terminal.Initialize()) return false;
+	Terminal.Rule->bAutoReturnToLobbyOnClear = false;
+	Terminal.Rule->SetEmptyCartGameOverDelayForTesting(1.0f);
+	Terminal.Rule->RequestCargoInitialization(1);
+	Terminal.Rule->RequestGameStart();
+	AActor* TerminalTarget = Terminal.World->SpawnActor<AActor>();
+	Terminal.Rule->SetDeliveryScoreSummaryForTesting(TerminalTarget, EmptySummary);
+	TestTrue(TEXT("Second fixture schedules an empty failure"), Terminal.Rule->NotifyGoalReached(TerminalTarget));
+	FCh4DeliveryScoreSummary DeliveredSummary;
+	DeliveredSummary.bHasScoreData = true;
+	DeliveredSummary.DeliveredCargoCount = 1;
+	DeliveredSummary.DeliveredCargoScore = 250;
+	Terminal.Rule->SetDeliveryScoreSummaryForTesting(TerminalTarget, DeliveredSummary);
+	TestTrue(TEXT("A valid terminal clear can finish before the pending failure"),
+		Terminal.Rule->NotifyGoalReached(TerminalTarget));
+	Terminal.TickTimers(2.0f);
+	TestEqual(TEXT("Cancelled empty timer cannot overwrite Cleared"),
+		Terminal.State->GetCurrentGamePhase(), ECh4GamePhase::Cleared);
+	TestEqual(TEXT("Cancelled empty timer cannot overwrite the clear score"),
+		Terminal.State->GetFinalCargoScore(), 250);
+
+	const FProperty* DelayProperty = FindFProperty<FProperty>(
+		ACh4_multiGameGameMode::StaticClass(), TEXT("EmptyCartGameOverDelaySeconds"));
+	TestTrue(TEXT("Empty Cart delay is editable in GameMode Class Defaults"),
+		DelayProperty && DelayProperty->HasAnyPropertyFlags(CPF_Edit));
 	return true;
 }
 
@@ -181,9 +250,10 @@ bool FCh4PreparationTransitionTest::RunTest(const FString& Parameters)
 	UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (!CartClass || !Mesh) { AddError(TEXT("Actual Cart or test mesh could not load")); return false; }
 	AActor* Cart = F.World->SpawnActor<AActor>(CartClass);
+	ACartBase* CartBase = Cast<ACartBase>(Cart);
 	AGameplayPhaseTransitionPoint* Point = F.World->SpawnActor<AGameplayPhaseTransitionPoint>();
 	UCartCargoTrackerComponent* Tracker = Cart ? Cart->FindComponentByClass<UCartCargoTrackerComponent>() : nullptr;
-	if (!Cart || !Point || !Tracker) return false;
+	if (!Cart || !CartBase || !Point || !Tracker) return false;
 	Point->bStartPreparationOnBeginPlay = false;
 	Point->SetGameModeForTesting(F.Rule);
 	Point->CartActor = Cart;
@@ -236,10 +306,17 @@ bool FCh4PreparationTransitionTest::RunTest(const FString& Parameters)
 	FirstBody->SetPhysicsAngularVelocityInRadians(FVector(0, 0, 3));
 	const bool bOriginalSim = FirstBody->IsSimulatingPhysics();
 	const ECollisionEnabled::Type OriginalCollision = FirstBody->GetCollisionEnabled();
+	UPrimitiveComponent* CartBody = Cast<UPrimitiveComponent>(Cart->GetRootComponent());
+	if (!CartBody) return false;
+	const ECollisionEnabled::Type CartCollision = CartBody->GetCollisionEnabled();
 	TestTrue(TEXT("Physics fixture actually simulates"), bOriginalSim);
 	TestFalse(TEXT("Manual call cannot skip preparation"), Point->TryStartMainGameplay());
 	Point->PreparationDurationSeconds = 0.0f;
 	TestTrue(TEXT("Preparation timer schedules once"), Point->StartPreparationTimer());
+	TestTrue(TEXT("Preparation timer explicitly locks the Cart"), CartBase->IsPreparationLocked());
+	TestFalse(TEXT("Locked Cart does not simulate during shopping"), CartBody->IsSimulatingPhysics());
+	TestEqual(TEXT("Locked Cart keeps collision so Cargo can be loaded"), CartBody->GetCollisionEnabled(), CartCollision);
+	TestTrue(TEXT("Cargo remains independently simulated while the Cart is locked"), FirstBody->IsSimulatingPhysics());
 	TestFalse(TEXT("Duplicate preparation timer is rejected"), Point->StartPreparationTimer());
 	TestEqual(TEXT("Before timer expiry the phase is Waiting"), F.State->GetCurrentGamePhase(), ECh4GamePhase::Waiting);
 	F.TickTimers();
@@ -256,6 +333,8 @@ bool FCh4PreparationTransitionTest::RunTest(const FString& Parameters)
 	F.TickTimers();
 	TestTrue(TEXT("Next tick completes the production transition"), Point->IsTransitionComplete());
 	TestEqual(TEXT("Game starts only after physics restoration"), F.State->GetCurrentGamePhase(), ECh4GamePhase::Playing);
+	TestFalse(TEXT("Main Area restoration releases the preparation Cart lock"), CartBase->IsPreparationLocked());
+	TestTrue(TEXT("Main Area restoration resumes authoritative Cart simulation"), CartBody->IsSimulatingPhysics());
 	TestEqual(TEXT("Original simulation state restored"), FirstBody->IsSimulatingPhysics(), bOriginalSim);
 	TestEqual(TEXT("Original collision state restored"), FirstBody->GetCollisionEnabled(), OriginalCollision);
 	TestTrue(TEXT("Old linear velocity is cleared"), FirstBody->GetPhysicsLinearVelocity().IsNearlyZero());
