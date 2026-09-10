@@ -102,6 +102,9 @@ public:
 	UPROPERTY(Replicated)
 	FVector2D CartMoveInput;
 	
+	UPROPERTY(Replicated)
+	bool bIsBraking = false;
+	
 	UPROPERTY(VisibleAnywhere, Category="Hat")
 	TObjectPtr<class UStaticMeshComponent> HatMeshComponent;
 

@@ -257,6 +257,7 @@ void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProp
 	DOREPLIFETIME(ThisClass, GrabbedComponent);
 	DOREPLIFETIME(ThisClass, GrabbedCart);
 	DOREPLIFETIME(ThisClass, CartMoveInput);
+	DOREPLIFETIME(ThisClass, bIsBraking);
 }
 
 void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
