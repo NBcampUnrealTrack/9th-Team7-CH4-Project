@@ -13,6 +13,7 @@ ALevelFloorBase::ALevelFloorBase()
 
 	bReplicates = true;
 	SetReplicateMovement(true);
+	bAlwaysRelevant = true;
 
 	// 루트 컴포넌트
 	USceneComponent* RootComp = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
@@ -68,10 +69,16 @@ void ALevelFloorBase::OnCollisionBoxBeginOverlap(
 	}
 
 	// 1. 진입 시 숨길 태그 처리
-	if (!BeginHideTargetTag.IsNone())
+	for (const FName& Tag : BeginHideTargetTags)
 	{
+		if (Tag.IsNone())
+		{
+			continue;
+		}
+
 		TArray<AActor*> HideActors;
-		UGameplayStatics::GetAllActorsWithTag(GetWorld(), BeginHideTargetTag, HideActors);
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), Tag, HideActors);
+
 		for (AActor* Actor : HideActors)
 		{
 			if (Actor)
@@ -82,10 +89,16 @@ void ALevelFloorBase::OnCollisionBoxBeginOverlap(
 	}
 
 	// 2. 진입 시 보일 태그 처리
-	if (!BeginShowTargetTag.IsNone())
+	for (const FName& Tag : BeginShowTargetTags)
 	{
+		if (Tag.IsNone())
+		{
+			continue;
+		}
+
 		TArray<AActor*> ShowActors;
-		UGameplayStatics::GetAllActorsWithTag(GetWorld(), BeginShowTargetTag, ShowActors);
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), Tag, ShowActors);
+
 		for (AActor* Actor : ShowActors)
 		{
 			if (Actor)
@@ -96,19 +109,30 @@ void ALevelFloorBase::OnCollisionBoxBeginOverlap(
 	}
 	
 	// 3. 진입 시 인스턴스 폴리지 컴포넌트 숨김 처리
-	if (!BeginHideComponentTag.IsNone())
+	for (const FName& Tag : BeginHideComponentTags)
 	{
+		if (Tag.IsNone())
+		{
+			continue;
+		}
+
 		for (TActorIterator<AInstancedFoliageActor> It(GetWorld()); It; ++It)
 		{
 			AInstancedFoliageActor* FoliageActor = *It;
+
 			if (FoliageActor)
 			{
-				TArray<UActorComponent*> Comps = FoliageActor->GetComponentsByTag(UPrimitiveComponent::StaticClass(), BeginHideComponentTag);
+				TArray<UActorComponent*> Comps =
+					FoliageActor->GetComponentsByTag(
+						UPrimitiveComponent::StaticClass(),
+						Tag);
+
 				for (UActorComponent* Comp : Comps)
 				{
 					if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Comp))
 					{
 						PrimComp->SetVisibility(false, true);
+						PrimComp->SetHiddenInGame(true, true);
 					}
 				}
 			}
@@ -116,19 +140,30 @@ void ALevelFloorBase::OnCollisionBoxBeginOverlap(
 	}
 
 	// 4. 진입 시 인스턴스 폴리지 컴포넌트 표시 처리
-	if (!BeginShowComponentTag.IsNone())
+	for (const FName& Tag : BeginShowComponentTags)
 	{
+		if (Tag.IsNone())
+		{
+			continue;
+		}
+
 		for (TActorIterator<AInstancedFoliageActor> It(GetWorld()); It; ++It)
 		{
 			AInstancedFoliageActor* FoliageActor = *It;
+
 			if (FoliageActor)
 			{
-				TArray<UActorComponent*> Comps = FoliageActor->GetComponentsByTag(UPrimitiveComponent::StaticClass(), BeginShowComponentTag);
+				TArray<UActorComponent*> Comps =
+					FoliageActor->GetComponentsByTag(
+						UPrimitiveComponent::StaticClass(),
+						Tag);
+
 				for (UActorComponent* Comp : Comps)
 				{
 					if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Comp))
 					{
 						PrimComp->SetVisibility(true, true);
+						PrimComp->SetHiddenInGame(false, true);
 					}
 				}
 			}
@@ -160,10 +195,16 @@ void ALevelFloorBase::OnCollisionBoxEndOverlap(
 	}
 
 	// 1. 이탈 시 숨길 태그 처리
-	if (!EndHideTargetTag.IsNone())
+	for (const FName& Tag : EndHideTargetTags)
 	{
+		if (Tag.IsNone())
+		{
+			continue;
+		}
+
 		TArray<AActor*> HideActors;
-		UGameplayStatics::GetAllActorsWithTag(GetWorld(), EndHideTargetTag, HideActors);
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), Tag, HideActors);
+
 		for (AActor* Actor : HideActors)
 		{
 			if (Actor)
@@ -174,10 +215,16 @@ void ALevelFloorBase::OnCollisionBoxEndOverlap(
 	}
 
 	// 2. 이탈 시 보일 태그 처리
-	if (!EndShowTargetTag.IsNone())
+	for (const FName& Tag : EndShowTargetTags)
 	{
+		if (Tag.IsNone())
+		{
+			continue;
+		}
+
 		TArray<AActor*> ShowActors;
-		UGameplayStatics::GetAllActorsWithTag(GetWorld(), EndShowTargetTag, ShowActors);
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), Tag, ShowActors);
+
 		for (AActor* Actor : ShowActors)
 		{
 			if (Actor)
@@ -188,19 +235,30 @@ void ALevelFloorBase::OnCollisionBoxEndOverlap(
 	}
 	
 	// 3. 이탈 시 인스턴스 폴리지 컴포넌트 숨김 처리
-	if (!EndHideComponentTag.IsNone())
+	for (const FName& Tag : EndHideComponentTags)
 	{
+		if (Tag.IsNone())
+		{
+			continue;
+		}
+
 		for (TActorIterator<AInstancedFoliageActor> It(GetWorld()); It; ++It)
 		{
 			AInstancedFoliageActor* FoliageActor = *It;
+
 			if (FoliageActor)
 			{
-				TArray<UActorComponent*> Comps = FoliageActor->GetComponentsByTag(UPrimitiveComponent::StaticClass(), EndHideComponentTag);
+				TArray<UActorComponent*> Comps =
+					FoliageActor->GetComponentsByTag(
+						UPrimitiveComponent::StaticClass(),
+						Tag);
+
 				for (UActorComponent* Comp : Comps)
 				{
 					if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Comp))
 					{
 						PrimComp->SetVisibility(false, true);
+						PrimComp->SetHiddenInGame(true, true);
 					}
 				}
 			}
@@ -208,19 +266,30 @@ void ALevelFloorBase::OnCollisionBoxEndOverlap(
 	}
 
 	// 4. 이탈 시 인스턴스 폴리지 컴포넌트 표시 처리
-	if (!EndShowComponentTag.IsNone())
+	for (const FName& Tag : EndShowComponentTags)
 	{
+		if (Tag.IsNone())
+		{
+			continue;
+		}
+
 		for (TActorIterator<AInstancedFoliageActor> It(GetWorld()); It; ++It)
 		{
 			AInstancedFoliageActor* FoliageActor = *It;
+
 			if (FoliageActor)
 			{
-				TArray<UActorComponent*> Comps = FoliageActor->GetComponentsByTag(UPrimitiveComponent::StaticClass(), EndShowComponentTag);
+				TArray<UActorComponent*> Comps =
+					FoliageActor->GetComponentsByTag(
+						UPrimitiveComponent::StaticClass(),
+						Tag);
+
 				for (UActorComponent* Comp : Comps)
 				{
 					if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Comp))
 					{
 						PrimComp->SetVisibility(true, true);
+						PrimComp->SetHiddenInGame(false, true);
 					}
 				}
 			}
