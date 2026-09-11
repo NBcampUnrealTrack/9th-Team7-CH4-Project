@@ -121,6 +121,24 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Hat")
 	void ApplyHeadwear(FName HeadwearID);
+
+	/** Updates the floating nameplate position, visibility, and replicated player name. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="UI|Nameplate")
+	void UpdateNameplate();
+	virtual void UpdateNameplate_Implementation();
+
+	/** Helper to find the nameplate widget component */
+	UFUNCTION(BlueprintCallable, Category="UI|Nameplate")
+	class UWidgetComponent* GetNameplateComponent() const;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="UI|Nameplate")
+	FName NameplateSocketName = TEXT("head_socket");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="UI|Nameplate")
+	FVector NameplateOffset = FVector(0.0f, 0.0f, 32.0f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="UI|Nameplate")
+	float NameplateMaxDrawDistance = 2500.0f;
 	
 protected:
 	// 각 동물 BP의 Class Defaults에서 설정한다.
@@ -144,6 +162,11 @@ protected:
 
 	UPROPERTY(Transient)
 	FName CurrentHeadwearID = NAME_None;
+
+	mutable TWeakObjectPtr<class UWidgetComponent> CachedNameplateComponent;
+
+	FTimerHandle NameplateRetryTimerHandle;
+	int32 NameplateRetryCount = 0;
 
 	void InitializeCharacterPhysics();
 

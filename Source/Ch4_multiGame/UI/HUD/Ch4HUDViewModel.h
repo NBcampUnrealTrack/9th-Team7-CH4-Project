@@ -17,6 +17,7 @@ public:
 	UCh4HUDViewModel();
 
 	virtual UWorld* GetWorld() const override;
+	virtual void BeginDestroy() override;
 
 	// GameState 및 PlayerState 이벤트 바인딩 초기화
 	UFUNCTION(BlueprintCallable, Category = "HUD")
@@ -31,13 +32,19 @@ public:
 	
 	// --- 게임 페이즈 / 로비 레디 상태 ------
 	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Phase")
-	FText PhaseText = FText::FromString(TEXT("Press R to Ready"));
-	
+	FText PhaseText = FText::FromString(TEXT("Press [R] to Ready"));
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Phase")
+	ESlateVisibility PhaseBannerVisibility = ESlateVisibility::Visible;
+
 	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Phase")
 	ECh4GamePhase CurrentPhase = ECh4GamePhase::Waiting;
 
 	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Lobby")
 	bool bIsLobbyReady = false;
+
+	UFUNCTION(BlueprintCallable, Category = "HUD|Phase")
+	void HidePhaseBanner();
 
 	// --- 보이스 마이크 ON/OFF ------
 	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Voice")
@@ -51,6 +58,9 @@ public:
 
 	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Voice")
 	ESlateVisibility MicOffVisibility = ESlateVisibility::Visible; // 꺼짐 아이콘 가시성
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Voice")
+	FVector2D MicScale = FVector2D(1.0f, 1.0f); // 마이크 팝 탄성 스케일
 
 	// --- 60초 카운트다운 타이머 -----
 	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "HUD|Timer")
@@ -100,14 +110,24 @@ private:
 	void OnPreparationTimerUpdated(float RemainingSeconds, float TotalSeconds);
 
 	void UpdateTimerTick();
+	void TriggerMicPop();
+	void UpdateMicAnim();
+	void TryBindGameState();
 	void TryBindLobbyPlayerState();
 	void AutoInitializeIfPossible();
 
 private:
 	TWeakObjectPtr<APlayerController> CachedPC;
 	FTimerHandle LobbyBindTimer;
+	FTimerHandle GameStateBindTimer;
+	FTimerHandle PhaseBannerAutoHideHandle;
 	FTimerHandle TimerTickHandle;
+	FTimerHandle MicAnimTimerHandle;
+	int32 GameStateBindRetryCount = 0;
 	int32 LastDisplaySeconds = -1;
-	float CurrentScaleValue = 1.0f;
+	float CurrentTimerScale = 1.0f;
+	float TimerVelocity = 0.0f;
+	float CurrentMicScale = 1.0f;
+	float MicVelocity = 0.0f;
 	bool bIsInitialized = false;
 };

@@ -17,6 +17,10 @@
 #include "Player/EmotionDataAsset.h"
 #include "Player/GrabbableInterface.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/WidgetComponent.h"
+#include "Blueprint/UserWidget.h"
+#include "Components/TextBlock.h"
+#include "TimerManager.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 
@@ -57,6 +61,7 @@ void ACh4_PlayerCharacter::BeginPlay()
 
 	AddPlayerInputMappingContext();
 	ApplyCharacterTypeFromPlayerState();
+	UpdateNameplate();
 
 	// PlayerState가 아직 없으면 현재 BP의 기본 설정으로 1회만 초기화한다.
 	if (!bCharacterPhysicsInitialized)
@@ -78,12 +83,14 @@ void ACh4_PlayerCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
 	ApplyCharacterTypeFromPlayerState();
+	UpdateNameplate();
 }
 
 void ACh4_PlayerCharacter::OnRep_PlayerState()
 {
 	Super::OnRep_PlayerState();
 	ApplyCharacterTypeFromPlayerState();
+	UpdateNameplate();
 }
 
 void ACh4_PlayerCharacter::PawnClientRestart()
@@ -92,6 +99,7 @@ void ACh4_PlayerCharacter::PawnClientRestart()
 
 	// Remote clients commonly receive possession after BeginPlay. Register the pawn IMC here too.
 	AddPlayerInputMappingContext();
+	UpdateNameplate();
 }
 
 void ACh4_PlayerCharacter::AddPlayerInputMappingContext()
@@ -207,6 +215,7 @@ void ACh4_PlayerCharacter::ApplyCharacterType(const ECh4CharacterType CharacterT
 	bRagdollIncludeSelf = AppearanceDefaults->bRagdollIncludeSelf;
 
 	InitializeCharacterPhysics();
+	UpdateNameplate();
 
 	// E_AnimalType enum order: Dog=0, Otter=1, Gorilla=2, Cat=3
 	uint8 MappedAnimalIndex = 3; // Default Cat
@@ -426,6 +435,146 @@ void ACh4_PlayerCharacter::ApplyHeadwear(FName HeadwearID)
 				}
 			}
 			return;
+		}
+	}
+}
+
+UWidgetComponent* ACh4_PlayerCharacter::GetNameplateComponent() const
+{
+	if (CachedNameplateComponent.IsValid())
+	{
+		return CachedNameplateComponent.Get();
+	}
+
+	TArray<UWidgetComponent*> WidgetComps;
+	GetComponents<UWidgetComponent>(WidgetComps);
+	for (UWidgetComponent* Comp : WidgetComps)
+	{
+		if (Comp && Comp->GetName().Contains(TEXT("Nameplate")))
+		{
+			CachedNameplateComponent = Comp;
+			return Comp;
+		}
+	}
+
+	if (WidgetComps.Num() > 0 && WidgetComps[0])
+	{
+		CachedNameplateComponent = WidgetComps[0];
+		return WidgetComps[0];
+	}
+
+	return nullptr;
+}
+
+void ACh4_PlayerCharacter::UpdateNameplate_Implementation()
+{
+	UWidgetComponent* NameplateComp = GetNameplateComponent();
+	if (!NameplateComp)
+	{
+		return;
+	}
+
+	// 1. Hide locally controlled player's nameplate to avoid blocking third-person camera
+	if (IsLocallyControlled())
+	{
+		NameplateComp->SetVisibility(false);
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(NameplateRetryTimerHandle);
+		}
+		return;
+	}
+
+	NameplateComp->SetVisibility(true);
+
+	// 2. Attach to head_socket (or fallback to head bone)
+	if (USkeletalMeshComponent* CharacterMesh = GetMesh())
+	{
+		FName SocketToUse = NameplateSocketName;
+		if (!CharacterMesh->DoesSocketExist(SocketToUse))
+		{
+			if (CharacterMesh->DoesSocketExist(TEXT("head")))
+			{
+				SocketToUse = TEXT("head");
+			}
+			else
+			{
+				SocketToUse = NAME_None;
+			}
+		}
+
+		if (NameplateComp->GetAttachSocketName() != SocketToUse || NameplateComp->GetAttachParent() != CharacterMesh)
+		{
+			NameplateComp->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketToUse);
+		}
+		NameplateComp->SetRelativeLocation(NameplateOffset);
+		NameplateComp->SetRelativeRotation(FRotator::ZeroRotator);
+	}
+
+	// 3. Screen space, desired size, centered pivot, distance culling
+	NameplateComp->SetWidgetSpace(EWidgetSpace::Screen);
+	NameplateComp->SetDrawAtDesiredSize(true);
+	NameplateComp->SetPivot(FVector2D(0.5f, 0.5f));
+	NameplateComp->SetCullDistance(NameplateMaxDrawDistance);
+
+	// 4. Player name replication handling
+	APlayerState* PS = GetPlayerState();
+	FString PlayerName = PS ? PS->GetPlayerName() : FString();
+
+	const bool bHasValidName = !PlayerName.IsEmpty() && PlayerName != TEXT("Player");
+
+	if (!bHasValidName && NameplateRetryCount < 10)
+	{
+		++NameplateRetryCount;
+		if (UWorld* World = GetWorld())
+		{
+			if (!World->GetTimerManager().IsTimerActive(NameplateRetryTimerHandle))
+			{
+				World->GetTimerManager().SetTimer(NameplateRetryTimerHandle, this, &ACh4_PlayerCharacter::UpdateNameplate, 0.2f, false);
+			}
+		}
+		if (PlayerName.IsEmpty())
+		{
+			return;
+		}
+	}
+	else
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(NameplateRetryTimerHandle);
+		}
+		NameplateRetryCount = 0;
+	}
+
+	// 5. Update the widget UI
+	if (UUserWidget* UserWidget = NameplateComp->GetUserWidgetObject())
+	{
+		// Try calling SetPlayerName if present on the blueprint widget
+		static const FName SetPlayerNameFuncName = TEXT("SetPlayerName");
+		if (UFunction* SetPlayerNameFunc = UserWidget->FindFunction(SetPlayerNameFuncName))
+		{
+			for (TFieldIterator<FProperty> PropIt(SetPlayerNameFunc); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
+			{
+				if (CastField<FTextProperty>(*PropIt))
+				{
+					struct FTextParam { FText Val; } Params{ FText::FromString(PlayerName) };
+					UserWidget->ProcessEvent(SetPlayerNameFunc, &Params);
+					break;
+				}
+				else if (CastField<FStrProperty>(*PropIt))
+				{
+					struct FStrParam { FString Val; } Params{ PlayerName };
+					UserWidget->ProcessEvent(SetPlayerNameFunc, &Params);
+					break;
+				}
+			}
+		}
+
+		// Also directly set Text_PlayerName text block if found
+		if (UTextBlock* TextBlock = Cast<UTextBlock>(UserWidget->GetWidgetFromName(TEXT("Text_PlayerName"))))
+		{
+			TextBlock->SetText(FText::FromString(PlayerName));
 		}
 	}
 }

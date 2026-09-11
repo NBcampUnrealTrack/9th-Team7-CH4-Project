@@ -189,3 +189,13 @@ void ACh4_multiGamePlayerState::CopyProperties(APlayerState* NewPlayerState)
 		TargetPS->EquippedHeadwearID = EquippedHeadwearID;
 	}
 }
+
+void ACh4_multiGamePlayerState::OnRep_PlayerName()
+{
+	Super::OnRep_PlayerName();
+
+	if (ACh4_PlayerCharacter* PlayerCharacter = Cast<ACh4_PlayerCharacter>(GetPawn()))
+	{
+		PlayerCharacter->UpdateNameplate();
+	}
+}

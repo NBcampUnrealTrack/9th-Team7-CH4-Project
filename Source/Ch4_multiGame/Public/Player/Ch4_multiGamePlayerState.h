@@ -39,6 +39,7 @@ public:
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void CopyProperties(APlayerState* NewPlayerState) override;
+	virtual void OnRep_PlayerName() override;
 
 private:
 	UFUNCTION()
