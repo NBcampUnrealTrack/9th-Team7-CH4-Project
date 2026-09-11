@@ -76,6 +76,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Input")
 	class UInputAction* CartGrabAction;
 	
+	UPROPERTY(EditAnywhere, Category = "Input")
+	class UInputAction* ZoomAction;
+	
 	UPROPERTY(EditDefaultsOnly, Category="Anim")
 	TObjectPtr<class UAnimMontage> StunMontage;
 
@@ -194,6 +197,8 @@ protected:
 	void InputActionEmote4(const struct FInputActionValue& Value);
 	void InputActionGrab(const struct FInputActionValue& Value);
 	void InputActionCartGrab(const struct FInputActionValue& Value);
+	void InputActionZoom(const struct FInputActionValue& Value);
+	
 	
 	// MovementMode가 변경될 때 호출
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
@@ -227,11 +232,11 @@ protected:
 	FTimerHandle StunTimerHandle;
 
 	// HitStop 지연 시간
-	UPROPERTY(EditDefaultsOnly, Category = "Stun")
+	UPROPERTY(EditDefaultsOnly, Category="Stun")
 	float HitStopTimeDilation = 0.1f;
 
 	// HitStop 지속 시간
-	UPROPERTY(EditDefaultsOnly, Category = "Stun")
+	UPROPERTY(EditDefaultsOnly, Category="Stun")
 	float HitStopDuration = 0.03f;
 
 	FTimerHandle HitStopTimerHandle;
@@ -306,4 +311,12 @@ protected:
 
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastRPC_PlayGrabReleaseMontage();
+
+	UPROPERTY(EditAnywhere, Category="Zoom")
+	float MinZoom = 200.f;
+
+	UPROPERTY(EditAnywhere, Category="Zoom")
+	float MaxZoom = 600.f;
+	
+	float TargetArmLength = 300.0f;
 };

@@ -31,7 +31,7 @@ ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 	
 	SpringArmComponent = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArmComponent"));
 	SpringArmComponent->SetupAttachment(RootComponent);
-	SpringArmComponent->TargetArmLength = 300.0f;
+	SpringArmComponent->TargetArmLength = TargetArmLength;
 	SpringArmComponent->bUsePawnControlRotation = true;
 	
 	CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("CameraComponent"));
@@ -295,6 +295,7 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		if (Emote4Action) EIC->BindAction(Emote4Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote4);
 		if (GrabAction) EIC->BindAction(GrabAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionGrab);
 		if (CartGrabAction) EIC->BindAction(CartGrabAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionCartGrab);
+		if (ZoomAction) EIC->BindAction(ZoomAction, ETriggerEvent::Triggered, this, &ACh4_PlayerCharacter::InputActionZoom);
 	}
 }
 
@@ -778,6 +779,18 @@ void ACh4_PlayerCharacter::InputActionCartGrab(const struct FInputActionValue& V
 			}
 		}
 	}
+}
+
+void ACh4_PlayerCharacter::InputActionZoom(const struct FInputActionValue& Value)
+{
+	if (Controller == nullptr)
+	{
+		return;
+	}
+	
+	const float ScrollValue = Value.Get<float>() * 10.0f;
+
+	SpringArmComponent->TargetArmLength = FMath::Clamp(SpringArmComponent->TargetArmLength - ScrollValue,	MinZoom, MaxZoom);
 }
 
 void ACh4_PlayerCharacter::ServerRPC_RequestCartGrab_Implementation(ACartBase* TargetCart)
