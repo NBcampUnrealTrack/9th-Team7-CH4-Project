@@ -35,30 +35,30 @@ public:
 	
 	// --- 오버랩 진입(Begin) 시 사용할 태그 설정 ---
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap")
-	FName BeginHideTargetTag = FName("BeginHideTagName");
+	TArray<FName> BeginHideTargetTags;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap")
-	FName BeginShowTargetTag = FName("BeginShowTagName");
+	TArray<FName> BeginShowTargetTags;
 
 	// --- 오버랩 이탈(End) 시 사용할 태그 설정 ---
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap")
-	FName EndHideTargetTag = FName("EndHideTagName");
+	TArray<FName> EndHideTargetTags;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap")
-	FName EndShowTargetTag = FName("EndShowTagName");
+	TArray<FName> EndShowTargetTags;
 	
 	// --- 컴포넌트(폴리지 등) 단위 태그 ---
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap | Component")
-	FName BeginHideComponentTag;
+	TArray<FName> BeginHideComponentTags;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap | Component")
-	FName BeginShowComponentTag;
+	TArray<FName> BeginShowComponentTags;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap | Component")
-	FName EndHideComponentTag;
+	TArray<FName> EndHideComponentTags;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | EndOverlap | Component")
-	FName EndShowComponentTag;
+	TArray<FName> EndShowComponentTags;
 
 	UFUNCTION()
 	void OnCollisionBoxBeginOverlap(

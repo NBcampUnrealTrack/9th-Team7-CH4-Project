@@ -25,6 +25,7 @@ public:
 
 	UPROPERTY(Replicated, EditInstanceOnly, Category = "Zone Setup|Settings", meta = (EditCondition = "bUseAutoArrange"))
 	bool bShuffleMiddleZones = true;
+	
 
 	// 서버에서 셔플된 중간 구역의 인덱스 순서 (클라이언트에 동기화)
 	UPROPERTY(ReplicatedUsing = OnRep_MiddleZoneOrder)
