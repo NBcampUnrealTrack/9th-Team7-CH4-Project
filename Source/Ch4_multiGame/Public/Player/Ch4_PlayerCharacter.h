@@ -110,6 +110,12 @@ public:
 	UPROPERTY(Replicated)
 	bool bIsBraking = false;
 	
+	UPROPERTY(EditDefaultsOnly, Category="Sound")
+	TObjectPtr<class USoundBase> GrabSound;
+
+	UPROPERTY(EditDefaultsOnly, Category="Sound")
+	TObjectPtr<class USoundBase> GrabReleaseSound;
+	
 	UPROPERTY(VisibleAnywhere, Category="Hat")
 	TObjectPtr<class UStaticMeshComponent> HatMeshComponent;
 

@@ -19,6 +19,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "PhysicsEngine/PhysicsAsset.h"
+#include "Kismet/GameplayStatics.h"
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
@@ -1023,11 +1024,15 @@ void ACh4_PlayerCharacter::MulticastRPC_AttachGrab_Implementation(UPrimitiveComp
 
 	TargetComponent->SetSimulatePhysics(false);
 	TargetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
 	TargetComponent->AttachToComponent(
 	   GetMesh(),
 	   FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 	   GrabSocketName);
+	
+	if (IsLocallyControlled() == true && IsValid(GrabSound) == true)
+	{
+		UGameplayStatics::PlaySound2D(this, GrabSound);
+	}
 }
 
 void ACh4_PlayerCharacter::ServerRPC_ReleaseGrab_Implementation()
@@ -1043,9 +1048,19 @@ void ACh4_PlayerCharacter::ServerRPC_ReleaseGrab_Implementation()
 
 void ACh4_PlayerCharacter::MulticastRPC_ReleaseGrab_Implementation(UPrimitiveComponent* TargetComponent)
 {
+	if (TargetComponent == nullptr)
+	{
+		return;
+	}
+	
 	TargetComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
 	TargetComponent->SetSimulatePhysics(true);
 	TargetComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	
+	if (IsLocallyControlled() == true && IsValid(GrabReleaseSound) == true)
+	{
+		UGameplayStatics::PlaySound2D(this, GrabReleaseSound);
+	}
 }
 
 void ACh4_PlayerCharacter::ServerRPC_PlayGrabMontage_Implementation()
