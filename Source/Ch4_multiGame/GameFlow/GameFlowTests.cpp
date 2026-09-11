@@ -332,9 +332,9 @@ bool FCh4GameFlowScoreTest::RunTest(const FString& Parameters)
 		InvalidSummaryFlow.GameMode->SetDeliveryScoreSummaryForTesting(GoalActor, InvalidSummary);
 		TestTrue(TEXT("Invalid-summary flow initializes"), InvalidSummaryFlow.GameRule->RequestCargoInitialization(1));
 		TestTrue(TEXT("Invalid-summary flow starts"), InvalidSummaryFlow.GameRule->RequestGameStart());
-		TestFalse(TEXT("A negative delivered count clamps to zero and cannot clear"),
+		TestTrue(TEXT("A negative delivered count clamps to an empty scored delivery and schedules failure"),
 			InvalidSummaryFlow.GameRule->NotifyGoalReached(GoalActor));
-		TestEqual(TEXT("Rejected delivered count preserves Playing"), InvalidSummaryFlow.GameState->GetCurrentGamePhase(), ECh4GamePhase::Playing);
+		TestEqual(TEXT("Delayed empty failure preserves Playing initially"), InvalidSummaryFlow.GameState->GetCurrentGamePhase(), ECh4GamePhase::Playing);
 		InvalidSummary.DeliveredCargoCount = 1;
 		InvalidSummaryFlow.GameMode->SetDeliveryScoreSummaryForTesting(GoalActor, InvalidSummary);
 		TestTrue(TEXT("A sufficient delivered count can clear with a clamped zero score"), InvalidSummaryFlow.GameRule->NotifyGoalReached(GoalActor));

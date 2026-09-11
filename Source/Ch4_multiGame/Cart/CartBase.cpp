@@ -84,6 +84,7 @@ void ACartBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetim
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ACartBase, AnchorOccupants);
+    DOREPLIFETIME(ACartBase, bPreparationLocked);
 }
 
 void ACartBase::BeginPlay()
@@ -99,7 +100,7 @@ void ACartBase::BeginPlay()
 
     if (HasAuthority())
     {
-        CartMesh->SetSimulatePhysics(true);
+        CartMesh->SetSimulatePhysics(!bPreparationLocked);
         CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
         CartMesh->SetAngularDamping(FMath::Max(CartAngularDamping, 0.0f));
 
@@ -129,7 +130,14 @@ void ACartBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (!HasAuthority() || !CartMesh || !CartMesh->IsSimulatingPhysics())
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    CleanupInvalidPlayers();
+
+    if (bPreparationLocked || !CartMesh || !CartMesh->IsSimulatingPhysics())
     {
         return;
     }
@@ -530,19 +538,45 @@ void ACartBase::ReleaseAnchorFor(const ACh4_PlayerCharacter* Player)
     }
 }
 
-// ── RPC ──
-
-void ACartBase::ServerRequestGrab_Implementation(ACh4_PlayerCharacter* Player)
+void ACartBase::CleanupInvalidPlayers()
 {
-    if (!IsValid(Player) || GetAnchorFor(Player))
+    for (TObjectPtr<ACh4_PlayerCharacter>& Occupant : AnchorOccupants)
     {
-        return;   // 이미 잡고 있으면 무시.
+        if (!IsValid(Occupant))
+        {
+            Occupant = nullptr;
+        }
+    }
+
+    for (auto It = PlayerInputs.CreateIterator(); It; ++It)
+    {
+        if (!IsValid(It.Key()) || !GetAnchorFor(It.Key()))
+        {
+            It.RemoveCurrent();
+        }
+    }
+}
+
+bool ACartBase::TryGrabPlayer(ACh4_PlayerCharacter* Player)
+{
+    if (!HasAuthority() || !IsValid(Player) || Player->IsActorBeingDestroyed()
+        || Player->GetWorld() != GetWorld() || Player->GrabbedComponent || Player->GrabbedCart
+        || GetAnchorFor(Player))
+    {
+        return false;
+    }
+
+    if (bPreparationLocked)
+    {
+        UE_LOG(LogCh4_multiGame, Log, TEXT("[Cart] Grab rejected: preparation lock active; Player=%s"),
+            *GetNameSafe(Player));
+        return false;
     }
 
     const int32 Index = FindClosestFreeAnchor(Player);
     if (Index == INDEX_NONE)
     {
-        return;   // 빈 앵커가 사거리 안에 없다.
+        return false;
     }
 
     AnchorOccupants[Index] = Player;
@@ -552,35 +586,101 @@ void ACartBase::ServerRequestGrab_Implementation(ACh4_PlayerCharacter* Player)
     Player->SetActorRotation(Anchors[Index]->GetComponentRotation());
     Player->AttachToComponent(CartMesh,
         FAttachmentTransformRules::KeepWorldTransform);
+    Player->GrabbedCart = this;
+    Player->CartMoveInput = FVector2D::ZeroVector;
+    Player->bIsBraking = false;
+    Player->ForceNetUpdate();
+    ForceNetUpdate();
+    return true;
 }
 
-void ACartBase::ServerRequestRelease_Implementation(ACh4_PlayerCharacter* Player)
+bool ACartBase::ReleasePlayer(ACh4_PlayerCharacter* Player)
 {
-    if (!IsValid(Player) || !GetAnchorFor(Player))
+    if (!HasAuthority() || !Player || !GetAnchorFor(Player))
     {
-        return;
+        return false;
     }
 
     ReleaseAnchorFor(Player);
     PlayerInputs.Remove(Player);
-    
-    Player->CartMoveInput = FVector2D::ZeroVector;
-    Player->bIsBraking = false;
-    
-    Player->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+
+    if (IsValid(Player))
+    {
+        Player->CartMoveInput = FVector2D::ZeroVector;
+        Player->bIsBraking = false;
+        Player->GrabbedCart = nullptr;
+        Player->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+        Player->ForceNetUpdate();
+    }
+    ForceNetUpdate();
+    return true;
 }
 
-void ACartBase::ServerSetMoveInput_Implementation(ACh4_PlayerCharacter* Player, FVector2D Input)
+bool ACartBase::SetPlayerMoveInput(ACh4_PlayerCharacter* Player, const FVector2D& Input)
 {
-    if (!IsValid(Player) || !GetAnchorFor(Player))
+    if (!HasAuthority() || bPreparationLocked || !IsValid(Player)
+        || Player->GetWorld() != GetWorld() || !GetAnchorFor(Player))
     {
-        return;   // 잡고 있지 않은 플레이어의 입력은 버린다.
+        return false;
     }
 
-    PlayerInputs.Add(Player, Input);
-    
-    const bool bBraking = Input.Y < 0.0f;
+    const FVector2D ValidatedInput = Input.ContainsNaN()
+        ? FVector2D::ZeroVector
+        : Input.GetClampedToMaxSize(1.0f);
+    PlayerInputs.Add(Player, ValidatedInput);
 
-    Player->CartMoveInput = Input;
+    const bool bBraking = ValidatedInput.Y < 0.0f;
+
+    Player->CartMoveInput = ValidatedInput;
     Player->bIsBraking = bBraking;
+    return true;
+}
+
+bool ACartBase::SetPreparationLocked(const bool bLocked)
+{
+    if (!HasAuthority() || !CartMesh)
+    {
+        return false;
+    }
+
+    if (bPreparationLocked == bLocked)
+    {
+        return true;
+    }
+
+    if (bLocked)
+    {
+        bWasSimulatingBeforePreparationLock = CartMesh->BodyInstance.bSimulatePhysics;
+        if (CartMesh->IsSimulatingPhysics())
+        {
+            CartMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+            CartMesh->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+        }
+
+        const TArray<TObjectPtr<ACh4_PlayerCharacter>> Occupants = AnchorOccupants;
+        for (ACh4_PlayerCharacter* Occupant : Occupants)
+        {
+            if (Occupant)
+            {
+                ReleasePlayer(Occupant);
+            }
+        }
+        AnchorOccupants.SetNum(Anchors.Num());
+        PlayerInputs.Reset();
+        CartMesh->SetSimulatePhysics(false);
+    }
+    else if (bWasSimulatingBeforePreparationLock)
+    {
+        CartMesh->SetSimulatePhysics(true);
+        CartMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        CartMesh->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+        ConfigureUprightSafetyConstraint();
+    }
+
+    bPreparationLocked = bLocked;
+    ForceNetUpdate();
+    UE_LOG(LogCh4_multiGame, Log, TEXT("[Cart] Preparation lock %s: Cart=%s Simulating=%d Collision=%d"),
+        bLocked ? TEXT("enabled") : TEXT("disabled"), *GetName(), CartMesh->IsSimulatingPhysics(),
+        static_cast<int32>(CartMesh->GetCollisionEnabled()));
+    return true;
 }

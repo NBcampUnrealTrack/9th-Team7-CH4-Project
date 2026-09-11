@@ -10,6 +10,10 @@ class CH4_MULTIGAME_API ACh4_PlayerCharacter : public ACharacter
 {
 	GENERATED_BODY()
 
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FCh4CartGrabNetworkRuntimeCommand;
+#endif
+
 public:
 	ACh4_PlayerCharacter();
 
@@ -26,6 +30,7 @@ public:
 	
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void OnRep_PlayerState() override;
 	
@@ -238,6 +243,16 @@ protected:
 
 	UFUNCTION(Server, Reliable)
 	void ServerRPC_ReleaseGrab();
+
+	/** Cart requests must originate from this client-owned Character, never from the shared Cart Actor. */
+	UFUNCTION(Server, Reliable)
+	void ServerRPC_RequestCartGrab(class ACartBase* TargetCart);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRPC_RequestCartRelease();
+
+	UFUNCTION(Server, Unreliable)
+	void ServerRPC_SetCartMoveInput(FVector2D Input);
 	
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastRPC_AttachGrab(UPrimitiveComponent* TargetComponent);

@@ -69,6 +69,7 @@ public:
 	void SetDeliveryScoreSummaryForTesting(
 		AActor* TargetActor,
 		const FCh4DeliveryScoreSummary& NewDeliveryScoreSummary);
+	void SetEmptyCartGameOverDelayForTesting(float NewDelaySeconds);
 	TFunction<bool(const FString&)> LobbyTravelForTesting;
 #endif
 
@@ -77,6 +78,10 @@ protected:
 	/** Authoritative success/failure policy, separate from runtime state and debug settings. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Rules")
 	FCh4GameRuleConfig GameRuleConfig;
+
+	/** A scored delivery target that reaches the Goal empty fails after this server-only delay. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Rules", meta=(ClampMin="0.0", Units="s"))
+	float EmptyCartGameOverDelaySeconds = 10.0f;
 
 	/** Legacy serialized setting. Debug startup is now owned by AGameFlowDebugDriver. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Legacy Debug",
@@ -114,12 +119,17 @@ private:
 	bool ApplyRemainingCargoCount(int32 NewRemainingCargo);
 	bool EndGameAsClear(ECh4GameEndReason EndReason, int32 FinalCargoScore);
 	void EndGameAsGameOver(ECh4GameEndReason EndReason);
+	bool ScheduleEmptyCartFailure();
+	void OnEmptyCartFailureTimer();
+	void ClearEmptyCartFailure();
 	bool GetLobbyTravelURL(FString& OutURL) const;
 	bool StartLobbyTravel();
 	void OnReturnToLobbyTimer();
 	FTimerHandle ReturnToLobbyTimer;
+	FTimerHandle EmptyCartFailureTimer;
 	bool bReturnToLobbyScheduled = false;
 	bool bLobbyTravelStarted = false;
+	bool bEmptyCartFailurePending = false;
 	bool bUsesPreparationCargoRoster = false;
 	bool bPreparationTransitionPending = false;
 	TSet<TWeakObjectPtr<AActor>> PreparationCargoRoster;

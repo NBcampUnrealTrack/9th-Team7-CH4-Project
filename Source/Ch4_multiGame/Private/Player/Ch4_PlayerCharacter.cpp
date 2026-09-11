@@ -65,6 +65,15 @@ void ACh4_PlayerCharacter::BeginPlay()
 	}
 }
 
+void ACh4_PlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (HasAuthority() && GrabbedCart)
+	{
+		GrabbedCart->ReleasePlayer(this);
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
 void ACh4_PlayerCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
@@ -437,7 +446,7 @@ void ACh4_PlayerCharacter::InputActionMove(const struct FInputActionValue& Value
 	
 	if (GrabbedCart)
 	{
-		GrabbedCart->ServerSetMoveInput(this, MoveVec);
+		ServerRPC_SetCartMoveInput(MoveVec);
 		return;   // 캐릭터는 걷지 않음
 	}
 	
@@ -594,8 +603,7 @@ void ACh4_PlayerCharacter::InputActionCartGrab(const struct FInputActionValue& V
 	
 	if (GrabbedCart)
 	{
-		GrabbedCart->ServerRequestRelease(this);
-		GrabbedCart = nullptr;
+		ServerRPC_RequestCartRelease();
 	}
 	else
 	{
@@ -611,10 +619,36 @@ void ACh4_PlayerCharacter::InputActionCartGrab(const struct FInputActionValue& V
 		{
 			if (ACartBase* Cart = Cast<ACartBase>(Hit.GetActor()))
 			{
-				Cart->ServerRequestGrab(this);
-				GrabbedCart = Cart;
+				ServerRPC_RequestCartGrab(Cart);
 			}
 		}
+	}
+}
+
+void ACh4_PlayerCharacter::ServerRPC_RequestCartGrab_Implementation(ACartBase* TargetCart)
+{
+	if (bIsStunned || GrabbedComponent || GrabbedCart || !IsValid(TargetCart)
+		|| TargetCart->GetWorld() != GetWorld())
+	{
+		return;
+	}
+
+	TargetCart->TryGrabPlayer(this);
+}
+
+void ACh4_PlayerCharacter::ServerRPC_RequestCartRelease_Implementation()
+{
+	if (GrabbedCart)
+	{
+		GrabbedCart->ReleasePlayer(this);
+	}
+}
+
+void ACh4_PlayerCharacter::ServerRPC_SetCartMoveInput_Implementation(const FVector2D Input)
+{
+	if (GrabbedCart)
+	{
+		GrabbedCart->SetPlayerMoveInput(this, Input);
 	}
 }
 
