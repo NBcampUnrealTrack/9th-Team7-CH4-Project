@@ -1029,9 +1029,9 @@ void ACh4_PlayerCharacter::MulticastRPC_AttachGrab_Implementation(UPrimitiveComp
 	   FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 	   GrabSocketName);
 	
-	if (IsLocallyControlled() == true && IsValid(GrabSound) == true)
+	if (IsValid(GrabSound) == true)
 	{
-		UGameplayStatics::PlaySound2D(this, GrabSound);
+		UGameplayStatics::PlaySoundAtLocation(this, GrabSound, GetActorLocation());
 	}
 }
 
@@ -1057,9 +1057,9 @@ void ACh4_PlayerCharacter::MulticastRPC_ReleaseGrab_Implementation(UPrimitiveCom
 	TargetComponent->SetSimulatePhysics(true);
 	TargetComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	
-	if (IsLocallyControlled() == true && IsValid(GrabReleaseSound) == true)
+	if (IsValid(GrabReleaseSound) == true)
 	{
-		UGameplayStatics::PlaySound2D(this, GrabReleaseSound);
+		UGameplayStatics::PlaySoundAtLocation(this, GrabReleaseSound, GetActorLocation());
 	}
 }
 
