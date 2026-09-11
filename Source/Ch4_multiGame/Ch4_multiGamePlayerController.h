@@ -3,12 +3,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFlow/Ch4GameFlowTypes.h"
 #include "GameFramework/PlayerController.h"
 #include "Player/Ch4CharacterTypes.h"
 #include "Ch4_multiGamePlayerController.generated.h"
 
 class UInputMappingContext;
 class UUserWidget;
+class UCh4GameResultWidget;
 class UInputAction;	// [추가]
 
 /**
@@ -111,6 +113,14 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "UI|HUD")
 	TObjectPtr<class UCh4HUDViewModel> HUDViewModel;
 
+	// ── Game Result ────────────────────────────────────────────────────
+	/** Assigned to WBP_GameResult in BP_ThirdPersonPlayerController Class Defaults. */
+	UPROPERTY(EditDefaultsOnly, Category = "UI|Game Result")
+	TSubclassOf<UCh4GameResultWidget> GameResultWidgetClass;
+
+	UPROPERTY()
+	TObjectPtr<UCh4GameResultWidget> GameResultWidget;
+
 	// ── Voice Mute Toggle (V Key) ──────────────────────────────────────
 	UPROPERTY(EditAnywhere, Category = "Input|Voice")
 	TObjectPtr<UInputAction> VoiceToggleAction;
@@ -143,6 +153,7 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnPossess(APawn* InPawn) override;
 	virtual void OnRep_PlayerState() override;
+	virtual void AcknowledgePossession(APawn* InPawn) override;
 
 	/** Input mapping context setup */
 	virtual void SetupInputComponent() override;
@@ -170,8 +181,15 @@ private:
 	void ApplyServerHeadwear(FName HeadwearID);
 
 	void SynchronizeCharacterSelectionForCurrentWorld();
+	void BindGameResultState();
+	void ShowGameResult(const FCh4GameResult& Result);
+	void RemoveGameResultUI();
+
+	UFUNCTION()
+	void HandleGameResultChanged(FCh4GameResult NewResult);
 
 	bool bSubmittedPersistedCharacterType = false;
 	bool bSubmittedPersistedHeadwear = false;
+	TWeakObjectPtr<class ACh4_multiGameGameState> BoundResultGameState;
 
 };

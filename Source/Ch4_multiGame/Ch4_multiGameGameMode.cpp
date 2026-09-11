@@ -37,9 +37,18 @@ void ACh4_multiGameGameMode::SetDeliveryScoreSummaryForTesting(
 	DeliveryScoreSummaryOverrideForTesting = NewDeliveryScoreSummary;
 }
 
-void ACh4_multiGameGameMode::SetEmptyCartGameOverDelayForTesting(const float NewDelaySeconds)
+void ACh4_multiGameGameMode::SetResultDisplayDurationForTesting(const float NewDurationSeconds)
 {
-	EmptyCartGameOverDelaySeconds = NewDelaySeconds;
+	ResultDisplayDurationSeconds = NewDurationSeconds;
+}
+
+void ACh4_multiGameGameMode::SetGameplayTimesForTesting(
+	const float StartServerTimeSeconds,
+	const float GoalServerTimeSeconds)
+{
+	bGameplayStartTimeRecorded = true;
+	GameplayStartServerTimeSeconds = StartServerTimeSeconds;
+	GoalServerTimeOverrideForTesting = GoalServerTimeSeconds;
 }
 #endif
 
@@ -128,8 +137,11 @@ bool ACh4_multiGameGameMode::RequestGameStart()
 	{
 		return false;
 	}
+	bGameplayStartTimeRecorded = true;
+	GameplayStartServerTimeSeconds = GameFlowState->GetServerWorldTimeSeconds();
 
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Game Started"));
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Game Started: ServerTime=%.2f"),
+		GameplayStartServerTimeSeconds);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Remaining Cargo: %d / %d"),
 		GameFlowState->GetRemainingCargoCount(), GameFlowState->GetInitialCargoCount());
 	return true;
@@ -290,6 +302,11 @@ bool ACh4_multiGameGameMode::NotifyGoalReached(AActor* ReachingActor)
 				: TEXT("Unavailable"));
 		return false;
 	}
+	if (GameFlowState->HasGameResultSnapshot())
+	{
+		UE_LOG(LogCh4_multiGame, Verbose, TEXT("[GameFlow] Duplicate Goal notification reused the frozen result"));
+		return true;
+	}
 
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Final Delivery Zone Reached by %s"),
 		*GetNameSafe(ReachingActor));
@@ -306,6 +323,10 @@ bool ACh4_multiGameGameMode::NotifyGoalReached(AActor* ReachingActor)
 	if (DeliveryScoreSummary.bHasScoreData && DeliveryScoreSummary.DeliveredCargoCount == 0)
 	{
 		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Goal reached with empty cart"));
+		if (!CaptureGoalResultSnapshot(false, 0, 0))
+		{
+			return false;
+		}
 		return ScheduleEmptyCartFailure();
 	}
 
@@ -474,7 +495,19 @@ bool ACh4_multiGameGameMode::EvaluateGameOutcome(
 		return false;
 	}
 
-	return EndGameAsClear(ECh4GameEndReason::GoalReached, FinalCargoScore);
+	const int32 CargoCountAtGoal = DeliveredCargoCount == INDEX_NONE
+		? GameFlowState->GetRemainingCargoCount() : DeliveredCargoCount;
+	if (!EndGameAsClear(ECh4GameEndReason::GoalReached, FinalCargoScore))
+	{
+		return false;
+	}
+	if (!CaptureGoalResultSnapshot(true, CargoCountAtGoal, FinalCargoScore))
+	{
+		UE_LOG(LogCh4_multiGame, Error, TEXT("[GameFlow] Cleared without capturing the Goal result snapshot"));
+		return false;
+	}
+	ScheduleReturnToLobby();
+	return true;
 }
 
 bool ACh4_multiGameGameMode::IsGamePhaseTransitionAllowed(
@@ -566,19 +599,74 @@ bool ACh4_multiGameGameMode::EndGameAsClear(
 		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Final Cargo Score: %d"),
 			GameFlowState->GetFinalCargoScore());
 	}
-	if (bAutoReturnToLobbyOnClear)
-	{
-		ScheduleReturnToLobby();
-	}
 	return true;
 }
 
-void ACh4_multiGameGameMode::EndGameAsGameOver(const ECh4GameEndReason EndReason)
+bool ACh4_multiGameGameMode::EndGameAsGameOver(const ECh4GameEndReason EndReason)
 {
 	if (TryTransitionGamePhase(ECh4GamePhase::GameOver, EndReason))
 	{
 		UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] GAME OVER"));
+		return true;
 	}
+	return false;
+}
+
+float ACh4_multiGameGameMode::GetValidatedResultDisplayDuration() const
+{
+	if (!FMath::IsFinite(ResultDisplayDurationSeconds))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Invalid result display duration; using the next server tick"));
+		return 0.0f;
+	}
+	return FMath::Max(ResultDisplayDurationSeconds, 0.0f);
+}
+
+bool ACh4_multiGameGameMode::CaptureGoalResultSnapshot(
+	const bool bSucceeded,
+	const int32 DeliveredCargoCount,
+	const int32 DeliveredCargoScore)
+{
+	ACh4_multiGameGameState* GameFlowState = GetGameFlowGameState();
+	if (!HasAuthority() || !GameFlowState || GameFlowState->HasGameResultSnapshot())
+	{
+		return false;
+	}
+
+	float GoalServerTimeSeconds = GameFlowState->GetServerWorldTimeSeconds();
+#if WITH_DEV_AUTOMATION_TESTS
+	if (GoalServerTimeOverrideForTesting.IsSet())
+	{
+		GoalServerTimeSeconds = GoalServerTimeOverrideForTesting.GetValue();
+	}
+#endif
+	const float ClearTimeSeconds = bGameplayStartTimeRecorded
+		? FMath::Max(GoalServerTimeSeconds - GameplayStartServerTimeSeconds, 0.0f)
+		: 0.0f;
+	if (!bGameplayStartTimeRecorded)
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[GameFlow] Goal result captured without a recorded RequestGameStart time"));
+	}
+	const float ResultDisplayEndServerTime = GoalServerTimeSeconds + GetValidatedResultDisplayDuration();
+	const bool bCaptured = GameFlowState->SetGoalResultSnapshot(
+		ClearTimeSeconds,
+		DeliveredCargoCount,
+		DeliveredCargoScore,
+		bSucceeded,
+		ResultDisplayEndServerTime);
+	if (bCaptured)
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[GameFlow] Result captured: Success=%s ClearTime=%.2f Cargo=%d Score=%d DisplayEnd=%.2f"),
+			bSucceeded ? TEXT("true") : TEXT("false"),
+			ClearTimeSeconds,
+			FMath::Max(DeliveredCargoCount, 0),
+			bSucceeded ? FMath::Max(DeliveredCargoScore, 0) : 0,
+			ResultDisplayEndServerTime);
+	}
+	return bCaptured;
 }
 
 bool ACh4_multiGameGameMode::ScheduleEmptyCartFailure()
@@ -594,14 +682,7 @@ bool ACh4_multiGameGameMode::ScheduleEmptyCartFailure()
 		return true;
 	}
 
-	const float DelaySeconds = FMath::IsFinite(EmptyCartGameOverDelaySeconds)
-		? FMath::Max(EmptyCartGameOverDelaySeconds, 0.0f)
-		: 0.0f;
-	if (!FMath::IsFinite(EmptyCartGameOverDelaySeconds))
-	{
-		UE_LOG(LogCh4_multiGame, Warning,
-			TEXT("[GameFlow] Invalid empty cart delay; using the next server tick"));
-	}
+	const float DelaySeconds = GetValidatedResultDisplayDuration();
 
 	bEmptyCartFailurePending = true;
 	if (DelaySeconds > 0.0f)
@@ -629,10 +710,11 @@ void ACh4_multiGameGameMode::OnEmptyCartFailureTimer()
 	}
 
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Empty cart failure triggered"));
-	EndGameAsGameOver(ECh4GameEndReason::CargoRuleFailed);
-	if (bEmptyCartFailurePending)
+	if (EndGameAsGameOver(ECh4GameEndReason::CargoRuleFailed))
 	{
-		ClearEmptyCartFailure();
+		// Empty results already spent the shared display duration in Playing.
+		// Travel immediately after GameOver so no second result timer is introduced.
+		StartLobbyTravel();
 	}
 }
 
@@ -724,22 +806,18 @@ bool ACh4_multiGameGameMode::ScheduleReturnToLobby()
 	{
 		return false;
 	}
-	if (!FMath::IsFinite(ReturnToLobbyDelaySeconds) || ReturnToLobbyDelaySeconds < 0.0f)
-	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[GameFlow] Lobby return rejected: invalid return delay"));
-		return false;
-	}
+	const float DelaySeconds = GetValidatedResultDisplayDuration();
 	bReturnToLobbyScheduled = true;
-	if (ReturnToLobbyDelaySeconds > 0.0f)
+	if (DelaySeconds > 0.0f)
 	{
 		GetWorldTimerManager().SetTimer(ReturnToLobbyTimer, this,
-			&ACh4_multiGameGameMode::OnReturnToLobbyTimer, ReturnToLobbyDelaySeconds, false);
+			&ACh4_multiGameGameMode::OnReturnToLobbyTimer, DelaySeconds, false);
 	}
 	else
 	{
 		ReturnToLobbyTimer = GetWorldTimerManager().SetTimerForNextTick(this, &ACh4_multiGameGameMode::OnReturnToLobbyTimer);
 	}
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Lobby return scheduled in %.2f seconds"), ReturnToLobbyDelaySeconds);
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Lobby return scheduled in %.2f seconds"), DelaySeconds);
 	return true;
 }
 
@@ -751,7 +829,10 @@ void ACh4_multiGameGameMode::OnReturnToLobbyTimer()
 bool ACh4_multiGameGameMode::ReturnToLobby()
 {
 	const ACh4_multiGameGameState* State = GetGameFlowGameState();
-	if (!State || State->GetCurrentGamePhase() != ECh4GamePhase::Cleared)
+	if (!State
+		|| (State->GetCurrentGamePhase() != ECh4GamePhase::Cleared
+			&& (State->GetCurrentGamePhase() != ECh4GamePhase::GameOver
+				|| !State->HasGameResultSnapshot())))
 	{
 		return false;
 	}

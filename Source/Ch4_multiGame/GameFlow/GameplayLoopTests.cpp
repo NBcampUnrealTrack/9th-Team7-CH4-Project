@@ -74,8 +74,6 @@ bool FCh4DeliveredCargoRuleTest::RunTest(const FString& Parameters)
 	AActor* Target = F.World->SpawnActor<AActor>();
 	FCh4DeliveryScoreSummary Summary;
 	Summary.bHasScoreData = true;
-	F.Rule->SetDeliveryScoreSummaryForTesting(Target, Summary);
-	TestTrue(TEXT("An empty scored Cart starts the delayed failure instead of clearing"), F.Rule->NotifyGoalReached(Target));
 	Summary.DeliveredCargoCount = 1;
 	Summary.DeliveredCargoScore = 100;
 	F.Rule->SetDeliveryScoreSummaryForTesting(Target, Summary);
@@ -104,9 +102,12 @@ bool FCh4EmptyCartGoalFailureTest::RunTest(const FString& Parameters)
 	using namespace Ch4GameplayLoopTests;
 	FWorldFixture F;
 	if (!F.Initialize()) return false;
-	F.Rule->SetEmptyCartGameOverDelayForTesting(1.0f);
+	F.Rule->SetResultDisplayDurationForTesting(1.0f);
 	F.Rule->RequestCargoInitialization(3);
 	F.Rule->RequestGameStart();
+	F.Rule->SetGameplayTimesForTesting(100.0f, 200.0f);
+	int32 LobbyTravels = 0;
+	F.Rule->LobbyTravelForTesting = [&LobbyTravels](const FString&) { ++LobbyTravels; return true; };
 	AActor* Target = F.World->SpawnActor<AActor>();
 	FCh4DeliveryScoreSummary EmptySummary;
 	EmptySummary.bHasScoreData = true;
@@ -117,6 +118,12 @@ bool FCh4EmptyCartGoalFailureTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Empty Goal remains Playing during the delay"),
 		F.State->GetCurrentGamePhase(), ECh4GamePhase::Playing);
 	TestEqual(TEXT("Pending empty Goal keeps final score zero"), F.State->GetFinalCargoScore(), 0);
+	const FCh4GameResult EmptyResult = F.State->GetGameResult();
+	TestTrue(TEXT("Empty Goal publishes its result immediately"), EmptyResult.bResultAvailable);
+	TestFalse(TEXT("Immediate empty result is a failure"), EmptyResult.bSucceeded);
+	TestEqual(TEXT("Empty result freezes time at Goal arrival"), EmptyResult.ClearTimeSeconds, 100.0f);
+	TestEqual(TEXT("Empty result freezes delivered Cargo at zero"), EmptyResult.DeliveredCargoCount, 0);
+	TestEqual(TEXT("Empty result freezes score at zero"), EmptyResult.FinalCargoScore, 0);
 	// A synthetic world's first manual TimerManager tick establishes its internal time base.
 	F.TickTimers(0.0f);
 	F.TickTimers(0.6f);
@@ -130,15 +137,20 @@ bool FCh4EmptyCartGoalFailureTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Empty Cart GameOver uses the existing cargo-rule reason"),
 		F.State->GetGameEndReason(), ECh4GameEndReason::CargoRuleFailed);
 	TestEqual(TEXT("Empty Cart GameOver finalizes score at zero"), F.State->GetFinalCargoScore(), 0);
+	TestEqual(TEXT("Empty Goal travels immediately after GameOver"), LobbyTravels, 1);
+	TestEqual(TEXT("GameOver does not add another result countdown"),
+		F.State->GetGameResult().ClearTimeSeconds, 100.0f);
 	TestFalse(TEXT("Terminal GameOver rejects further Goal notifications"),
 		F.Rule->NotifyGoalReached(Target));
 
 	FWorldFixture Terminal;
 	if (!Terminal.Initialize()) return false;
-	Terminal.Rule->bAutoReturnToLobbyOnClear = false;
-	Terminal.Rule->SetEmptyCartGameOverDelayForTesting(1.0f);
+	Terminal.Rule->SetResultDisplayDurationForTesting(1.0f);
 	Terminal.Rule->RequestCargoInitialization(1);
 	Terminal.Rule->RequestGameStart();
+	Terminal.Rule->SetGameplayTimesForTesting(10.0f, 25.0f);
+	int32 TerminalTravels = 0;
+	Terminal.Rule->LobbyTravelForTesting = [&TerminalTravels](const FString&) { ++TerminalTravels; return true; };
 	AActor* TerminalTarget = Terminal.World->SpawnActor<AActor>();
 	Terminal.Rule->SetDeliveryScoreSummaryForTesting(TerminalTarget, EmptySummary);
 	TestTrue(TEXT("Second fixture schedules an empty failure"), Terminal.Rule->NotifyGoalReached(TerminalTarget));
@@ -147,17 +159,23 @@ bool FCh4EmptyCartGoalFailureTest::RunTest(const FString& Parameters)
 	DeliveredSummary.DeliveredCargoCount = 1;
 	DeliveredSummary.DeliveredCargoScore = 250;
 	Terminal.Rule->SetDeliveryScoreSummaryForTesting(TerminalTarget, DeliveredSummary);
-	TestTrue(TEXT("A valid terminal clear can finish before the pending failure"),
+	TestTrue(TEXT("A later duplicate Goal reuses the first empty result"),
 		Terminal.Rule->NotifyGoalReached(TerminalTarget));
+	Terminal.TickTimers(0.0f);
 	Terminal.TickTimers(2.0f);
-	TestEqual(TEXT("Cancelled empty timer cannot overwrite Cleared"),
-		Terminal.State->GetCurrentGamePhase(), ECh4GamePhase::Cleared);
-	TestEqual(TEXT("Cancelled empty timer cannot overwrite the clear score"),
-		Terminal.State->GetFinalCargoScore(), 250);
+	TestEqual(TEXT("First empty result still reaches GameOver"),
+		Terminal.State->GetCurrentGamePhase(), ECh4GamePhase::GameOver);
+	TestEqual(TEXT("Later Cargo cannot mutate the first Goal score"),
+		Terminal.State->GetGameResult().FinalCargoScore, 0);
+	TestEqual(TEXT("Later Cargo cannot mutate the first Goal count"),
+		Terminal.State->GetGameResult().DeliveredCargoCount, 0);
+	TestEqual(TEXT("Later Cargo cannot mutate the first Goal time"),
+		Terminal.State->GetGameResult().ClearTimeSeconds, 15.0f);
+	TestEqual(TEXT("Empty result performs one Lobby travel"), TerminalTravels, 1);
 
 	const FProperty* DelayProperty = FindFProperty<FProperty>(
-		ACh4_multiGameGameMode::StaticClass(), TEXT("EmptyCartGameOverDelaySeconds"));
-	TestTrue(TEXT("Empty Cart delay is editable in GameMode Class Defaults"),
+		ACh4_multiGameGameMode::StaticClass(), TEXT("ResultDisplayDurationSeconds"));
+	TestTrue(TEXT("Shared result duration is editable in GameMode Class Defaults"),
 		DelayProperty && DelayProperty->HasAnyPropertyFlags(CPF_Edit));
 	return true;
 }
@@ -171,8 +189,7 @@ bool FCh4LobbyReturnTest::RunTest(const FString& Parameters)
 	using namespace Ch4GameplayLoopTests;
 	FWorldFixture F;
 	if (!F.Initialize()) return false;
-	TestTrue(TEXT("Automatic clear return defaults on"), F.Rule->bAutoReturnToLobbyOnClear);
-	TestEqual(TEXT("Result display defaults to ten seconds"), F.Rule->ReturnToLobbyDelaySeconds, 10.0f);
+	TestEqual(TEXT("Result display defaults to ten seconds"), F.Rule->ResultDisplayDurationSeconds, 10.0f);
 	int32 Travels = 0;
 	FString LastURL;
 	F.Rule->LobbyTravelForTesting = [&Travels, &LastURL](const FString& URL) { ++Travels; LastURL = URL; return true; };
@@ -181,7 +198,7 @@ bool FCh4LobbyReturnTest::RunTest(const FString& Parameters)
 	F.Rule->RequestCargoInitialization(1);
 	F.Rule->RequestGameStart();
 	TestFalse(TEXT("Playing cannot schedule a return"), F.Rule->ScheduleReturnToLobby());
-	F.Rule->ReturnToLobbyDelaySeconds = 0.5f;
+	F.Rule->SetResultDisplayDurationForTesting(0.5f);
 	TestTrue(TEXT("Providerless debug target keeps legacy clear behavior"), F.Rule->NotifyGoalReached(F.World->SpawnActor<AActor>()));
 	TestTrue(TEXT("Clear schedules one return"), F.Rule->IsReturnToLobbyScheduled());
 	TestFalse(TEXT("Duplicate schedule is rejected"), F.Rule->ScheduleReturnToLobby());
@@ -201,18 +218,18 @@ bool FCh4LobbyReturnTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("GameOver has no automatic return"), Failed.Rule->IsReturnToLobbyScheduled());
 	TestFalse(TEXT("GameOver does not enter the clear-only route"), Failed.Rule->ReturnToLobby());
 
-	FWorldFixture Disabled;
-	if (!Disabled.Initialize()) return false;
-	Disabled.Rule->bAutoReturnToLobbyOnClear = false;
-	Disabled.Rule->RequestCargoInitialization(1);
-	Disabled.Rule->RequestGameStart();
-	Disabled.Rule->NotifyGoalReached(Disabled.World->SpawnActor<AActor>());
-	TestFalse(TEXT("Editor option disables automatic scheduling"), Disabled.Rule->IsReturnToLobbyScheduled());
+	FWorldFixture Retry;
+	if (!Retry.Initialize()) return false;
+	Retry.Rule->SetResultDisplayDurationForTesting(0.0f);
+	Retry.Rule->RequestCargoInitialization(1);
+	Retry.Rule->RequestGameStart();
 	int32 Attempts = 0;
-	Disabled.Rule->LobbyTravelForTesting = [&Attempts](const FString&) { return ++Attempts > 1; };
-	TestFalse(TEXT("Rejected ServerTravel reports failure"), Disabled.Rule->ReturnToLobby());
-	TestTrue(TEXT("A rejected request can be retried manually"), Disabled.Rule->ReturnToLobby());
-	TestFalse(TEXT("Successful retry is guarded"), Disabled.Rule->ReturnToLobby());
+	Retry.Rule->LobbyTravelForTesting = [&Attempts](const FString&) { return ++Attempts > 1; };
+	TestTrue(TEXT("Required clear return is scheduled"), Retry.Rule->NotifyGoalReached(Retry.World->SpawnActor<AActor>()));
+	Retry.TickTimers();
+	TestEqual(TEXT("Rejected scheduled ServerTravel attempted once"), Attempts, 1);
+	TestTrue(TEXT("A rejected request can be retried manually"), Retry.Rule->ReturnToLobby());
+	TestFalse(TEXT("Successful retry is guarded"), Retry.Rule->ReturnToLobby());
 
 	FWorldFixture PreparationAbort;
 	if (!PreparationAbort.Initialize()) return false;

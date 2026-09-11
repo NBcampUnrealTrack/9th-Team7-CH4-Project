@@ -16,6 +16,7 @@ void ACh4_multiGameGameState::GetLifetimeReplicatedProps(TArray<FLifetimePropert
 	DOREPLIFETIME(ACh4_multiGameGameState, CurrentGamePhase);
 	DOREPLIFETIME(ACh4_multiGameGameState, PreparationEndTime);
 	DOREPLIFETIME(ACh4_multiGameGameState, PreparationTotalDuration);
+	DOREPLIFETIME(ACh4_multiGameGameState, GameResultSnapshot);
 }
 
 int32 ACh4_multiGameGameState::GetLostCargoCount() const
@@ -35,6 +36,11 @@ float ACh4_multiGameGameState::GetCargoSurvivalRate() const
 
 FCh4GameResult ACh4_multiGameGameState::GetGameResult() const
 {
+	if (GameResultSnapshot.bResultAvailable)
+	{
+		return GameResultSnapshot;
+	}
+
 	FCh4GameResult Result;
 	Result.GamePhase = CurrentGamePhase;
 	Result.GameEndReason = GameEndReason;
@@ -73,7 +79,52 @@ bool ACh4_multiGameGameState::SetGamePhaseState(
 	FinalCargoScore = ValidatedFinalCargoScore;
 	GameEndReason = NewEndReason;
 	CurrentGamePhase = NewGamePhase;
+	if (GameResultSnapshot.bResultAvailable
+		&& (NewGamePhase == ECh4GamePhase::Cleared || NewGamePhase == ECh4GamePhase::GameOver))
+	{
+		GameResultSnapshot.GamePhase = NewGamePhase;
+		GameResultSnapshot.GameEndReason = NewEndReason;
+		GameResultSnapshot.bGameEnded = true;
+		GameResultSnapshot.bSucceeded = NewGamePhase == ECh4GamePhase::Cleared;
+		GameResultSnapshot.FinalCargoScore = NewGamePhase == ECh4GamePhase::Cleared
+			? ValidatedFinalCargoScore : 0;
+		OnGameResultChanged.Broadcast(GameResultSnapshot);
+	}
 	OnGamePhaseChanged.Broadcast(CurrentGamePhase);
+	ForceNetUpdate();
+	return true;
+}
+
+bool ACh4_multiGameGameState::SetGoalResultSnapshot(
+	const float ClearTimeSeconds,
+	const int32 DeliveredCargoCount,
+	const int32 DeliveredCargoScore,
+	const bool bSucceeded,
+	const float ResultDisplayEndServerTime)
+{
+	if (!HasAuthority() || GameResultSnapshot.bResultAvailable)
+	{
+		return false;
+	}
+
+	GameResultSnapshot.bResultAvailable = true;
+	GameResultSnapshot.GamePhase = bSucceeded ? ECh4GamePhase::Cleared : CurrentGamePhase;
+	GameResultSnapshot.GameEndReason = bSucceeded
+		? ECh4GameEndReason::GoalReached : ECh4GameEndReason::CargoRuleFailed;
+	GameResultSnapshot.InitialCargoCount = InitialCargoCount;
+	GameResultSnapshot.RemainingCargoCount = RemainingCargoCount;
+	GameResultSnapshot.LostCargoCount = GetLostCargoCount();
+	GameResultSnapshot.CargoSurvivalRate = GetCargoSurvivalRate();
+	GameResultSnapshot.FinalCargoScore = bSucceeded ? FMath::Max(DeliveredCargoScore, 0) : 0;
+	GameResultSnapshot.ClearTimeSeconds = FMath::IsFinite(ClearTimeSeconds)
+		? FMath::Max(ClearTimeSeconds, 0.0f) : 0.0f;
+	GameResultSnapshot.DeliveredCargoCount = FMath::Max(DeliveredCargoCount, 0);
+	GameResultSnapshot.ResultDisplayEndServerTime = FMath::IsFinite(ResultDisplayEndServerTime)
+		? FMath::Max(ResultDisplayEndServerTime, 0.0f) : 0.0f;
+	GameResultSnapshot.bGameEnded = bSucceeded;
+	GameResultSnapshot.bSucceeded = bSucceeded;
+
+	OnGameResultChanged.Broadcast(GameResultSnapshot);
 	ForceNetUpdate();
 	return true;
 }
@@ -152,6 +203,14 @@ void ACh4_multiGameGameState::SetPreparationTimer(float DurationSeconds)
 void ACh4_multiGameGameState::OnRep_PreparationEndTime()
 {
 	OnPreparationTimerUpdated.Broadcast(GetRemainingPreparationTime(), PreparationTotalDuration);
+}
+
+void ACh4_multiGameGameState::OnRep_GameResultSnapshot()
+{
+	if (GameResultSnapshot.bResultAvailable)
+	{
+		OnGameResultChanged.Broadcast(GameResultSnapshot);
+	}
 }
 
 float ACh4_multiGameGameState::GetRemainingPreparationTime() const

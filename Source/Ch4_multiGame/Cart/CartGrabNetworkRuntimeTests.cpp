@@ -189,7 +189,8 @@ private:
 			FCh4DeliveryScoreSummary EmptySummary;
 			EmptySummary.bHasScoreData = true;
 			Rule->SetDeliveryScoreSummaryForTesting(Cart, EmptySummary);
-			Rule->SetEmptyCartGameOverDelayForTesting(1.0f);
+			Rule->SetResultDisplayDurationForTesting(1.0f);
+			Rule->LobbyTravelForTesting = [](const FString&) { return true; };
 			if (!Rule->NotifyGoalReached(Cart))
 			{
 				Test->AddError(TEXT("Actual Forest GameMode rejected the empty Cart Goal fixture"));
@@ -197,6 +198,10 @@ private:
 			}
 			Test->TestEqual(TEXT("Actual Forest remains Playing during the empty Goal delay"),
 				State->GetCurrentGamePhase(), ECh4GamePhase::Playing);
+			const FCh4GameResult Result = State->GetGameResult();
+			Test->TestTrue(TEXT("Host receives the empty result snapshot immediately"), Result.bResultAvailable);
+			Test->TestEqual(TEXT("Host empty result Cargo is zero"), Result.DeliveredCargoCount, 0);
+			Test->TestEqual(TEXT("Host empty result score is zero"), Result.FinalCargoScore, 0);
 			Stage = 5;
 			return false;
 		}
@@ -258,10 +263,22 @@ private:
 		{
 			ACh4_multiGameGameState* State = LocalCharacter->GetWorld()
 				? LocalCharacter->GetWorld()->GetGameState<ACh4_multiGameGameState>() : nullptr;
-			if (!State || State->GetCurrentGamePhase() != ECh4GamePhase::GameOver)
+			if (!State)
 			{
 				return false;
 			}
+			const FCh4GameResult Result = State->GetGameResult();
+			if (Result.bResultAvailable && State->GetCurrentGamePhase() == ECh4GamePhase::Playing)
+			{
+				bObservedResultBeforeGameOver = true;
+				Test->TestEqual(TEXT("Remote client receives immediate empty Goal Cargo zero"), Result.DeliveredCargoCount, 0);
+				Test->TestEqual(TEXT("Remote client receives immediate empty Goal score zero"), Result.FinalCargoScore, 0);
+			}
+			if (State->GetCurrentGamePhase() != ECh4GamePhase::GameOver)
+			{
+				return false;
+			}
+			Test->TestTrue(TEXT("Remote client saw Result UI data before GameOver"), bObservedResultBeforeGameOver);
 			Test->TestEqual(TEXT("Remote client receives empty Goal score zero"), State->GetFinalCargoScore(), 0);
 			Test->AddInfo(TEXT("CART_GRAB_CLIENT_RESULT LockedRejected=1 Grabbed=1 MoveIntent=1 Released=1 EmptyGoalGameOver=1 Score=0"));
 			return true;
@@ -273,6 +290,7 @@ private:
 	double StartedAt = 0.0;
 	double StageStartedAt = 0.0;
 	int32 Stage = 0;
+	bool bObservedResultBeforeGameOver = false;
 };
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCh4CartGrabNetworkRuntimeTest,
