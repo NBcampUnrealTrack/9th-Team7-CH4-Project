@@ -47,6 +47,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Preview|Interaction")
 	void ResetPreviewRotation();
 
+	UFUNCTION(BlueprintCallable, Category = "Preview|Backdrop")
+	void SetBackdropColor(const FLinearColor& NewColor);
+
 	UFUNCTION(BlueprintPure, Category = "Preview|Appearance")
 	ECh4CharacterType GetCurrentCharacterType() const { return CurrentCharacterType; }
 
@@ -91,9 +94,17 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Preview|Backdrop")
 	bool bUseBackdrop = true;
 
-	/** 스튜디오 배경 색상 (화사하고 깨끗한 소프트 화이트 스튜디오 기본값) */
+	/** 스튜디오 배경 색상 (세련된 소프트 슬레이트 네이비 스튜디오 기본값) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Preview|Backdrop")
-	FLinearColor BackdropColor = FLinearColor(0.96f, 0.96f, 0.97f, 1.0f);
+	FLinearColor BackdropColor = FLinearColor(0.08f, 0.095f, 0.15f, 1.0f);
+
+	/** 비네팅 강도 (모서리를 은은하게 정돈, 0.0 ~ 1.0) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Preview|PostProcess")
+	float VignetteIntensity = 0.2f;
+
+	/** 블룸 강도 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Preview|PostProcess")
+	float BloomIntensity = 0.0f;
 
 	/** 카메라 거리 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Preview|Camera")

@@ -213,6 +213,14 @@ void UCh4SkinSelectorViewModel::ResetPreviewRotation()
 	}
 }
 
+void UCh4SkinSelectorViewModel::SetPreviewBackdropColor(const FLinearColor& NewColor)
+{
+	if (ActivePreviewStudio)
+	{
+		ActivePreviewStudio->SetBackdropColor(NewColor);
+	}
+}
+
 void UCh4SkinSelectorViewModel::SelectCharacterType(ECh4CharacterType NewType)
 {
 	SetPendingCharacterType(NewType);

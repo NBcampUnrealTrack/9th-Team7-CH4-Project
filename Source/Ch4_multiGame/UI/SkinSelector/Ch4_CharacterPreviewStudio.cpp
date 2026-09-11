@@ -5,6 +5,7 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/TextureCube.h"
 #include "Engine/DataTable.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
@@ -68,27 +69,38 @@ ACh4_CharacterPreviewStudio::ACh4_CharacterPreviewStudio()
 	CaptureComponent->bCaptureOnMovement = false;
 	CaptureComponent->CompositeMode = ESceneCaptureCompositeMode::SCCM_Overwrite;
 
-	// ShowFlags: Disable Lumen, Dynamic Shadows, AO, Bloom, Fog for clean, flat cartoon look
+	// ShowFlags: Disable Lumen, Dynamic Shadows, AO, Fog
 	CaptureComponent->ShowFlags.SetDynamicShadows(false);
 	CaptureComponent->ShowFlags.SetLumenGlobalIllumination(false);
 	CaptureComponent->ShowFlags.SetLumenReflections(false);
 	CaptureComponent->ShowFlags.SetGlobalIllumination(false);
-	CaptureComponent->ShowFlags.SetAmbientOcclusion(true);
-	CaptureComponent->ShowFlags.SetBloom(false);
 	CaptureComponent->ShowFlags.SetEyeAdaptation(false);
 	CaptureComponent->ShowFlags.SetAtmosphere(false);
 	CaptureComponent->ShowFlags.SetFog(false);
 	CaptureComponent->ShowFlags.SetVolumetricFog(false);
 	CaptureComponent->ShowFlags.SetMotionBlur(false);
-	CaptureComponent->ShowFlags.SetToneCurve(false);
+	CaptureComponent->ShowFlags.SetToneCurve(true);
 
 	// PostProcess: Fixed manual exposure, clean bright toon look without dirty AO noise
 	CaptureComponent->PostProcessSettings.bOverride_AutoExposureMethod = true;
 	CaptureComponent->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
 	CaptureComponent->PostProcessSettings.bOverride_AutoExposureBias = true;
 	CaptureComponent->PostProcessSettings.AutoExposureBias = 0.0f;
+
+	// 포스트 이펙트: 소프트 비네팅
+	CaptureComponent->ShowFlags.SetBloom(false);
 	CaptureComponent->PostProcessSettings.bOverride_BloomIntensity = true;
-	CaptureComponent->PostProcessSettings.BloomIntensity = 0.0f;
+	CaptureComponent->PostProcessSettings.BloomIntensity = BloomIntensity;
+
+	CaptureComponent->PostProcessSettings.bOverride_VignetteIntensity = true;
+	CaptureComponent->PostProcessSettings.VignetteIntensity = VignetteIntensity;
+
+	CaptureComponent->PostProcessSettings.bOverride_ColorSaturation = true;
+	CaptureComponent->PostProcessSettings.ColorSaturation = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+
+	CaptureComponent->PostProcessSettings.bOverride_ColorContrast = true;
+	CaptureComponent->PostProcessSettings.ColorContrast = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+
 	CaptureComponent->ShowFlags.SetAmbientOcclusion(false);
 	CaptureComponent->PostProcessSettings.bOverride_AmbientOcclusionIntensity = true;
 	CaptureComponent->PostProcessSettings.AmbientOcclusionIntensity = 0.0f;
@@ -114,7 +126,7 @@ ACh4_CharacterPreviewStudio::ACh4_CharacterPreviewStudio()
 
 	SkyLightComponent = CreateDefaultSubobject<USkyLightComponent>(TEXT("SkyLightComponent"));
 	SkyLightComponent->SetupAttachment(StudioRoot);
-	SkyLightComponent->SetIntensity(2.0f);
+	SkyLightComponent->SetIntensity(1.8f);
 	SkyLightComponent->SetLightColor(FLinearColor(1.0f, 1.0f, 1.0f));
 	SkyLightComponent->SetCastShadows(false);
 
@@ -159,7 +171,7 @@ void ACh4_CharacterPreviewStudio::BeginPlay()
 
 	UpdateCameraTransform();
 
-	// 런타임 조명 강도 보정 (화사하고 부드러운 스튜디오 룩)
+	// 1. 런타임 조명 강도 보정 (깔끔하고 화사한 카툰 스튜디오 룩)
 	if (KeyLightComponent)
 	{
 		KeyLightComponent->SetIntensity(3.2f);
@@ -174,7 +186,7 @@ void ACh4_CharacterPreviewStudio::BeginPlay()
 	}
 	if (SkyLightComponent)
 	{
-		SkyLightComponent->SetIntensity(2.0f);
+		SkyLightComponent->SetIntensity(1.8f);
 		SkyLightComponent->SetLightColor(FLinearColor(1.0f, 1.0f, 1.0f));
 	}
 
@@ -198,6 +210,27 @@ void ACh4_CharacterPreviewStudio::BeginPlay()
 		CaptureComponent->PostProcessSettings.bOverride_AmbientOcclusionIntensity = true;
 		CaptureComponent->PostProcessSettings.AmbientOcclusionIntensity = 0.0f;
 
+		// 수동 고정 노출 (인게임 캐릭터 고유의 텍스처 명암 유지)
+		CaptureComponent->PostProcessSettings.bOverride_AutoExposureMethod = true;
+		CaptureComponent->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
+		CaptureComponent->PostProcessSettings.bOverride_AutoExposureBias = true;
+		CaptureComponent->PostProcessSettings.AutoExposureBias = 0.0f;
+
+		// 톤 커브 및 부드러운 외곽 비네팅만 적용 (잡광 및 번짐 방지)
+		CaptureComponent->ShowFlags.SetToneCurve(true);
+		CaptureComponent->ShowFlags.SetBloom(false);
+		CaptureComponent->PostProcessSettings.bOverride_BloomIntensity = true;
+		CaptureComponent->PostProcessSettings.BloomIntensity = BloomIntensity;
+
+		CaptureComponent->PostProcessSettings.bOverride_VignetteIntensity = true;
+		CaptureComponent->PostProcessSettings.VignetteIntensity = VignetteIntensity;
+
+		CaptureComponent->PostProcessSettings.bOverride_ColorSaturation = true;
+		CaptureComponent->PostProcessSettings.ColorSaturation = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+
+		CaptureComponent->PostProcessSettings.bOverride_ColorContrast = true;
+		CaptureComponent->PostProcessSettings.ColorContrast = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+
 		// 마네킹과 모자 및 배경만 캡처하도록 ShowOnly 목록 갱신
 		CaptureComponent->ShowOnlyComponents.Empty();
 		if (PreviewMeshComponent) CaptureComponent->ShowOnlyComponents.Add(PreviewMeshComponent);
@@ -205,7 +238,7 @@ void ACh4_CharacterPreviewStudio::BeginPlay()
 		if (BackdropMeshComponent && bUseBackdrop) CaptureComponent->ShowOnlyComponents.Add(BackdropMeshComponent);
 	}
 
-	// 2. 림 라이트: 과도한 역광 대비를 방지하고 모자/머리 윤곽에만 은은하게 1.0f 강도로 비춤
+	// 2. 림 라이트 비활성화 (배경 대각선 광선 스트릭 및 번짐 결함 방지)
 	UDirectionalLightComponent* RimLight = nullptr;
 	for (UActorComponent* Comp : GetComponents())
 	{
@@ -215,22 +248,9 @@ void ACh4_CharacterPreviewStudio::BeginPlay()
 			break;
 		}
 	}
-	if (!RimLight)
-	{
-		RimLight = NewObject<UDirectionalLightComponent>(this, TEXT("RuntimeRimLight"));
-		if (RimLight)
-		{
-			RimLight->ComponentTags.Add(TEXT("RimLight"));
-			RimLight->SetupAttachment(StudioRoot);
-			RimLight->RegisterComponent();
-		}
-	}
 	if (RimLight)
 	{
-		RimLight->SetRelativeRotation(FRotator(-30.0f, 25.0f, 0.0f));
-		RimLight->SetIntensity(1.0f);
-		RimLight->SetLightColor(FLinearColor(1.0f, 0.98f, 0.95f));
-		RimLight->SetCastShadows(false);
+		RimLight->SetIntensity(0.0f);
 	}
 
 	// 런타임 백드롭 생성 (라이브 코딩 CDO 누락 방지)
@@ -269,12 +289,7 @@ void ACh4_CharacterPreviewStudio::BeginPlay()
 			BackdropMeshComponent->SetVisibility(true);
 			if (UMaterialInstanceDynamic* DynMat = BackdropMeshComponent->CreateAndSetMaterialInstanceDynamic(0))
 			{
-				FLinearColor SafeBackdropColor = BackdropColor;
-				if (SafeBackdropColor.R < 0.95f)
-				{
-					SafeBackdropColor = FLinearColor(0.96f, 0.96f, 0.97f, 1.0f);
-				}
-				DynMat->SetVectorParameterValue(TEXT("Color"), SafeBackdropColor);
+				DynMat->SetVectorParameterValue(TEXT("Color"), BackdropColor);
 			}
 			if (CaptureComponent)
 			{
@@ -351,6 +366,22 @@ void ACh4_CharacterPreviewStudio::UpdateCameraTransform()
 		CaptureComponent->ShowFlags.SetAmbientOcclusion(false);
 		CaptureComponent->PostProcessSettings.bOverride_AmbientOcclusionIntensity = true;
 		CaptureComponent->PostProcessSettings.AmbientOcclusionIntensity = 0.0f;
+	}
+}
+
+void ACh4_CharacterPreviewStudio::SetBackdropColor(const FLinearColor& NewColor)
+{
+	BackdropColor = NewColor;
+	if (BackdropMeshComponent)
+	{
+		if (UMaterialInstanceDynamic* DynMat = Cast<UMaterialInstanceDynamic>(BackdropMeshComponent->GetMaterial(0)))
+		{
+			DynMat->SetVectorParameterValue(TEXT("Color"), BackdropColor);
+		}
+		else if (UMaterialInstanceDynamic* NewDynMat = BackdropMeshComponent->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			NewDynMat->SetVectorParameterValue(TEXT("Color"), BackdropColor);
+		}
 	}
 }
 
