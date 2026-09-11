@@ -23,6 +23,7 @@
 #include "TimerManager.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "PhysicsEngine/PhysicsAsset.h"
+#include "Kismet/GameplayStatics.h"
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
@@ -705,13 +706,20 @@ void ACh4_PlayerCharacter::InputActionGrab(const FInputActionValue& Value)
 	{
 		return;
 	}
-
-	if (bIsGrabActionInProgress)
+	
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance == nullptr)
+	{
+		return;
+	}
+	
+	const bool bGrabMontagePlaying = GrabMontage && AnimInstance->Montage_IsPlaying(GrabMontage);
+	const bool bReleaseMontagePlaying = GrabReleaseMontage && AnimInstance->Montage_IsPlaying(GrabReleaseMontage);
+	
+	if (bGrabMontagePlaying || bReleaseMontagePlaying)
 	{
 		return; // 몽타주 재생 중엔 입력 무시
 	}
-	
-	bIsGrabActionInProgress = true;
 	
 	if (GrabbedComponent != nullptr)
 	{
@@ -1079,8 +1087,6 @@ void ACh4_PlayerCharacter::BeginGrabDetection()
 		return; // 서버 또는 본인 조종 클라이언트만 판정
 	}
 
-	bIsGrabActionInProgress = false;
-
 	if (GrabbedComponent != nullptr || GrabBoxComponent == nullptr)
 	{
 		return;
@@ -1108,7 +1114,6 @@ void ACh4_PlayerCharacter::BeginGrabDetection()
 
 void ACh4_PlayerCharacter::EndGrabDetection()
 {
-	bIsGrabActionInProgress = false;
 
 	if (GrabBoxComponent == nullptr)
 	{
@@ -1168,11 +1173,15 @@ void ACh4_PlayerCharacter::MulticastRPC_AttachGrab_Implementation(UPrimitiveComp
 
 	TargetComponent->SetSimulatePhysics(false);
 	TargetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
 	TargetComponent->AttachToComponent(
 	   GetMesh(),
 	   FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 	   GrabSocketName);
+	
+	if (IsValid(GrabSound) == true)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, GrabSound, GetActorLocation());
+	}
 }
 
 void ACh4_PlayerCharacter::ServerRPC_ReleaseGrab_Implementation()
@@ -1188,9 +1197,19 @@ void ACh4_PlayerCharacter::ServerRPC_ReleaseGrab_Implementation()
 
 void ACh4_PlayerCharacter::MulticastRPC_ReleaseGrab_Implementation(UPrimitiveComponent* TargetComponent)
 {
+	if (TargetComponent == nullptr)
+	{
+		return;
+	}
+	
 	TargetComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
 	TargetComponent->SetSimulatePhysics(true);
 	TargetComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	
+	if (IsValid(GrabReleaseSound) == true)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, GrabReleaseSound, GetActorLocation());
+	}
 }
 
 void ACh4_PlayerCharacter::ServerRPC_PlayGrabMontage_Implementation()
@@ -1212,8 +1231,6 @@ void ACh4_PlayerCharacter::OnGrabReleaseNotify()
 	{
 		return;
 	}
-
-	bIsGrabActionInProgress = false;
 	
 	if (GrabbedComponent != nullptr)
 	{

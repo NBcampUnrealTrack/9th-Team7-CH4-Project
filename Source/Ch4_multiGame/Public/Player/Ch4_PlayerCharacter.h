@@ -110,6 +110,12 @@ public:
 	UPROPERTY(Replicated)
 	bool bIsBraking = false;
 	
+	UPROPERTY(EditDefaultsOnly, Category="Sound")
+	TObjectPtr<class USoundBase> GrabSound;
+
+	UPROPERTY(EditDefaultsOnly, Category="Sound")
+	TObjectPtr<class USoundBase> GrabReleaseSound;
+	
 	UPROPERTY(VisibleAnywhere, Category="Hat")
 	TObjectPtr<class UStaticMeshComponent> HatMeshComponent;
 
@@ -251,9 +257,6 @@ protected:
 	
 	UPROPERTY(EditDefaultsOnly, Category="Grab")
 	FName GrabSocketName = TEXT("GrabSocket");
-	
-	// 그랩/릴리즈 몽타주 재생 중 여부 (입력 잠금용)
-	bool bIsGrabActionInProgress = false;
 	
 	UFUNCTION()
 	void OnRep_GrabbedComponent();
