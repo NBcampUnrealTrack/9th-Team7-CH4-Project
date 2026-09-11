@@ -100,6 +100,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SkinSelector|Preview")
 	void ResetPreviewRotation();
 
+	/** 스튜디오 배경 색상 동적 변경 */
+	UFUNCTION(BlueprintCallable, Category = "SkinSelector|Preview")
+	void SetPreviewBackdropColor(const FLinearColor& NewColor);
+
 	// ----------------------------------------------------------------
 	// [Lifecycle & Initialization]
 	// ----------------------------------------------------------------
