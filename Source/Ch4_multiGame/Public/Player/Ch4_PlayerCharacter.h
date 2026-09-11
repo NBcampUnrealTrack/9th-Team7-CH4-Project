@@ -116,6 +116,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Sound")
 	TObjectPtr<class USoundBase> GrabReleaseSound;
 	
+	UPROPERTY(EditDefaultsOnly, Category="Sound")
+	TObjectPtr<class USoundBase> JumpSound;
+	
+	UPROPERTY(EditDefaultsOnly, Category="Sound")
+	TObjectPtr<class USoundBase> StunSound;
+	
 	UPROPERTY(VisibleAnywhere, Category="Hat")
 	TObjectPtr<class UStaticMeshComponent> HatMeshComponent;
 
