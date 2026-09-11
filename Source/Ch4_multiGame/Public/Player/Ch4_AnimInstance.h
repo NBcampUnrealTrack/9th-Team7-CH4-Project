@@ -38,4 +38,7 @@ protected:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	bool bIsPushingCart;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	bool bIsBraking = false;
 };

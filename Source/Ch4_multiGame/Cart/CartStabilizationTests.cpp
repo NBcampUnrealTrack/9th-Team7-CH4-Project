@@ -9,6 +9,7 @@
 #include "Misc/AutomationTest.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
+#include "Player/Ch4_PlayerCharacter.h"
 
 namespace Ch4CartStabilizationTests
 {
@@ -233,9 +234,9 @@ bool FCh4CartStabilizationConfigurationTest::RunTest(const FString& Parameters)
 		BodyInstance->COMNudge.Equals(FVector(-20.0f, 0.0f, -18.0f), 0.001f));
 	TestTrue(TEXT("Roll and pitch inertia increase while yaw inertia is unchanged"),
 		BodyInstance->InertiaTensorScale.Equals(FVector(2.0f, 2.0f, 1.0f), 0.001f));
-	TestTrue(TEXT("Maximum angular velocity is 240 degrees per second"),
+	TestTrue(TEXT("Blueprint maximum angular velocity reaches the physics body"),
 		FMath::IsNearlyEqual(BodyInstance->GetMaxAngularVelocityInRadians(),
-			FMath::DegreesToRadians(240.0f), 0.001f));
+			FMath::DegreesToRadians(FMath::Max(Cart->MaximumAngularVelocityDegrees, 0.0f)), 0.001f));
 	TestTrue(TEXT("Angular damping remains 3"), FMath::IsNearlyEqual(CartMesh->GetAngularDamping(), 3.0f));
 
 	UPrimitiveComponent* ConstrainedComponent1 = nullptr;
@@ -252,10 +253,10 @@ bool FCh4CartStabilizationConfigurationTest::RunTest(const FString& Parameters)
 		Constraint->ConstraintInstance.GetAngularTwistMotion(), ACM_Free);
 	TestEqual(TEXT("Swing 1 is limited"), Constraint->ConstraintInstance.GetAngularSwing1Motion(), ACM_Limited);
 	TestEqual(TEXT("Swing 2 is limited"), Constraint->ConstraintInstance.GetAngularSwing2Motion(), ACM_Limited);
-	TestTrue(TEXT("Swing 1 limit is 55 degrees"),
-		FMath::IsNearlyEqual(Constraint->ConstraintInstance.GetAngularSwing1Limit(), 55.0f));
-	TestTrue(TEXT("Swing 2 limit is 55 degrees"),
-		FMath::IsNearlyEqual(Constraint->ConstraintInstance.GetAngularSwing2Limit(), 55.0f));
+	TestTrue(TEXT("Sanitized Blueprint maximum configures Swing 1"),
+		FMath::IsNearlyEqual(Constraint->ConstraintInstance.GetAngularSwing1Limit(), Cart->EffectiveMaximumTiltAngleDegrees));
+	TestTrue(TEXT("Sanitized Blueprint maximum configures Swing 2"),
+		FMath::IsNearlyEqual(Constraint->ConstraintInstance.GetAngularSwing2Limit(), Cart->EffectiveMaximumTiltAngleDegrees));
 	TestFalse(TEXT("The final swing limit is hard"), Constraint->ConstraintInstance.GetIsSoftSwingLimit());
 	TestTrue(TEXT("Optional soft-limit stiffness defaults to the UE cone value"),
 		FMath::IsNearlyEqual(Constraint->ConstraintInstance.GetSoftSwingLimitStiffness(), 50.0f));
@@ -270,6 +271,68 @@ bool FCh4CartStabilizationConfigurationTest::RunTest(const FString& Parameters)
 		Constraint->ConstraintInstance.PriAxis1.Equals(FVector::UpVector, 0.001f));
 	TestTrue(TEXT("World Z is the matching primary twist axis"),
 		Constraint->ConstraintInstance.PriAxis2.Equals(FVector::UpVector, 0.001f));
+
+	const ECollisionEnabled::Type CartCollision = CartMesh->GetCollisionEnabled();
+	ACh4_PlayerCharacter* LockedPlayer = TestWorld.World->SpawnActor<ACh4_PlayerCharacter>();
+	LockedPlayer->SetActorLocation(Cart->GetActorLocation());
+	TestTrue(TEXT("Preparation explicitly locks the authoritative Cart"), Cart->SetPreparationLocked(true));
+	TestTrue(TEXT("Preparation lock state is exposed"), Cart->IsPreparationLocked());
+	TestFalse(TEXT("Preparation lock makes the Cart kinematic"), BodyInstance->bSimulatePhysics);
+	TestEqual(TEXT("Preparation lock preserves Cart collision for Cargo"), CartMesh->GetCollisionEnabled(), CartCollision);
+	TestFalse(TEXT("Preparation lock rejects Cart grab"), Cart->TryGrabPlayer(LockedPlayer));
+	TestTrue(TEXT("Preparation explicitly unlocks the Cart"), Cart->SetPreparationLocked(false));
+	TestFalse(TEXT("Preparation lock state clears"), Cart->IsPreparationLocked());
+	TestTrue(TEXT("Unlock restores authoritative Cart simulation"), BodyInstance->bSimulatePhysics);
+
+	TArray<ACh4_PlayerCharacter*> Grabbers;
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		ACh4_PlayerCharacter* Player = TestWorld.World->SpawnActor<ACh4_PlayerCharacter>();
+		USceneComponent* Anchor = Cast<USceneComponent>(
+			Cart->GetDefaultSubobjectByName(*FString::Printf(TEXT("Anchor_%d"), Index + 1)));
+		if (!TestNotNull(FString::Printf(TEXT("Anchor %d exists"), Index + 1), Anchor)
+			|| !TestNotNull(FString::Printf(TEXT("Grabber %d spawns"), Index + 1), Player))
+		{
+			return false;
+		}
+		Player->SetActorLocation(Anchor->GetComponentLocation());
+		TestTrue(FString::Printf(TEXT("Grabber %d receives a distinct server anchor"), Index + 1),
+			Cart->TryGrabPlayer(Player));
+		TestNotNull(FString::Printf(TEXT("Grabber %d has an assigned anchor"), Index + 1),
+			Cart->GetAnchorFor(Player));
+		Grabbers.Add(Player);
+	}
+	TestFalse(TEXT("Duplicate grab cannot consume another anchor"), Cart->TryGrabPlayer(Grabbers[0]));
+	TestTrue(TEXT("Server accepts clamped move intent for an assigned player"),
+		Cart->SetPlayerMoveInput(Grabbers[0], FVector2D(2.0f, 0.0f)));
+	TestTrue(TEXT("Client move intent cannot exceed unit magnitude"),
+		FMath::IsNearlyEqual(Grabbers[0]->CartMoveInput.Size(), 1.0f));
+	TestTrue(TEXT("Release returns the player's anchor"), Cart->ReleasePlayer(Grabbers[0]));
+	TestNull(TEXT("Release clears the player's Cart state"), Grabbers[0]->GrabbedCart);
+	TestNull(TEXT("Release removes the anchor assignment"), Cart->GetAnchorFor(Grabbers[0]));
+	TestTrue(TEXT("Released player can grab once again"), Cart->TryGrabPlayer(Grabbers[0]));
+	TestTrue(TEXT("Enabling preparation lock releases all existing grabbers"), Cart->SetPreparationLocked(true));
+	for (ACh4_PlayerCharacter* Player : Grabbers)
+	{
+		TestNull(TEXT("Preparation lock frees every occupied anchor"), Cart->GetAnchorFor(Player));
+		TestNull(TEXT("Preparation lock clears every Character Cart state"), Player->GrabbedCart);
+	}
+	TestTrue(TEXT("Cart can resume after the preparation lock test"), Cart->SetPreparationLocked(false));
+	const UFunction* CharacterGrabRPC = ACh4_PlayerCharacter::StaticClass()->FindFunctionByName(
+		TEXT("ServerRPC_RequestCartGrab"));
+	const UFunction* CharacterReleaseRPC = ACh4_PlayerCharacter::StaticClass()->FindFunctionByName(
+		TEXT("ServerRPC_RequestCartRelease"));
+	const UFunction* CharacterMoveRPC = ACh4_PlayerCharacter::StaticClass()->FindFunctionByName(
+		TEXT("ServerRPC_SetCartMoveInput"));
+	TestTrue(TEXT("Cart grab enters the server through the client-owned Character"),
+		CharacterGrabRPC && CharacterGrabRPC->HasAllFunctionFlags(FUNC_NetServer | FUNC_NetReliable));
+	TestTrue(TEXT("Cart release enters the server through the client-owned Character"),
+		CharacterReleaseRPC && CharacterReleaseRPC->HasAllFunctionFlags(FUNC_NetServer | FUNC_NetReliable));
+	TestTrue(TEXT("Per-frame Cart move intent uses an unreliable Character server RPC"),
+		CharacterMoveRPC && CharacterMoveRPC->HasAnyFunctionFlags(FUNC_NetServer)
+		&& !CharacterMoveRPC->HasAnyFunctionFlags(FUNC_NetReliable));
+	TestNull(TEXT("The shared Cart no longer exposes the invalid client-owned grab RPC"),
+		ACartBase::StaticClass()->FindFunctionByName(TEXT("ServerRequestGrab")));
 
 	const FTransform SoftCartTransform(FVector(1000.0f, 0.0f, 0.0f));
 	ACartBase* SoftCart = TestWorld.World->SpawnActorDeferred<ACartBase>(CartClass, SoftCartTransform);

@@ -27,6 +27,7 @@ void ALevelManager::BeginPlay()
     {
         // 1. 서버: 기본 인덱스 배열 생성 (0, 1, 2...)
         MiddleZoneOrder.Empty();
+
         for (int32 i = 0; i < MiddleRoadActors.Num(); ++i)
         {
             MiddleZoneOrder.Add(i);
@@ -38,6 +39,7 @@ void ALevelManager::BeginPlay()
             for (int32 Index = 0; Index < MiddleZoneOrder.Num(); ++Index)
             {
                 const int32 RandomIndex = FMath::RandRange(Index, MiddleZoneOrder.Num() - 1);
+
                 if (Index != RandomIndex)
                 {
                     MiddleZoneOrder.Swap(Index, RandomIndex);
@@ -76,6 +78,7 @@ void ALevelManager::ArrangePlacedZones()
     SetRootMobility(EndEnvironmentActor, EComponentMobility::Movable);
     SetRootMobility(EndPostProcessVolume, EComponentMobility::Movable);
     SetRootMobility(FinalDeliveryZoneActor, EComponentMobility::Movable);
+    SetRootMobility(EndLandscapeActor, EComponentMobility::Movable);
 
     // Middle Zone
     for (ARoadBase* Road : MiddleRoadActors)
@@ -93,10 +96,16 @@ void ALevelManager::ArrangePlacedZones()
         SetRootMobility(PostProcessVolume, EComponentMobility::Movable);
     }
 
+    for (ALandscape* Landscape : MiddleLandscapeActors)
+    {
+        SetRootMobility(Landscape, EComponentMobility::Movable);
+    }
+
     // Start Zone
     SetRootMobility(StartRoadActor, EComponentMobility::Movable);
     SetRootMobility(StartEnvironmentActor, EComponentMobility::Movable);
     SetRootMobility(StartPostProcessVolume, EComponentMobility::Movable);
+    SetRootMobility(StartLandscapeActor, EComponentMobility::Movable);
 
     float EnvironmentBaseZ = 0.0f;
 
@@ -117,17 +126,18 @@ void ALevelManager::ArrangePlacedZones()
 
         return;
     }
-    
-    
 
     // LevelManager 위치를 최초 기준점으로 사용
     FTransform NextAttachTransform = GetActorTransform();
 
+    // ============================================================
     // 1. End Zone
-    // End Road의 EndPoint를 LevelManager 위치에 맞춤
+    // ============================================================
+
     if (EndRoadActor && EndEnvironmentActor)
     {
         const FTransform OriginalEndRoadTransform = EndRoadActor->GetActorTransform();
+        const float OriginalRoadZ = EndRoadActor->GetActorLocation().Z;
 
         FTransform FinalDeliveryRelativeTransform;
 
@@ -136,19 +146,19 @@ void ALevelManager::ArrangePlacedZones()
             FinalDeliveryRelativeTransform = FinalDeliveryZoneActor->GetActorTransform().GetRelativeTransform(OriginalEndRoadTransform);
         }
 
-        // [추가] End PostProcessVolume의 Road 기준 상대 Transform 저장
         FTransform EndPostProcessRelativeTransform;
 
-        // [추가]
         if (EndPostProcessVolume)
         {
             EndPostProcessRelativeTransform = EndPostProcessVolume->GetActorTransform().GetRelativeTransform(OriginalEndRoadTransform);
         }
-        
+
         FTransform RoadEndRelative = EndRoadActor->GetEndPointTransform().GetRelativeTransform(EndRoadActor->GetActorTransform());
-        
-        
+
         FTransform FinalRoadTransform = RoadEndRelative.Inverse() * NextAttachTransform;
+
+        // Road가 이동한 Z 거리
+        const float RoadZDelta = FinalRoadTransform.GetLocation().Z - OriginalRoadZ;
 
         EndRoadActor->SetActorTransform(FinalRoadTransform);
 
@@ -160,34 +170,33 @@ void ALevelManager::ArrangePlacedZones()
         EnvironmentTransform.SetLocation(EnvironmentLocation);
         EndEnvironmentActor->SetActorTransform(EnvironmentTransform);
 
+        // Landscape는 Road가 이동한 만큼 Z축으로 이동
         if (EndLandscapeActor)
         {
-            if (EndLandscapeActor->GetRootComponent())
-            {
-                EndLandscapeActor->GetRootComponent()->SetMobility(EComponentMobility::Movable);
-            }
-            
-            FVector LandscapeLocation = FinalRoadTransform.GetLocation();
-            LandscapeLocation.Z = EndLandscapeActor->GetActorLocation().Z;
-            
-            FVector Origin, Extent;
+            FVector LandscapeLocation = EndLandscapeActor->GetActorLocation();
+            LandscapeLocation.Z += RoadZDelta;
+
+            FVector Origin;
+            FVector Extent;
+
             EndLandscapeActor->GetActorBounds(false, Origin, Extent);
-            LandscapeLocation.X -= Extent.X;
-            LandscapeLocation.Y -= Extent.Y;
+
+            LandscapeLocation.X = FinalRoadTransform.GetLocation().X - Extent.X;
+            LandscapeLocation.Y = FinalRoadTransform.GetLocation().Y - Extent.Y;
 
             FTransform LandscapeTransform = EndLandscapeActor->GetActorTransform();
             LandscapeTransform.SetLocation(LandscapeLocation);
             EndLandscapeActor->SetActorTransform(LandscapeTransform);
         }
-        
+
         // FinalDeliveryZone도 End Road와 동일한 상대 위치를 유지하며 이동
         if (FinalDeliveryZoneActor)
         {
             const FTransform FinalDeliveryTransform = FinalDeliveryRelativeTransform * FinalRoadTransform;
             FinalDeliveryZoneActor->SetActorTransform(FinalDeliveryTransform);
         }
-        
-        // [추가] End PostProcessVolume을 End Road와 동일한 상대 위치로 이동
+
+        // End PostProcessVolume도 End Road와 동일한 상대 위치를 유지하며 이동
         if (EndPostProcessVolume)
         {
             const FTransform FinalPostProcessTransform = EndPostProcessRelativeTransform * FinalRoadTransform;
@@ -198,8 +207,10 @@ void ALevelManager::ArrangePlacedZones()
         NextAttachTransform = EndRoadActor->GetStartPointTransform();
     }
 
+    // ============================================================
     // 2. Middle Zone
-    // 기존 Zone 순서를 유지하기 위해 뒤에서부터 배치
+    // ============================================================
+
     for (int32 Index = MiddleZoneOrder.Num() - 1; Index >= 0; --Index)
     {
         const int32 TargetIndex = MiddleZoneOrder[Index];
@@ -211,13 +222,14 @@ void ALevelManager::ArrangePlacedZones()
 
         ARoadBase* Road = MiddleRoadActors[TargetIndex];
         ALevelFloorBase* Environment = MiddleEnvironmentActors[TargetIndex];
-        
+
         ALandscape* Landscape = nullptr;
+
         if (MiddleLandscapeActors.IsValidIndex(TargetIndex))
         {
             Landscape = MiddleLandscapeActors[TargetIndex];
         }
-        
+
         AZonePostProcessVolume* PostProcessVolume = nullptr;
 
         if (MiddlePostProcessVolumes.IsValidIndex(TargetIndex))
@@ -229,18 +241,23 @@ void ALevelManager::ArrangePlacedZones()
         {
             continue;
         }
-        
+
         FTransform PostProcessRelativeTransform;
 
         if (PostProcessVolume)
         {
             PostProcessRelativeTransform = PostProcessVolume->GetActorTransform().GetRelativeTransform(Road->GetActorTransform());
         }
-        
+
         FTransform RoadEndRelative = Road->GetEndPointTransform().GetRelativeTransform(Road->GetActorTransform());
 
         FTransform FinalRoadTransform = RoadEndRelative.Inverse() * NextAttachTransform;
-        
+
+        // 배치 전 Road의 Z 위치 저장
+        const float OriginalRoadZ = Road->GetActorLocation().Z;
+
+        // Road가 이동한 Z 거리
+        const float RoadZDelta = FinalRoadTransform.GetLocation().Z - OriginalRoadZ;
 
         Road->SetActorTransform(FinalRoadTransform);
 
@@ -249,60 +266,60 @@ void ALevelManager::ArrangePlacedZones()
         EnvironmentLocation.Z = EnvironmentBaseZ;
 
         FTransform EnvironmentTransform = Environment->GetActorTransform();
-
         EnvironmentTransform.SetLocation(EnvironmentLocation);
-
         Environment->SetActorTransform(EnvironmentTransform);
-        
+
+        // Landscape는 Road가 이동한 만큼 Z축으로 이동
         if (Landscape)
         {
-            if (Landscape->GetRootComponent())
-            {
-                Landscape->GetRootComponent()->SetMobility(EComponentMobility::Movable);
-            }
-            
-            FVector LandscapeLocation = FinalRoadTransform.GetLocation();
-            LandscapeLocation.Z = Landscape->GetActorLocation().Z;
-            
-            FVector Origin, Extent;
+            FVector LandscapeLocation = Landscape->GetActorLocation();
+            LandscapeLocation.Z += RoadZDelta;
+
+            FVector Origin;
+            FVector Extent;
+
             Landscape->GetActorBounds(false, Origin, Extent);
-            LandscapeLocation.X -= Extent.X;
-            LandscapeLocation.Y -= Extent.Y;
+
+            LandscapeLocation.X = FinalRoadTransform.GetLocation().X - Extent.X;
+            LandscapeLocation.Y = FinalRoadTransform.GetLocation().Y - Extent.Y;
 
             FTransform LandscapeTransform = Landscape->GetActorTransform();
             LandscapeTransform.SetLocation(LandscapeLocation);
             Landscape->SetActorTransform(LandscapeTransform);
         }
-        
+
         if (PostProcessVolume)
         {
             const FTransform FinalPostProcessTransform = PostProcessRelativeTransform * FinalRoadTransform;
             PostProcessVolume->SetActorTransform(FinalPostProcessTransform);
         }
-        
+
         // 현재 Road의 StartPoint를 다음 연결 기준으로 사용
         NextAttachTransform = Road->GetStartPointTransform();
     }
 
+    // ============================================================
     // 3. Start Zone
+    // ============================================================
+
     if (StartRoadActor && StartEnvironmentActor)
     {
-        // [추가] Start PostProcessVolume의 Road 기준 상대 Transform 저장
         const FTransform OriginalStartRoadTransform = StartRoadActor->GetActorTransform();
+        const float OriginalRoadZ = StartRoadActor->GetActorLocation().Z;
 
-        // [추가]
         FTransform StartPostProcessRelativeTransform;
-        
-        // [추가]
+
         if (StartPostProcessVolume)
         {
             StartPostProcessRelativeTransform = StartPostProcessVolume->GetActorTransform().GetRelativeTransform(OriginalStartRoadTransform);
         }
-        
-        // Start Road의 EndPoint를 마지막 Middle의 StartPoint에 맞춤
+
         FTransform RoadEndRelative = StartRoadActor->GetEndPointTransform().GetRelativeTransform(StartRoadActor->GetActorTransform());
 
         FTransform FinalRoadTransform = RoadEndRelative.Inverse() * NextAttachTransform;
+
+        // Road가 이동한 Z 거리
+        const float RoadZDelta = FinalRoadTransform.GetLocation().Z - OriginalRoadZ;
 
         StartRoadActor->SetActorTransform(FinalRoadTransform);
 
@@ -311,39 +328,40 @@ void ALevelManager::ArrangePlacedZones()
         EnvironmentLocation.Z = EnvironmentBaseZ;
 
         FTransform EnvironmentTransform = StartEnvironmentActor->GetActorTransform();
-
         EnvironmentTransform.SetLocation(EnvironmentLocation);
-
         StartEnvironmentActor->SetActorTransform(EnvironmentTransform);
-        
+
+        // Landscape는 Road가 이동한 만큼 Z축으로 이동
         if (StartLandscapeActor)
         {
-            if (StartLandscapeActor->GetRootComponent())
-            {
-                StartLandscapeActor->GetRootComponent()->SetMobility(EComponentMobility::Movable);
-            }
-            
-            FVector LandscapeLocation = FinalRoadTransform.GetLocation();
-            LandscapeLocation.Z = StartLandscapeActor->GetActorLocation().Z;
-            
-            FVector Origin, Extent;
+            FVector LandscapeLocation = StartLandscapeActor->GetActorLocation();
+            LandscapeLocation.Z += RoadZDelta;
+
+            FVector Origin;
+            FVector Extent;
+
             StartLandscapeActor->GetActorBounds(false, Origin, Extent);
-            LandscapeLocation.X -= Extent.X;
-            LandscapeLocation.Y -= Extent.Y;
+
+            LandscapeLocation.X = FinalRoadTransform.GetLocation().X - Extent.X;
+            LandscapeLocation.Y = FinalRoadTransform.GetLocation().Y - Extent.Y;
 
             FTransform LandscapeTransform = StartLandscapeActor->GetActorTransform();
             LandscapeTransform.SetLocation(LandscapeLocation);
             StartLandscapeActor->SetActorTransform(LandscapeTransform);
         }
-        
-        //Start PostProcessVolume을 이동한 Road 기준으로 같이 이동
+
+        // Start PostProcessVolume을 이동한 Road 기준으로 같이 이동
         if (StartPostProcessVolume)
         {
             const FTransform FinalPostProcessTransform = StartPostProcessRelativeTransform * FinalRoadTransform;
             StartPostProcessVolume->SetActorTransform(FinalPostProcessTransform);
         }
     }
-    
+
+    // ============================================================
+    // Road Components를 다시 Static으로 변경
+    // ============================================================
+
     if (EndRoadActor)
     {
         EndRoadActor->SetRoadComponentsStatic();
@@ -361,7 +379,7 @@ void ALevelManager::ArrangePlacedZones()
     {
         StartRoadActor->SetRoadComponentsStatic();
     }
-    
+
     UE_LOG(
         LogTemp,
         Warning,
@@ -375,5 +393,5 @@ void ALevelManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 
     DOREPLIFETIME(ALevelManager, bUseAutoArrange);
     DOREPLIFETIME(ALevelManager, bShuffleMiddleZones);
-    DOREPLIFETIME(ALevelManager, MiddleZoneOrder); // 인덱스 배열 동기화
+    DOREPLIFETIME(ALevelManager, MiddleZoneOrder);
 }
