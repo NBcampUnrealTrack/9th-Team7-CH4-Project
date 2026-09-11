@@ -244,7 +244,7 @@ void UCh4HUDViewModel::SetMicActive(bool bActive)
 
 void UCh4HUDViewModel::TriggerMicPop()
 {
-	CurrentMicScale = 1.35f;
+	CurrentMicScale = 1.25f;
 	MicVelocity = 0.0f;
 	MicScale = FVector2D(CurrentMicScale, CurrentMicScale);
 	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(MicScale);
@@ -267,14 +267,14 @@ void UCh4HUDViewModel::UpdateMicAnim()
 {
 	const float DeltaTime = 0.016f;
 	const float SpringStiffness = 320.0f;
-	const float SpringDamping = 18.0f;
+	const float SpringDamping = 28.0f;
 
 	const float Displacement = CurrentMicScale - 1.0f;
 	const float Acceleration = (-SpringStiffness * Displacement) - (SpringDamping * MicVelocity);
 	MicVelocity += Acceleration * DeltaTime;
 	CurrentMicScale += MicVelocity * DeltaTime;
 
-	if (FMath::Abs(CurrentMicScale - 1.0f) < 0.005f && FMath::Abs(MicVelocity) < 0.02f)
+	if (FMath::Abs(CurrentMicScale - 1.0f) < 0.005f && FMath::Abs(MicVelocity) < 0.05f)
 	{
 		CurrentMicScale = 1.0f;
 		MicVelocity = 0.0f;
@@ -441,7 +441,7 @@ void UCh4HUDViewModel::UpdateTimerTick()
 	if (CurrentSeconds != LastDisplaySeconds)
 	{
 		LastDisplaySeconds = CurrentSeconds;
-		TimerText = FText::AsNumber(CurrentSeconds);
+		TimerText = FText::AsNumber(FMath::Max(0, CurrentSeconds));
 		bIsUrgent = (CurrentSeconds <= 10 && CurrentSeconds > 0);
 
 		// 색상: 10초 이하 위기 상태면 코랄 레드(#FF3B30), 평소에는 밝은 웜화이트(#FFFFF0)
