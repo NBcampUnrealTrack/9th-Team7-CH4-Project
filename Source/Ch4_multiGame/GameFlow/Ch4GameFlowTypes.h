@@ -69,11 +69,15 @@ struct CH4_MULTIGAME_API FCh4DeliveryScoreSummary
 	int32 DeliveredCargoScore = 0;
 };
 
-/** Read-only result snapshot derived from the replicated game-flow state. */
+/** Replicated result snapshot captured at the first valid Goal arrival. */
 USTRUCT(BlueprintType)
 struct CH4_MULTIGAME_API FCh4GameResult
 {
 	GENERATED_BODY()
+
+	/** True after the server has captured the first valid Goal result. */
+	UPROPERTY(BlueprintReadOnly, Category="Game Flow|Result")
+	bool bResultAvailable = false;
 
 	UPROPERTY(BlueprintReadOnly, Category="Game Flow|Result")
 	ECh4GamePhase GamePhase = ECh4GamePhase::Waiting;
@@ -96,6 +100,18 @@ struct CH4_MULTIGAME_API FCh4GameResult
 	/** Team Cargo score finalized only when the match successfully reaches the goal. */
 	UPROPERTY(BlueprintReadOnly, Category="Game Flow|Result")
 	int32 FinalCargoScore = 0;
+
+	/** Playing time from the successful RequestGameStart call to the first valid Goal arrival. */
+	UPROPERTY(BlueprintReadOnly, Category="Game Flow|Result", meta=(ClampMin="0.0", Units="s"))
+	float ClearTimeSeconds = 0.0f;
+
+	/** Cargo physically inside the reaching Cart at the Goal, sourced from its delivery summary. */
+	UPROPERTY(BlueprintReadOnly, Category="Game Flow|Result", meta=(ClampMin="0"))
+	int32 DeliveredCargoCount = 0;
+
+	/** Synchronized server-world timestamp at which the result display period ends. */
+	UPROPERTY(BlueprintReadOnly, Category="Game Flow|Result", meta=(Units="s"))
+	float ResultDisplayEndServerTime = 0.0f;
 
 	UPROPERTY(BlueprintReadOnly, Category="Game Flow|Result")
 	bool bGameEnded = false;

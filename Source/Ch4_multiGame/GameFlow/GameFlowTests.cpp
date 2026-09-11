@@ -143,6 +143,8 @@ bool FCh4GameFlowStateTransitionsTest::RunTest(const FString& Parameters)
 		const FCh4GameResult ClearResult = ClearFlow.GameState->GetGameResult();
 		TestTrue(TEXT("Clear result is complete"), ClearResult.bGameEnded);
 		TestTrue(TEXT("Clear result succeeds"), ClearResult.bSucceeded);
+		TestTrue(TEXT("Clear result is a captured Goal snapshot"), ClearResult.bResultAvailable);
+		TestEqual(TEXT("Providerless Goal snapshots current remaining Cargo"), ClearResult.DeliveredCargoCount, 13);
 		TestEqual(TEXT("Clear result records GoalReached"), static_cast<uint8>(ClearResult.GameEndReason), static_cast<uint8>(ECh4GameEndReason::GoalReached));
 		TestEqual(TEXT("Clear result contains lost cargo"), ClearResult.LostCargoCount, 7);
 		TestFalse(TEXT("Cargo changes are ignored after clear"), ClearFlow.GameMode->UpdateRemainingCargo(0));
@@ -305,10 +307,15 @@ bool FCh4GameFlowScoreTest::RunTest(const FString& Parameters)
 
 		TestTrue(TEXT("Scored flow initializes"), ScoredFlow.GameRule->RequestCargoInitialization(2));
 		TestTrue(TEXT("Scored flow starts"), ScoredFlow.GameRule->RequestGameStart());
+		ScoredFlow.GameMode->SetGameplayTimesForTesting(100.0f, 254.72f);
 		TestTrue(TEXT("Score provider goal clears"), ScoredFlow.GameRule->NotifyGoalReached(GoalActor));
 		TestEqual(TEXT("Cleared flow finalizes provided score"), ScoredFlow.GameState->GetFinalCargoScore(), 600);
 		TestEqual(TEXT("Game result contains finalized score"),
 			ScoredFlow.GameState->GetGameResult().FinalCargoScore, 600);
+		TestEqual(TEXT("Game result contains delivered Cargo snapshot"),
+			ScoredFlow.GameState->GetGameResult().DeliveredCargoCount, 2);
+		TestTrue(TEXT("Clear time starts at Playing rather than preparation"),
+			FMath::IsNearlyEqual(ScoredFlow.GameState->GetGameResult().ClearTimeSeconds, 154.72f, 0.001f));
 
 		ScoreSummary.DeliveredCargoScore = 900;
 		ScoredFlow.GameMode->SetDeliveryScoreSummaryForTesting(GoalActor, ScoreSummary);
@@ -337,9 +344,11 @@ bool FCh4GameFlowScoreTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Delayed empty failure preserves Playing initially"), InvalidSummaryFlow.GameState->GetCurrentGamePhase(), ECh4GamePhase::Playing);
 		InvalidSummary.DeliveredCargoCount = 1;
 		InvalidSummaryFlow.GameMode->SetDeliveryScoreSummaryForTesting(GoalActor, InvalidSummary);
-		TestTrue(TEXT("A sufficient delivered count can clear with a clamped zero score"), InvalidSummaryFlow.GameRule->NotifyGoalReached(GoalActor));
-		TestEqual(TEXT("Negative provided score clamps to zero"),
-			InvalidSummaryFlow.GameState->GetFinalCargoScore(), 0);
+		TestTrue(TEXT("A later duplicate reuses the frozen empty result"), InvalidSummaryFlow.GameRule->NotifyGoalReached(GoalActor));
+		TestEqual(TEXT("Duplicate delivery does not clear the pending empty result"),
+			InvalidSummaryFlow.GameState->GetCurrentGamePhase(), ECh4GamePhase::Playing);
+		TestEqual(TEXT("Negative provided score remains clamped in the frozen result"),
+			InvalidSummaryFlow.GameState->GetGameResult().FinalCargoScore, 0);
 	}
 
 	{
@@ -365,6 +374,10 @@ bool FCh4GameFlowScoreTest::RunTest(const FString& Parameters)
 		FinalScoreProperty && FinalScoreProperty->HasAnyPropertyFlags(CPF_Net));
 	TestNull(TEXT("FinalCargoScore has no Blueprint setter"),
 		ACh4_multiGameGameState::StaticClass()->FindFunctionByName(TEXT("SetFinalCargoScore")));
+	const FProperty* ResultSnapshotProperty =
+		FindFProperty<FProperty>(ACh4_multiGameGameState::StaticClass(), TEXT("GameResultSnapshot"));
+	TestTrue(TEXT("Goal result snapshot is replicated"),
+		ResultSnapshotProperty && ResultSnapshotProperty->HasAnyPropertyFlags(CPF_Net));
 	TestNotNull(TEXT("GameFlow target exposes an optional score summary function"),
 		UGameFlowTargetInterface::StaticClass()->FindFunctionByName(TEXT("GetDeliveryScoreSummary")));
 

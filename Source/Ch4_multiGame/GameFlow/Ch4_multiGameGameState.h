@@ -10,6 +10,7 @@
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCh4GamePhaseChangedSignature, ECh4GamePhase, NewGamePhase);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCh4CargoCountChangedSignature, int32, RemainingCargoCount, int32, InitialCargoCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCh4PreparationTimerUpdatedSignature, float, RemainingSeconds, float, TotalSeconds);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCh4GameResultChangedSignature, FCh4GameResult, NewResult);
 
 /**
  * Replicated data store for the authoritative game flow.
@@ -34,6 +35,10 @@ public:
 	/** Fired on the server and clients whenever the preparation timer is set or updated. */
 	UPROPERTY(BlueprintAssignable, Category="Game Flow|Events")
 	FCh4PreparationTimerUpdatedSignature OnPreparationTimerUpdated;
+
+	/** Fired once when a Goal snapshot arrives and again if its terminal phase metadata changes. */
+	UPROPERTY(BlueprintAssignable, Category="Game Flow|Events")
+	FCh4GameResultChangedSignature OnGameResultChanged;
 
 	UFUNCTION(BlueprintPure, Category="Game Flow")
 	ECh4GamePhase GetCurrentGamePhase() const { return CurrentGamePhase; }
@@ -73,9 +78,12 @@ public:
 	UFUNCTION(BlueprintPure, Category="Game Flow|Result")
 	int32 GetFinalCargoScore() const { return FinalCargoScore; }
 
-	/** Returns a read-only snapshot built from the replicated phase and cargo counts. */
+	/** Returns the frozen Goal snapshot when available, otherwise the current derived flow state. */
 	UFUNCTION(BlueprintPure, Category="Game Flow|Result")
 	FCh4GameResult GetGameResult() const;
+
+	UFUNCTION(BlueprintPure, Category="Game Flow|Result")
+	bool HasGameResultSnapshot() const { return GameResultSnapshot.bResultAvailable; }
 
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -87,6 +95,12 @@ private:
 		int32 NewFinalCargoScore);
 	bool SetCargoCounts(int32 NewInitialCargoCount, int32 NewRemainingCargoCount);
 	bool SetRemainingCargoCount(int32 NewRemainingCargoCount);
+	bool SetGoalResultSnapshot(
+		float ClearTimeSeconds,
+		int32 DeliveredCargoCount,
+		int32 DeliveredCargoScore,
+		bool bSucceeded,
+		float ResultDisplayEndServerTime);
 
 	UFUNCTION()
 	void OnRep_CurrentGamePhase();
@@ -96,6 +110,9 @@ private:
 
 	UFUNCTION()
 	void OnRep_PreparationEndTime();
+
+	UFUNCTION()
+	void OnRep_GameResultSnapshot();
 
 	void BroadcastCargoCountChanged();
 
@@ -125,4 +142,7 @@ private:
 
 	UPROPERTY(Replicated, BlueprintReadOnly, Category="Game Flow|Timer", meta=(AllowPrivateAccess="true"))
 	float PreparationTotalDuration = 60.0f;
+
+	UPROPERTY(ReplicatedUsing=OnRep_GameResultSnapshot, BlueprintReadOnly, Category="Game Flow|Result", meta=(AllowPrivateAccess="true"))
+	FCh4GameResult GameResultSnapshot;
 };

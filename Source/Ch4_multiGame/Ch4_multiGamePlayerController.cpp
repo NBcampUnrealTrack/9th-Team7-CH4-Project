@@ -15,6 +15,8 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Player/Ch4_multiGameGameInstance.h"
 #include "Lobby/Ch4_multiGameLobbyPlayerState.h"
+#include "GameFlow/Ch4_multiGameGameState.h"
+#include "UI/GameResult/Ch4GameResultWidget.h"
 #include "UI/PauseMenu/Ch4PauseMenuViewModel.h"
 #include "UI/HUD/Ch4HUDViewModel.h"
 #include "View/MVVMView.h"
@@ -254,16 +256,19 @@ void ACh4_multiGamePlayerController::BeginPlay()
 	}
 
 	SynchronizeCharacterSelectionForCurrentWorld();
+	BindGameResultState();
 }
 
 void ACh4_multiGamePlayerController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 	SynchronizeCharacterSelectionForCurrentWorld();
+	BindGameResultState();
 }
 
 void ACh4_multiGamePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	RemoveGameResultUI();
 	if (bPauseInputCaptured) HidePauseMenu();
 	if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
 	{
@@ -279,6 +284,98 @@ void ACh4_multiGamePlayerController::OnRep_PlayerState()
 {
 	Super::OnRep_PlayerState();
 	SynchronizeCharacterSelectionForCurrentWorld();
+	BindGameResultState();
+}
+
+void ACh4_multiGamePlayerController::AcknowledgePossession(APawn* InPawn)
+{
+	Super::AcknowledgePossession(InPawn);
+	BindGameResultState();
+}
+
+void ACh4_multiGamePlayerController::BindGameResultState()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	ACh4_multiGameGameState* CurrentGameState = GetWorld()
+		? GetWorld()->GetGameState<ACh4_multiGameGameState>() : nullptr;
+	if (ACh4_multiGameGameState* PreviousGameState = BoundResultGameState.Get())
+	{
+		PreviousGameState->OnGameResultChanged.RemoveDynamic(
+			this, &ACh4_multiGamePlayerController::HandleGameResultChanged);
+	}
+	BoundResultGameState = CurrentGameState;
+
+	if (!CurrentGameState)
+	{
+		RemoveGameResultUI();
+		return;
+	}
+
+	CurrentGameState->OnGameResultChanged.AddDynamic(
+		this, &ACh4_multiGamePlayerController::HandleGameResultChanged);
+	if (CurrentGameState->HasGameResultSnapshot())
+	{
+		HandleGameResultChanged(CurrentGameState->GetGameResult());
+	}
+}
+
+void ACh4_multiGamePlayerController::HandleGameResultChanged(const FCh4GameResult NewResult)
+{
+	if (NewResult.bResultAvailable)
+	{
+		ShowGameResult(NewResult);
+	}
+}
+
+void ACh4_multiGamePlayerController::ShowGameResult(const FCh4GameResult& Result)
+{
+	if (!IsLocalPlayerController() || !GameResultWidgetClass)
+	{
+		if (!GameResultWidgetClass)
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[GameResult] Result received but GameResultWidgetClass is not configured on %s"),
+				*GetClass()->GetName());
+		}
+		return;
+	}
+
+	if (!IsValid(GameResultWidget) || GameResultWidget->GetWorld() != GetWorld())
+	{
+		GameResultWidget = CreateWidget<UCh4GameResultWidget>(this, GameResultWidgetClass);
+	}
+	if (!GameResultWidget)
+	{
+		return;
+	}
+	if (!GameResultWidget->IsInViewport())
+	{
+		GameResultWidget->AddToPlayerScreen(50);
+	}
+
+	const ACh4_multiGameGameState* ResultGameState = BoundResultGameState.Get();
+	const float CurrentServerTimeSeconds = ResultGameState
+		? ResultGameState->GetServerWorldTimeSeconds() : 0.0f;
+	GameResultWidget->ApplyGameResult(Result, CurrentServerTimeSeconds);
+}
+
+void ACh4_multiGamePlayerController::RemoveGameResultUI()
+{
+	if (ACh4_multiGameGameState* PreviousGameState = BoundResultGameState.Get())
+	{
+		PreviousGameState->OnGameResultChanged.RemoveDynamic(
+			this, &ACh4_multiGamePlayerController::HandleGameResultChanged);
+	}
+	BoundResultGameState.Reset();
+	if (GameResultWidget)
+	{
+		GameResultWidget->RemoveFromParent();
+		GameResultWidget = nullptr;
+	}
 }
 
 void ACh4_multiGamePlayerController::RequestCharacterType(
