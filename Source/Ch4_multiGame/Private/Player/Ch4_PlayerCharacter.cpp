@@ -636,7 +636,12 @@ void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
     }
 
 	InterruptEmotionMontage();
-    	
+	
+	if (IsValid(JumpSound) == true)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, JumpSound, GetActorLocation());
+	}
+	
 	Jump();
 }
 
@@ -898,7 +903,7 @@ void ACh4_PlayerCharacter::OnRep_IsStunned()
 			PlayAnimMontage(StunMontage);
 		}
 
-		// 경직된 캐릭터를 직접 조작하는 클라이언트에서만 HitStop, CameraShake
+		// 경직된 캐릭터를 직접 조작하는 클라이언트에서만 HitStop, CameraShake, Sound
 		if (IsLocallyControlled())
 		{
 			StartHitStop();
@@ -909,6 +914,11 @@ void ACh4_PlayerCharacter::OnRep_IsStunned()
 				{
 					PC->ClientStartCameraShake(StunCameraShake);
 				}
+			}
+			
+			if (IsValid(StunSound) == true)
+			{
+				UGameplayStatics::PlaySoundAtLocation(this, StunSound, GetActorLocation());
 			}
 		}
 	}
