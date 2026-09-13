@@ -1,12 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/SceneComponent.h"
+#include "Components/ArrowComponent.h"
 #include "BounceComponent.generated.h"
 
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class CH4_MULTIGAME_API UBounceComponent : public USceneComponent
+class CH4_MULTIGAME_API UBounceComponent : public UArrowComponent
 {
 	GENERATED_BODY()
 
@@ -21,6 +21,14 @@ public:
 		int32 OtherBodyIndex,
 		bool bFromSweep,
 		const FHitResult& SweepResult);
+	
+	UFUNCTION()
+	void OnParentHit(
+		UPrimitiveComponent* HitComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		FVector NormalImpulse,
+		const FHitResult& Hit);
 
 protected:
 	virtual void BeginPlay() override;
@@ -39,6 +47,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bounce")
 	bool bUseComponentForwardVector = true;
 
+	
 	
 public:	
 	// 오버랩/충돌 시 외부(트리거 박스 등)에서 호출해 줄 튕기기 함수
