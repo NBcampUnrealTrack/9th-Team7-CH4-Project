@@ -17,11 +17,11 @@ public:
 	// [State] View Binding용 데이터 속성
 	// ----------------------------------------------------------------
 
-	// Settings 패널이 열려있는지 여부 (기본값 true로 하여 Settings 버튼이 활성화되도록 유지)
+	// Settings 패널이 열려있는지 여부 (기본값 false로 하여 PauseMenu 메인 카드가 기본 활성화)
 	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "PauseMenu|State")
-	bool bIsSettingsVisible = true;
+	bool bIsSettingsVisible = false;
 
-	// bIsSettingsVisible Setter (FieldNotify 변경 알림 포함)
+	// bIsSettingsVisible Setter (FieldNotify 변경 알림)
 	UFUNCTION(BlueprintCallable, Category = "PauseMenu|State")
 	void SetIsSettingsVisible(bool bNewValue);
 
@@ -37,9 +37,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PauseMenu|Actions")
 	void ResumeGame();
 	
-	// [Settings] 버튼 클릭 시 : 설정 패널 열고 닫기
+	// [Settings] 버튼 클릭 시 : 설정 패널 열기
 	UFUNCTION(BlueprintCallable, Category = "PauseMenu|Actions")
 	void OpenSettings();
+
+	// [Back / Close] 설정 패널 닫기 (메인 메뉴로 복귀)
+	UFUNCTION(BlueprintCallable, Category = "PauseMenu|Actions")
+	void CloseSettings();
 	
 	// [Main Menu] 버튼 클릭 시 : 메인 메뉴로 퇴장
 	UFUNCTION(BlueprintCallable, Category = "PauseMenu|Actions")

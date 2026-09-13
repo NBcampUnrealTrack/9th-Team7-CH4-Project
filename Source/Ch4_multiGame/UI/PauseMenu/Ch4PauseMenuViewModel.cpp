@@ -21,7 +21,7 @@ ACh4_multiGamePlayerController* UCh4PauseMenuViewModel::GetOwningCh4PlayerContro
 	return Controller && Controller->IsLocalController() ? Controller : nullptr;
 }
 
-// Settings 패널 표시 여부 변경 (FieldNotify 변경 알림 포함)
+// Settings 패널 표시 여부 변경 (FieldNotify 변경 알림)
 void UCh4PauseMenuViewModel::SetIsSettingsVisible(bool bNewValue)
 {
 	if (bIsSettingsVisible != bNewValue)
@@ -42,8 +42,12 @@ void UCh4PauseMenuViewModel::ResumeGame()
 
 void UCh4PauseMenuViewModel::OpenSettings()
 {
-	// Settings 패널 토글 (열려있으면 닫기, 닫혀있으면 열기)
-	SetIsSettingsVisible(!bIsSettingsVisible);
+	SetIsSettingsVisible(true);
+}
+
+void UCh4PauseMenuViewModel::CloseSettings()
+{
+	SetIsSettingsVisible(false);
 }
 
 void UCh4PauseMenuViewModel::ReturnToMainMenu()
