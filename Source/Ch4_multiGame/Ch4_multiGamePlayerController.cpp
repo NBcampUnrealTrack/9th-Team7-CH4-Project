@@ -18,10 +18,12 @@
 #include "GameFlow/Ch4_multiGameGameState.h"
 #include "UI/GameResult/Ch4GameResultWidget.h"
 #include "UI/PauseMenu/Ch4PauseMenuViewModel.h"
+#include "UI/PauseMenu/Ch4PauseMenuWidget.h"
 #include "UI/HUD/Ch4HUDViewModel.h"
 #include "View/MVVMView.h"
 #include "MVVMSubsystem.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/UnrealType.h"
 #include "Player/Ch4_multiGamePlayerState.h"
 
 namespace
@@ -639,8 +641,25 @@ void ACh4_multiGamePlayerController::TogglePauseMenu()
 	const double CurrentTime = FPlatformTime::Seconds();
 	if (CurrentTime - LastPauseToggleTime < 0.2) return;
 	LastPauseToggleTime = CurrentTime;
-	if (IsPauseMenuOpen()) HidePauseMenu();
-	else ShowPauseMenu();
+
+	if (IsPauseMenuOpen())
+	{
+		// 만약 PauseMenu 안에 Settings 창이 열려있는 상태라면, PauseMenu 전체를 닫지 않고 Settings 창만 먼저 닫음!
+		if (UCh4PauseMenuWidget* Ch4Pause = Cast<UCh4PauseMenuWidget>(PauseMenuWidget))
+		{
+			if (Ch4Pause->IsSettingsOpen())
+			{
+				Ch4Pause->CloseSettingsWindow();
+				return;
+			}
+		}
+
+		HidePauseMenu();
+	}
+	else
+	{
+		ShowPauseMenu();
+	}
 }
 
 bool ACh4_multiGamePlayerController::IsMoveInputIgnored() const
@@ -676,8 +695,24 @@ void ACh4_multiGamePlayerController::ShowPauseMenu()
 	PauseMenuWidget->SetVisibility(ESlateVisibility::Visible);
 	PauseMenuWidget->AddToViewport(100);
 
-	// Construct initializes MVVM. Bind one effective instance after construction,
-	// retaining dev's explicit binding refresh and Blueprint setter fallback.
+	// Construct initializes MVVM or local variables.
+	// If the widget created its own Ch4PauseMenuViewModel property in Construct, adopt it!
+	if (FObjectProperty* Prop = CastField<FObjectProperty>(PauseMenuWidget->GetClass()->FindPropertyByName(TEXT("Ch4PauseMenuViewModel"))))
+	{
+		if (UObject* WidgetVM = Prop->GetObjectPropertyValue_InContainer(PauseMenuWidget))
+		{
+			if (UCh4PauseMenuViewModel* CastVM = Cast<UCh4PauseMenuViewModel>(WidgetVM))
+			{
+				PauseMenuViewModel = CastVM;
+			}
+		}
+		else
+		{
+			Prop->SetObjectPropertyValue_InContainer(PauseMenuWidget, PauseMenuViewModel.Get());
+		}
+	}
+
+	// Bind one effective instance after construction, retaining dev's explicit binding refresh and Blueprint setter fallback.
 	UMVVMView* View = UMVVMSubsystem::GetViewFromUserWidget(PauseMenuWidget);
 	bool bViewModelBound = false;
 	if (View)
@@ -720,7 +755,7 @@ void ACh4_multiGamePlayerController::ShowPauseMenu()
 void ACh4_multiGamePlayerController::HidePauseMenu()
 {
 	if (!IsLocalPlayerController()) return;
-	
+
 	if (PauseMenuWidget && PauseMenuWidget->IsInViewport())
 	{
 		// 1. 화면에서 위젯 내리기
