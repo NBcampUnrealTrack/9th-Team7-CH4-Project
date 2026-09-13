@@ -365,6 +365,29 @@ void ACh4_multiGamePlayerController::ShowGameResult(const FCh4GameResult& Result
 	GameResultWidget->ApplyGameResult(Result, CurrentServerTimeSeconds);
 }
 
+void ACh4_multiGamePlayerController::TestGameResult(bool bSuccess)
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	const ACh4_multiGameGameState* ResultGameState = BoundResultGameState.Get();
+	const float CurrentTime = ResultGameState
+		? ResultGameState->GetServerWorldTimeSeconds()
+		: (GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f);
+
+	FCh4GameResult DummyResult;
+	DummyResult.bResultAvailable = true;
+	DummyResult.bSucceeded = bSuccess;
+	DummyResult.ClearTimeSeconds = 154.72f;
+	DummyResult.DeliveredCargoCount = bSuccess ? 3 : 0;
+	DummyResult.FinalCargoScore = bSuccess ? 1850 : 0;
+	DummyResult.ResultDisplayEndServerTime = CurrentTime + 10.0f;
+
+	ShowGameResult(DummyResult);
+}
+
 void ACh4_multiGamePlayerController::RemoveGameResultUI()
 {
 	if (ACh4_multiGameGameState* PreviousGameState = BoundResultGameState.Get())
