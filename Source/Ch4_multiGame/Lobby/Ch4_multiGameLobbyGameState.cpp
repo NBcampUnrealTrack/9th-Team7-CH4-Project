@@ -26,16 +26,18 @@ void ACh4_multiGameLobbyGameState::GetLifetimeReplicatedProps(TArray<FLifetimePr
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ACh4_multiGameLobbyGameState, CurrentPlayerCount);
+	DOREPLIFETIME(ACh4_multiGameLobbyGameState, ReadyPlayerCount);
 	DOREPLIFETIME(ACh4_multiGameLobbyGameState, MaxPlayerCount);
 }
 
-bool ACh4_multiGameLobbyGameState::SetPlayerCounts(
+bool ACh4_multiGameLobbyGameState::SetLobbyCounts(
 	const int32 NewCurrentPlayerCount,
+	const int32 NewReadyPlayerCount,
 	const int32 NewMaxPlayerCount)
 {
 	if (!HasAuthority())
 	{
-		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Lobby] Rejected a client-side player-count change"));
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[Lobby] Rejected a client-side lobby-count change"));
 		return false;
 	}
 
@@ -44,16 +46,31 @@ bool ACh4_multiGameLobbyGameState::SetPlayerCounts(
 		NewCurrentPlayerCount,
 		0,
 		ValidatedMaxPlayerCount);
+	const int32 ValidatedReadyPlayerCount = FMath::Clamp(
+		NewReadyPlayerCount,
+		0,
+		ValidatedCurrentPlayerCount);
+	const bool bPlayerCountChanged = CurrentPlayerCount != ValidatedCurrentPlayerCount
+		|| MaxPlayerCount != ValidatedMaxPlayerCount;
+	const bool bReadySummaryChanged = ReadyPlayerCount != ValidatedReadyPlayerCount
+		|| MaxPlayerCount != ValidatedMaxPlayerCount;
 
-	if (CurrentPlayerCount == ValidatedCurrentPlayerCount
-		&& MaxPlayerCount == ValidatedMaxPlayerCount)
+	if (!bPlayerCountChanged && !bReadySummaryChanged)
 	{
 		return false;
 	}
 
 	CurrentPlayerCount = ValidatedCurrentPlayerCount;
+	ReadyPlayerCount = ValidatedReadyPlayerCount;
 	MaxPlayerCount = ValidatedMaxPlayerCount;
-	BroadcastPlayerCountChanged();
+	if (bPlayerCountChanged)
+	{
+		BroadcastPlayerCountChanged();
+	}
+	if (bReadySummaryChanged)
+	{
+		BroadcastReadySummaryChanged();
+	}
 	ForceNetUpdate();
 	return true;
 }
@@ -68,9 +85,30 @@ void ACh4_multiGameLobbyGameState::OnRep_CurrentPlayerCount()
 	ShowClientDebugStatus();
 }
 
+void ACh4_multiGameLobbyGameState::OnRep_ReadyPlayerCount()
+{
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[Lobby] Replicated Ready Players: %d / %d"),
+		ReadyPlayerCount,
+		MaxPlayerCount);
+	BroadcastReadySummaryChanged();
+}
+
+void ACh4_multiGameLobbyGameState::OnRep_MaxPlayerCount()
+{
+	BroadcastPlayerCountChanged();
+	BroadcastReadySummaryChanged();
+	ShowClientDebugStatus();
+}
+
 void ACh4_multiGameLobbyGameState::BroadcastPlayerCountChanged()
 {
 	OnPlayerCountChanged.Broadcast(CurrentPlayerCount, MaxPlayerCount);
+}
+
+void ACh4_multiGameLobbyGameState::BroadcastReadySummaryChanged()
+{
+	OnReadySummaryChanged.Broadcast(ReadyPlayerCount, MaxPlayerCount);
 }
 
 void ACh4_multiGameLobbyGameState::ShowClientDebugStatus() const

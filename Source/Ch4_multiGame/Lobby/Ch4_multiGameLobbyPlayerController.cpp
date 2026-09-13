@@ -5,10 +5,13 @@
 #include "Ch4_multiGame.h"
 #include "EnhancedInputComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "Lobby/Ch4_multiGameLobbyGameMode.h"
+#include "Lobby/Ch4_multiGameLobbyGameState.h"
 #include "Lobby/Ch4_multiGameLobbyPlayerState.h"
+#include "UI/Lobby/Ch4LobbyReadyWidget.h"
 #include "UObject/ConstructorHelpers.h"
 
 ACh4_multiGameLobbyPlayerController::ACh4_multiGameLobbyPlayerController()
@@ -29,6 +32,186 @@ ACh4_multiGameLobbyPlayerController::ACh4_multiGameLobbyPlayerController()
 	if (ReadyAction.Succeeded())
 	{
 		LobbyReadyAction = ReadyAction.Object;
+	}
+}
+
+void ACh4_multiGameLobbyPlayerController::BeginPlay()
+{
+	Super::BeginPlay();
+	InitializeLobbyReadyUI();
+}
+
+void ACh4_multiGameLobbyPlayerController::EndPlay(
+	const EEndPlayReason::Type EndPlayReason)
+{
+	RemoveLobbyReadyUI();
+	Super::EndPlay(EndPlayReason);
+}
+
+void ACh4_multiGameLobbyPlayerController::OnPossess(APawn* InPawn)
+{
+	Super::OnPossess(InPawn);
+	InitializeLobbyReadyUI();
+}
+
+void ACh4_multiGameLobbyPlayerController::OnRep_PlayerState()
+{
+	Super::OnRep_PlayerState();
+	InitializeLobbyReadyUI();
+}
+
+void ACh4_multiGameLobbyPlayerController::AcknowledgePossession(APawn* InPawn)
+{
+	Super::AcknowledgePossession(InPawn);
+	InitializeLobbyReadyUI();
+}
+
+void ACh4_multiGameLobbyPlayerController::InitializeLobbyReadyUI()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	BindLobbyReadyState();
+	if (!LobbyReadyWidgetClass)
+	{
+		if (!bMissingLobbyReadyWidgetClassLogged)
+		{
+			bMissingLobbyReadyWidgetClassLogged = true;
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[LobbyReadyUI] LobbyReadyWidgetClass is not configured on %s"),
+				*GetClass()->GetName());
+		}
+		return;
+	}
+
+	if (!IsValid(LobbyReadyWidget) || LobbyReadyWidget->GetWorld() != GetWorld())
+	{
+		if (LobbyReadyWidget)
+		{
+			LobbyReadyWidget->RemoveFromParent();
+		}
+		LobbyReadyWidget = CreateWidget<UCh4LobbyReadyWidget>(this, LobbyReadyWidgetClass);
+	}
+	if (!LobbyReadyWidget)
+	{
+		return;
+	}
+	if (!LobbyReadyWidget->IsInViewport())
+	{
+		LobbyReadyWidget->AddToPlayerScreen(10);
+	}
+
+	RefreshLobbyReadyUI();
+}
+
+void ACh4_multiGameLobbyPlayerController::BindLobbyReadyState()
+{
+	ACh4_multiGameLobbyGameState* LobbyGameState = GetWorld()
+		? GetWorld()->GetGameState<ACh4_multiGameLobbyGameState>()
+		: nullptr;
+	if (BoundLobbyGameState.Get() != LobbyGameState)
+	{
+		if (ACh4_multiGameLobbyGameState* PreviousGameState = BoundLobbyGameState.Get())
+		{
+			PreviousGameState->OnReadySummaryChanged.RemoveDynamic(
+				this, &ACh4_multiGameLobbyPlayerController::HandleReadySummaryChanged);
+		}
+		BoundLobbyGameState = LobbyGameState;
+	}
+	if (LobbyGameState)
+	{
+		LobbyGameState->OnReadySummaryChanged.RemoveDynamic(
+			this, &ACh4_multiGameLobbyPlayerController::HandleReadySummaryChanged);
+		LobbyGameState->OnReadySummaryChanged.AddDynamic(
+			this, &ACh4_multiGameLobbyPlayerController::HandleReadySummaryChanged);
+	}
+
+	ACh4_multiGameLobbyPlayerState* LobbyPlayerState =
+		GetPlayerState<ACh4_multiGameLobbyPlayerState>();
+	if (BoundLobbyPlayerState.Get() != LobbyPlayerState)
+	{
+		if (ACh4_multiGameLobbyPlayerState* PreviousPlayerState = BoundLobbyPlayerState.Get())
+		{
+			PreviousPlayerState->OnReadyStateChanged.RemoveDynamic(
+				this, &ACh4_multiGameLobbyPlayerController::HandleLocalReadyStateChanged);
+		}
+		BoundLobbyPlayerState = LobbyPlayerState;
+	}
+	if (LobbyPlayerState)
+	{
+		LobbyPlayerState->OnReadyStateChanged.RemoveDynamic(
+			this, &ACh4_multiGameLobbyPlayerController::HandleLocalReadyStateChanged);
+		LobbyPlayerState->OnReadyStateChanged.AddDynamic(
+			this, &ACh4_multiGameLobbyPlayerController::HandleLocalReadyStateChanged);
+	}
+}
+
+void ACh4_multiGameLobbyPlayerController::RefreshLobbyReadyUI()
+{
+	if (!LobbyReadyWidget)
+	{
+		return;
+	}
+
+	const ACh4_multiGameLobbyGameState* LobbyGameState = BoundLobbyGameState.Get();
+	const ACh4_multiGameLobbyPlayerState* LobbyPlayerState = BoundLobbyPlayerState.Get();
+	if (!LobbyGameState || !LobbyPlayerState)
+	{
+		return;
+	}
+
+	LobbyReadyWidget->UpdateReadyStatus(
+		LobbyGameState->GetReadyPlayerCount(),
+		LobbyGameState->GetMaxPlayerCount(),
+		LobbyPlayerState->IsReady());
+}
+
+void ACh4_multiGameLobbyPlayerController::RemoveLobbyReadyUI()
+{
+	if (ACh4_multiGameLobbyGameState* LobbyGameState = BoundLobbyGameState.Get())
+	{
+		LobbyGameState->OnReadySummaryChanged.RemoveDynamic(
+			this, &ACh4_multiGameLobbyPlayerController::HandleReadySummaryChanged);
+	}
+	if (ACh4_multiGameLobbyPlayerState* LobbyPlayerState = BoundLobbyPlayerState.Get())
+	{
+		LobbyPlayerState->OnReadyStateChanged.RemoveDynamic(
+			this, &ACh4_multiGameLobbyPlayerController::HandleLocalReadyStateChanged);
+	}
+	BoundLobbyGameState.Reset();
+	BoundLobbyPlayerState.Reset();
+	if (LobbyReadyWidget)
+	{
+		LobbyReadyWidget->RemoveFromParent();
+		LobbyReadyWidget = nullptr;
+	}
+}
+
+void ACh4_multiGameLobbyPlayerController::HandleReadySummaryChanged(
+	const int32 ReadyPlayerCount,
+	const int32 MaxPlayerCount)
+{
+	const ACh4_multiGameLobbyPlayerState* LobbyPlayerState = BoundLobbyPlayerState.Get();
+	if (LobbyReadyWidget && LobbyPlayerState)
+	{
+		LobbyReadyWidget->UpdateReadyStatus(
+			ReadyPlayerCount,
+			MaxPlayerCount,
+			LobbyPlayerState->IsReady());
+	}
+}
+
+void ACh4_multiGameLobbyPlayerController::HandleLocalReadyStateChanged(const bool bIsReady)
+{
+	const ACh4_multiGameLobbyGameState* LobbyGameState = BoundLobbyGameState.Get();
+	if (LobbyReadyWidget && LobbyGameState)
+	{
+		LobbyReadyWidget->UpdateReadyStatus(
+			LobbyGameState->GetReadyPlayerCount(),
+			LobbyGameState->GetMaxPlayerCount(),
+			bIsReady);
 	}
 }
 
