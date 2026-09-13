@@ -17,12 +17,19 @@ void UBounceComponent::BeginPlay()
 	if (ParentCollision)
 	{
 		ParentCollision->OnComponentBeginOverlap.AddDynamic(this, &UBounceComponent::OnParentBeginOverlap);
+		ParentCollision->OnComponentHit.AddDynamic(this, &UBounceComponent::OnParentHit);
 	}
 }
 
 void UBounceComponent::OnParentBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
 	UE_LOG(LogTemp,Warning,TEXT("바운스 액터와 오버랩 발생"));
+	BounceActor(OtherActor, OtherComp);
+}
+
+void UBounceComponent::OnParentHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+{
+	UE_LOG(LogTemp, Warning, TEXT("바운스 벽과 Hit 발생"));
 	BounceActor(OtherActor, OtherComp);
 }
 
