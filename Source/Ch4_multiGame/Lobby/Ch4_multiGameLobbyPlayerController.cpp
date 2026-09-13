@@ -164,7 +164,7 @@ void ACh4_multiGameLobbyPlayerController::RefreshLobbyReadyUI()
 
 	LobbyReadyWidget->UpdateReadyStatus(
 		LobbyGameState->GetReadyPlayerCount(),
-		LobbyGameState->GetMaxPlayerCount(),
+		LobbyGameState->GetCurrentPlayerCount(),
 		LobbyPlayerState->IsReady());
 }
 
@@ -191,14 +191,14 @@ void ACh4_multiGameLobbyPlayerController::RemoveLobbyReadyUI()
 
 void ACh4_multiGameLobbyPlayerController::HandleReadySummaryChanged(
 	const int32 ReadyPlayerCount,
-	const int32 MaxPlayerCount)
+	const int32 CurrentPlayerCount)
 {
 	const ACh4_multiGameLobbyPlayerState* LobbyPlayerState = BoundLobbyPlayerState.Get();
 	if (LobbyReadyWidget && LobbyPlayerState)
 	{
 		LobbyReadyWidget->UpdateReadyStatus(
 			ReadyPlayerCount,
-			MaxPlayerCount,
+			CurrentPlayerCount,
 			LobbyPlayerState->IsReady());
 	}
 }
@@ -210,7 +210,7 @@ void ACh4_multiGameLobbyPlayerController::HandleLocalReadyStateChanged(const boo
 	{
 		LobbyReadyWidget->UpdateReadyStatus(
 			LobbyGameState->GetReadyPlayerCount(),
-			LobbyGameState->GetMaxPlayerCount(),
+			LobbyGameState->GetCurrentPlayerCount(),
 			bIsReady);
 	}
 }

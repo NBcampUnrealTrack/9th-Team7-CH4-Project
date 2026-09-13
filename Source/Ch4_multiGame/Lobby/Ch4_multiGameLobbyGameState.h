@@ -14,7 +14,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FCh4LobbyReadySummaryChangedSignature,
 	int32, ReadyPlayerCount,
-	int32, MaxPlayerCount);
+	int32, CurrentPlayerCount);
 
 /** Replicated player-count data for the IP-based test lobby. */
 UCLASS()
@@ -29,7 +29,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Lobby|Events")
 	FCh4LobbyPlayerCountChangedSignature OnPlayerCountChanged;
 
-	/** Fired when the authoritative number of Ready players or lobby capacity changes. */
+	/** Fired when the authoritative Ready or current-player count changes. */
 	UPROPERTY(BlueprintAssignable, Category="Lobby|Ready|Events")
 	FCh4LobbyReadySummaryChangedSignature OnReadySummaryChanged;
 

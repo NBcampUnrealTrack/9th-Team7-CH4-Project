@@ -18,15 +18,27 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FCh4LobbyReadyStatusContract::RunTest(const FString&)
 {
-	TestEqual(TEXT("Empty lobby Ready text"),
-		UCh4LobbyReadyWidget::FormatReadyStatus(0, 4).ToString(),
-		FString(TEXT("Ready 0/4")));
-	TestEqual(TEXT("Partial lobby Ready text"),
-		UCh4LobbyReadyWidget::FormatReadyStatus(2, 4).ToString(),
-		FString(TEXT("Ready 2/4")));
-	TestEqual(TEXT("Ready count is clamped to capacity"),
+	TestEqual(TEXT("Solo Not Ready text"),
+		UCh4LobbyReadyWidget::FormatReadyStatus(0, 1).ToString(),
+		FString(TEXT("Ready 0/1")));
+	TestEqual(TEXT("Solo Ready text"),
+		UCh4LobbyReadyWidget::FormatReadyStatus(1, 1).ToString(),
+		FString(TEXT("Ready 1/1")));
+	TestEqual(TEXT("One of two Ready text"),
+		UCh4LobbyReadyWidget::FormatReadyStatus(1, 2).ToString(),
+		FString(TEXT("Ready 1/2")));
+	TestEqual(TEXT("Two of three Ready text"),
+		UCh4LobbyReadyWidget::FormatReadyStatus(2, 3).ToString(),
+		FString(TEXT("Ready 2/3")));
+	TestEqual(TEXT("Three of four Ready text"),
+		UCh4LobbyReadyWidget::FormatReadyStatus(3, 4).ToString(),
+		FString(TEXT("Ready 3/4")));
+	TestEqual(TEXT("Ready count is clamped to current players"),
 		UCh4LobbyReadyWidget::FormatReadyStatus(8, 4).ToString(),
 		FString(TEXT("Ready 4/4")));
+	TestEqual(TEXT("Transient zero-player state is not displayed as zero over zero"),
+		UCh4LobbyReadyWidget::FormatReadyStatus(0, 0).ToString(),
+		FString(TEXT("Ready 0/1")));
 
 	const UCh4LobbyReadyWidget* WidgetDefaults = GetDefault<UCh4LobbyReadyWidget>();
 	TestTrue(TEXT("Local Ready uses green by default"),
@@ -62,18 +74,32 @@ bool FCh4LobbyReadyStatusContract::RunTest(const FString&)
 	bool bSuccess = TestNotNull(TEXT("Ready summary GameState"), State);
 	if (State)
 	{
-		bSuccess &= State->SetLobbyCounts(2, 0, 4);
-		TestEqual(TEXT("Server publishes zero Ready players"), State->GetReadyPlayerCount(), 0);
-		TestEqual(TEXT("Server publishes the configured maximum"), State->GetMaxPlayerCount(), 4);
+		bSuccess &= State->SetLobbyCounts(2, 1, 4);
+		TestEqual(TEXT("Initial two-player summary"),
+			UCh4LobbyReadyWidget::FormatReadyStatus(
+				State->GetReadyPlayerCount(), State->GetCurrentPlayerCount()).ToString(),
+			FString(TEXT("Ready 1/2")));
 
+		bSuccess &= State->SetLobbyCounts(3, 1, 4);
+		TestEqual(TEXT("Joining player increases the current-player denominator"),
+			UCh4LobbyReadyWidget::FormatReadyStatus(
+				State->GetReadyPlayerCount(), State->GetCurrentPlayerCount()).ToString(),
+			FString(TEXT("Ready 1/3")));
+
+		bSuccess &= State->SetLobbyCounts(3, 2, 4);
+		bSuccess &= State->SetLobbyCounts(2, 1, 4);
+		TestEqual(TEXT("Ready player leaving decreases both counts"),
+			UCh4LobbyReadyWidget::FormatReadyStatus(
+				State->GetReadyPlayerCount(), State->GetCurrentPlayerCount()).ToString(),
+			FString(TEXT("Ready 1/2")));
+
+		bSuccess &= State->SetLobbyCounts(3, 2, 4);
 		bSuccess &= State->SetLobbyCounts(2, 2, 4);
-		TestEqual(TEXT("Ready toggles update the authoritative summary"),
-			State->GetReadyPlayerCount(), 2);
-
-		bSuccess &= State->SetLobbyCounts(1, 1, 4);
-		TestEqual(TEXT("Disconnecting one Ready player decreases the summary"),
-			State->GetReadyPlayerCount(), 1);
-		TestEqual(TEXT("Disconnect does not change the HUD denominator"),
+		TestEqual(TEXT("Not Ready player leaving decreases only the denominator"),
+			UCh4LobbyReadyWidget::FormatReadyStatus(
+				State->GetReadyPlayerCount(), State->GetCurrentPlayerCount()).ToString(),
+			FString(TEXT("Ready 2/2")));
+		TestEqual(TEXT("Maximum lobby capacity remains unchanged"),
 			State->GetMaxPlayerCount(), 4);
 	}
 

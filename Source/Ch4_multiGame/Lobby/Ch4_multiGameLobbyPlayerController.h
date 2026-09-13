@@ -44,7 +44,7 @@ private:
 	void HandleReadyInput();
 
 	UFUNCTION()
-	void HandleReadySummaryChanged(int32 ReadyPlayerCount, int32 MaxPlayerCount);
+	void HandleReadySummaryChanged(int32 ReadyPlayerCount, int32 CurrentPlayerCount);
 
 	UFUNCTION()
 	void HandleLocalReadyStateChanged(bool bIsReady);

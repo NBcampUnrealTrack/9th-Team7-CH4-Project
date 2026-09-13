@@ -53,7 +53,7 @@ bool ACh4_multiGameLobbyGameState::SetLobbyCounts(
 	const bool bPlayerCountChanged = CurrentPlayerCount != ValidatedCurrentPlayerCount
 		|| MaxPlayerCount != ValidatedMaxPlayerCount;
 	const bool bReadySummaryChanged = ReadyPlayerCount != ValidatedReadyPlayerCount
-		|| MaxPlayerCount != ValidatedMaxPlayerCount;
+		|| CurrentPlayerCount != ValidatedCurrentPlayerCount;
 
 	if (!bPlayerCountChanged && !bReadySummaryChanged)
 	{
@@ -82,6 +82,7 @@ void ACh4_multiGameLobbyGameState::OnRep_CurrentPlayerCount()
 		CurrentPlayerCount,
 		MaxPlayerCount);
 	BroadcastPlayerCountChanged();
+	BroadcastReadySummaryChanged();
 	ShowClientDebugStatus();
 }
 
@@ -90,14 +91,13 @@ void ACh4_multiGameLobbyGameState::OnRep_ReadyPlayerCount()
 	UE_LOG(LogCh4_multiGame, Log,
 		TEXT("[Lobby] Replicated Ready Players: %d / %d"),
 		ReadyPlayerCount,
-		MaxPlayerCount);
+		CurrentPlayerCount);
 	BroadcastReadySummaryChanged();
 }
 
 void ACh4_multiGameLobbyGameState::OnRep_MaxPlayerCount()
 {
 	BroadcastPlayerCountChanged();
-	BroadcastReadySummaryChanged();
 	ShowClientDebugStatus();
 }
 
@@ -108,7 +108,7 @@ void ACh4_multiGameLobbyGameState::BroadcastPlayerCountChanged()
 
 void ACh4_multiGameLobbyGameState::BroadcastReadySummaryChanged()
 {
-	OnReadySummaryChanged.Broadcast(ReadyPlayerCount, MaxPlayerCount);
+	OnReadySummaryChanged.Broadcast(ReadyPlayerCount, CurrentPlayerCount);
 }
 
 void ACh4_multiGameLobbyGameState::ShowClientDebugStatus() const

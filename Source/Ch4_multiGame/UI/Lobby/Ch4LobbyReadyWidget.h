@@ -16,10 +16,10 @@ class CH4_MULTIGAME_API UCh4LobbyReadyWidget : public UUserWidget
 
 public:
 	/** Applies the replicated lobby Ready count and the owning player's Ready state. */
-	void UpdateReadyStatus(int32 ReadyCount, int32 MaxPlayerCount, bool bLocalPlayerReady);
+	void UpdateReadyStatus(int32 ReadyCount, int32 CurrentPlayerCount, bool bLocalPlayerReady);
 
 	/** Localization-friendly text formatter shared by presentation tests. */
-	static FText FormatReadyStatus(int32 ReadyCount, int32 MaxPlayerCount);
+	static FText FormatReadyStatus(int32 ReadyCount, int32 CurrentPlayerCount);
 
 	/** Returns the designer-configurable color for the local Ready state. */
 	FSlateColor GetStatusColor(bool bLocalPlayerReady) const;

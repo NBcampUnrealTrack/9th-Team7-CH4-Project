@@ -64,8 +64,8 @@ namespace Ch4LobbyPackagedTests
 						bObservedPartialReady = true;
 						Test->TestEqual(TEXT("Replicated Ready summary matches the authoritative player states"),
 							State->GetReadyPlayerCount(), ReadyPlayers);
-						Test->TestEqual(TEXT("Ready HUD denominator remains the configured lobby capacity"),
-							State->GetMaxPlayerCount(), 4);
+						Test->TestEqual(TEXT("Ready HUD denominator matches the current lobby population"),
+							State->GetCurrentPlayerCount(), ExpectedPlayers);
 						Test->AddInfo(TEXT("PARTIAL_READY_PASS: one player Ready, all players still in Lobby."));
 					}
 				}
