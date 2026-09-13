@@ -53,6 +53,8 @@ bool FCh4GameResultPresentationTest::RunTest(const FString&)
 	TestTrue(TEXT("Cargo count is required"), HasWidgetMetadata(TEXT("Text_CargoCount"), TEXT("BindWidget")));
 	TestTrue(TEXT("Total score is required"), HasWidgetMetadata(TEXT("Text_TotalScore"), TEXT("BindWidget")));
 	TestTrue(TEXT("Countdown is optional"), HasWidgetMetadata(TEXT("Text_Countdown"), TEXT("BindWidgetOptional")));
+	TestTrue(TEXT("Confirm button is optional"), HasWidgetMetadata(TEXT("Btn_Confirm"), TEXT("BindWidgetOptional")));
+	TestTrue(TEXT("FadeInAnim is optional"), HasWidgetMetadata(TEXT("FadeInAnim"), TEXT("BindWidgetAnimOptional")));
 
 	if (!GEngine)
 	{

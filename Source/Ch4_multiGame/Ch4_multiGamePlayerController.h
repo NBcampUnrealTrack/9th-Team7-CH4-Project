@@ -38,6 +38,10 @@ public:
 	UFUNCTION(Exec, BlueprintCallable, Category="Network|Debug")
 	void JoinHamachi(FString HostIPv4);
 
+	/** Development cheat: displays test game result UI in PIE. Usage: TestGameResult 1 (success) or TestGameResult 0 (failure) */
+	UFUNCTION(Exec, BlueprintCallable, Category="Development")
+	void TestGameResult(bool bSuccess = true);
+
 	/** Saves the local choice for travel and asks the server to update replicated PlayerState. */
 	UFUNCTION(BlueprintCallable, Category="Player|Character")
 	void RequestCharacterType(ECh4CharacterType CharacterType);

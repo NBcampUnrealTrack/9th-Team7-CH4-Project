@@ -2,10 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Styling/SlateColor.h"
 #include "GameFlow/Ch4GameFlowTypes.h"
 #include "Ch4GameResultWidget.generated.h"
 
+class UButton;
 class UTextBlock;
+class UWidgetAnimation;
 
 /**
  * C++ presentation base for WBP_GameResult.
@@ -26,7 +29,11 @@ public:
 	static int32 CalculateCountdownSeconds(float ResultDisplayEndServerTime, float CurrentServerTimeSeconds);
 
 protected:
+	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+
+	UFUNCTION()
+	void OnConfirmClicked();
 
 	UPROPERTY(meta=(BindWidget))
 	TObjectPtr<UTextBlock> Text_ResultTitle;
@@ -42,6 +49,18 @@ protected:
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_Countdown;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UButton> Btn_Confirm;
+
+	UPROPERTY(Transient, meta=(BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> FadeInAnim;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Result Appearance")
+	FSlateColor SuccessTitleColor = FSlateColor(FLinearColor(0.18f, 0.8f, 0.44f, 1.0f));
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Result Appearance")
+	FSlateColor FailureTitleColor = FSlateColor(FLinearColor(0.9f, 0.24f, 0.24f, 1.0f));
 
 private:
 	void UpdateCountdown();
