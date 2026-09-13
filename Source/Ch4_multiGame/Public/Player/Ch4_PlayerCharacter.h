@@ -76,6 +76,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Input")
 	class UInputAction* CartGrabAction;
 	
+	UPROPERTY(EditAnywhere, Category = "Input")
+	class UInputAction* ZoomAction;
+	
 	UPROPERTY(EditDefaultsOnly, Category="Anim")
 	TObjectPtr<class UAnimMontage> StunMontage;
 
@@ -109,6 +112,18 @@ public:
 	
 	UPROPERTY(Replicated)
 	bool bIsBraking = false;
+	
+	UPROPERTY(EditDefaultsOnly, Category="Sound")
+	TObjectPtr<class USoundBase> GrabSound;
+
+	UPROPERTY(EditDefaultsOnly, Category="Sound")
+	TObjectPtr<class USoundBase> GrabReleaseSound;
+	
+	UPROPERTY(EditDefaultsOnly, Category="Sound")
+	TObjectPtr<class USoundBase> JumpSound;
+	
+	UPROPERTY(EditDefaultsOnly, Category="Sound")
+	TObjectPtr<class USoundBase> StunSound;
 	
 	UPROPERTY(VisibleAnywhere, Category="Hat")
 	TObjectPtr<class UStaticMeshComponent> HatMeshComponent;
@@ -182,6 +197,8 @@ protected:
 	void InputActionEmote4(const struct FInputActionValue& Value);
 	void InputActionGrab(const struct FInputActionValue& Value);
 	void InputActionCartGrab(const struct FInputActionValue& Value);
+	void InputActionZoom(const struct FInputActionValue& Value);
+	
 	
 	// MovementMode가 변경될 때 호출
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
@@ -215,11 +232,11 @@ protected:
 	FTimerHandle StunTimerHandle;
 
 	// HitStop 지연 시간
-	UPROPERTY(EditDefaultsOnly, Category = "Stun")
+	UPROPERTY(EditDefaultsOnly, Category="Stun")
 	float HitStopTimeDilation = 0.1f;
 
 	// HitStop 지속 시간
-	UPROPERTY(EditDefaultsOnly, Category = "Stun")
+	UPROPERTY(EditDefaultsOnly, Category="Stun")
 	float HitStopDuration = 0.03f;
 
 	FTimerHandle HitStopTimerHandle;
@@ -251,9 +268,6 @@ protected:
 	
 	UPROPERTY(EditDefaultsOnly, Category="Grab")
 	FName GrabSocketName = TEXT("GrabSocket");
-	
-	// 그랩/릴리즈 몽타주 재생 중 여부 (입력 잠금용)
-	bool bIsGrabActionInProgress = false;
 	
 	UFUNCTION()
 	void OnRep_GrabbedComponent();
@@ -297,4 +311,12 @@ protected:
 
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastRPC_PlayGrabReleaseMontage();
+
+	UPROPERTY(EditAnywhere, Category="Zoom")
+	float MinZoom = 200.f;
+
+	UPROPERTY(EditAnywhere, Category="Zoom")
+	float MaxZoom = 600.f;
+	
+	float TargetArmLength = 300.0f;
 };

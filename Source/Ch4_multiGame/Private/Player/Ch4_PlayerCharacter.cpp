@@ -23,6 +23,7 @@
 #include "TimerManager.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "PhysicsEngine/PhysicsAsset.h"
+#include "Kismet/GameplayStatics.h"
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
@@ -30,7 +31,7 @@ ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 	
 	SpringArmComponent = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArmComponent"));
 	SpringArmComponent->SetupAttachment(RootComponent);
-	SpringArmComponent->TargetArmLength = 300.0f;
+	SpringArmComponent->TargetArmLength = TargetArmLength;
 	SpringArmComponent->bUsePawnControlRotation = true;
 	
 	CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("CameraComponent"));
@@ -294,6 +295,7 @@ void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		if (Emote4Action) EIC->BindAction(Emote4Action, ETriggerEvent::Started,   this, &ACh4_PlayerCharacter::InputActionEmote4);
 		if (GrabAction) EIC->BindAction(GrabAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionGrab);
 		if (CartGrabAction) EIC->BindAction(CartGrabAction, ETriggerEvent::Started, this, &ACh4_PlayerCharacter::InputActionCartGrab);
+		if (ZoomAction) EIC->BindAction(ZoomAction, ETriggerEvent::Triggered, this, &ACh4_PlayerCharacter::InputActionZoom);
 	}
 }
 
@@ -635,7 +637,12 @@ void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
     }
 
 	InterruptEmotionMontage();
-    	
+	
+	if (IsValid(JumpSound) == true)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, JumpSound, GetActorLocation());
+	}
+	
 	Jump();
 }
 
@@ -705,13 +712,20 @@ void ACh4_PlayerCharacter::InputActionGrab(const FInputActionValue& Value)
 	{
 		return;
 	}
-
-	if (bIsGrabActionInProgress)
+	
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance == nullptr)
+	{
+		return;
+	}
+	
+	const bool bGrabMontagePlaying = GrabMontage && AnimInstance->Montage_IsPlaying(GrabMontage);
+	const bool bReleaseMontagePlaying = GrabReleaseMontage && AnimInstance->Montage_IsPlaying(GrabReleaseMontage);
+	
+	if (bGrabMontagePlaying || bReleaseMontagePlaying)
 	{
 		return; // 몽타주 재생 중엔 입력 무시
 	}
-	
-	bIsGrabActionInProgress = true;
 	
 	if (GrabbedComponent != nullptr)
 	{
@@ -765,6 +779,18 @@ void ACh4_PlayerCharacter::InputActionCartGrab(const struct FInputActionValue& V
 			}
 		}
 	}
+}
+
+void ACh4_PlayerCharacter::InputActionZoom(const struct FInputActionValue& Value)
+{
+	if (Controller == nullptr)
+	{
+		return;
+	}
+	
+	const float ScrollValue = Value.Get<float>() * 10.0f;
+
+	SpringArmComponent->TargetArmLength = FMath::Clamp(SpringArmComponent->TargetArmLength - ScrollValue,	MinZoom, MaxZoom);
 }
 
 void ACh4_PlayerCharacter::ServerRPC_RequestCartGrab_Implementation(ACartBase* TargetCart)
@@ -890,7 +916,7 @@ void ACh4_PlayerCharacter::OnRep_IsStunned()
 			PlayAnimMontage(StunMontage);
 		}
 
-		// 경직된 캐릭터를 직접 조작하는 클라이언트에서만 HitStop, CameraShake
+		// 경직된 캐릭터를 직접 조작하는 클라이언트에서만 HitStop, CameraShake, Sound
 		if (IsLocallyControlled())
 		{
 			StartHitStop();
@@ -901,6 +927,11 @@ void ACh4_PlayerCharacter::OnRep_IsStunned()
 				{
 					PC->ClientStartCameraShake(StunCameraShake);
 				}
+			}
+			
+			if (IsValid(StunSound) == true)
+			{
+				UGameplayStatics::PlaySoundAtLocation(this, StunSound, GetActorLocation());
 			}
 		}
 	}
@@ -1079,8 +1110,6 @@ void ACh4_PlayerCharacter::BeginGrabDetection()
 		return; // 서버 또는 본인 조종 클라이언트만 판정
 	}
 
-	bIsGrabActionInProgress = false;
-
 	if (GrabbedComponent != nullptr || GrabBoxComponent == nullptr)
 	{
 		return;
@@ -1108,7 +1137,6 @@ void ACh4_PlayerCharacter::BeginGrabDetection()
 
 void ACh4_PlayerCharacter::EndGrabDetection()
 {
-	bIsGrabActionInProgress = false;
 
 	if (GrabBoxComponent == nullptr)
 	{
@@ -1168,11 +1196,15 @@ void ACh4_PlayerCharacter::MulticastRPC_AttachGrab_Implementation(UPrimitiveComp
 
 	TargetComponent->SetSimulatePhysics(false);
 	TargetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
 	TargetComponent->AttachToComponent(
 	   GetMesh(),
 	   FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 	   GrabSocketName);
+	
+	if (IsValid(GrabSound) == true)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, GrabSound, GetActorLocation());
+	}
 }
 
 void ACh4_PlayerCharacter::ServerRPC_ReleaseGrab_Implementation()
@@ -1188,9 +1220,19 @@ void ACh4_PlayerCharacter::ServerRPC_ReleaseGrab_Implementation()
 
 void ACh4_PlayerCharacter::MulticastRPC_ReleaseGrab_Implementation(UPrimitiveComponent* TargetComponent)
 {
+	if (TargetComponent == nullptr)
+	{
+		return;
+	}
+	
 	TargetComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
 	TargetComponent->SetSimulatePhysics(true);
 	TargetComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	
+	if (IsValid(GrabReleaseSound) == true)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, GrabReleaseSound, GetActorLocation());
+	}
 }
 
 void ACh4_PlayerCharacter::ServerRPC_PlayGrabMontage_Implementation()
@@ -1212,8 +1254,6 @@ void ACh4_PlayerCharacter::OnGrabReleaseNotify()
 	{
 		return;
 	}
-
-	bIsGrabActionInProgress = false;
 	
 	if (GrabbedComponent != nullptr)
 	{

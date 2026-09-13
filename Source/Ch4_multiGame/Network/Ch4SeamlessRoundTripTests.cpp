@@ -86,7 +86,7 @@ public:
 				auto* Flow = World->GetGameState<ACh4_multiGameGameState>();
 				if (!Rule || !Flow) return false;
 				Test->TestEqual(TEXT("New gameplay begins in Waiting"), Flow->GetCurrentGamePhase(), ECh4GamePhase::Waiting);
-				Rule->ReturnToLobbyDelaySeconds = 2.0f;
+				Rule->SetResultDisplayDurationForTesting(2.0f);
 				if (!Test->TestTrue(TEXT("Test fixture initializes one Cargo"), Rule->RequestCargoInitialization(1))) return true;
 				if (!Test->TestTrue(TEXT("Test fixture enters Playing through existing rules"), Rule->RequestGameStart())) return true;
 				bStartedTestMatch = true;

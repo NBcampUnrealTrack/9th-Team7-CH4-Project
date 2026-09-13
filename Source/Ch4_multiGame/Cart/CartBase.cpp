@@ -447,6 +447,7 @@ void ACartBase::DrawCartPhysicsDebug() const
 #endif
 }
 
+
 void ACartBase::ApplyPlayerForces(float DeltaTime)
 {
     if (!CartMesh)
@@ -470,21 +471,37 @@ void ACartBase::ApplyPlayerForces(float DeltaTime)
             continue;   // 잡고 있지 않으면 힘을 줄 수 없다.
         }
 
-        // 캐릭터가 보는 방향 기준. BP 버전과 동일하게.
+        // 캐릭터가 보는 방향 기준.
         const FVector Forward = Player->GetActorForwardVector();
         const FVector Right = Player->GetActorRightVector();
 
-        FVector Force = (Forward * Input.Y + Right * Input.X) * PushForce;
-
-        // 손잡이 쪽(앵커 0, 1)에서 뒤로 당기면 브레이크로 동작한다.
+        // 앵커 위치마다 역할이 다르다.
         const int32 AnchorIndex = AnchorOccupants.IndexOfByKey(Player);
-        if (Input.Y < 0.0f && AnchorIndex <= 1)
+
+        float ForwardScale = 1.0f;
+        float SideScale = 1.0f;
+
+        if (AnchorIndex <= 1)                             // 손잡이: 추진
         {
-            const FVector Velocity = CartMesh->GetPhysicsLinearVelocity();
-            Force = -Velocity.GetSafeNormal() * BrakeForce;
+            ForwardScale = HandleForwardScale;
+            SideScale = -HandleSideScale;
+        }
+        else if (AnchorIndex == 2 || AnchorIndex == 4)    // 중간 사이드: 뒷바퀴 쪽
+        {
+            ForwardScale = MidForwardScale;
+            SideScale = MidSideScale;
+        }
+        else                                              // 앞 사이드: 방향 전환
+        {
+            ForwardScale = FrontForwardScale;
+            SideScale = FrontSideScale;
         }
 
-        CartMesh->AddForce(Force);
+        const FVector Force = (Forward * Input.Y * ForwardScale
+                             + Right * Input.X * SideScale) * PushForce;
+
+        // 잡은 앵커 위치에 힘을 준다. 위치에 따라 회전이 생긴다.
+        CartMesh->AddForceAtLocation(Force, Anchor->GetComponentLocation());
     }
 }
 

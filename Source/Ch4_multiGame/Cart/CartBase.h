@@ -65,13 +65,36 @@ protected:
 
     UPROPERTY(EditAnywhere, Category="Cart|Grip")
     float GripRear = -1500.0f;
-
+    
+    
     // ── 조작 ──
     UPROPERTY(EditAnywhere, Category="Cart|Push")
     float PushForce = 30000.0f;
 
     UPROPERTY(EditAnywhere, Category="Cart|Push")
     float BrakeForce = 3900.0f;
+
+    // ── 앵커별 힘 배율 ──
+    /** 손잡이(앵커 0, 1). 주 추진 담당이라 앞뒤가 세다. */
+    UPROPERTY(EditAnywhere, Category="Cart|Push|Anchor Scale")
+    float HandleForwardScale = 1.5f;
+
+    UPROPERTY(EditAnywhere, Category="Cart|Push|Anchor Scale")
+    float HandleSideScale = 0.3f;
+
+    /** 중간 사이드(앵커 3, 5). 뒷바퀴 근처라 밀면 뒤가 밀린다. */
+    UPROPERTY(EditAnywhere, Category="Cart|Push|Anchor Scale")
+    float MidForwardScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, Category="Cart|Push|Anchor Scale")
+    float MidSideScale = 0.3f;
+
+    /** 앞 사이드(앵커 4, 6). 지렛대가 길어 방향 전환이 잘 된다. */
+    UPROPERTY(EditAnywhere, Category="Cart|Push|Anchor Scale")
+    float FrontForwardScale = 1.5f;
+
+    UPROPERTY(EditAnywhere, Category="Cart|Push|Anchor Scale")
+    float FrontSideScale = 0.3f;
 
     UPROPERTY(EditAnywhere, Category="Cart|Grab")
     float GrabDistance = 150.0f;
