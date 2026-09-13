@@ -64,9 +64,15 @@ private:
 #endif
 
 	class ACh4_multiGameLobbyGameState* GetLobbyGameState() const;
-	void UpdateLobbyPlayerCount(int32 NewPlayerCount);
+	void UpdateLobbyCounts(
+		int32 NewPlayerCount,
+		const class ACh4_multiGameLobbyPlayerState* ExcludedPlayerState = nullptr);
+	void HandleDeferredLobbyRosterChange();
 	void CheckAllPlayersReady();
-	void GetReadyPlayerCounts(int32& OutReadyPlayers, int32& OutTotalPlayers) const;
+	void GetReadyPlayerCounts(
+		int32& OutReadyPlayers,
+		int32& OutTotalPlayers,
+		const class ACh4_multiGameLobbyPlayerState* ExcludedPlayerState = nullptr) const;
 	static int32 ClampMinimumPlayersToStart(int32 MinimumPlayers, int32 LobbyCapacity);
 	static bool CanStartLobbyTravel(
 		int32 ReadyPlayers,

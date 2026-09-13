@@ -136,7 +136,7 @@ void ACh4_multiGameLobbyGameMode::InitGame(
 void ACh4_multiGameLobbyGameMode::InitGameState()
 {
 	Super::InitGameState();
-	UpdateLobbyPlayerCount(GetNumPlayers());
+	UpdateLobbyCounts(GetNumPlayers());
 }
 
 void ACh4_multiGameLobbyGameMode::InitSeamlessTravelPlayer(AController* NewController)
@@ -147,7 +147,7 @@ void ACh4_multiGameLobbyGameMode::InitSeamlessTravelPlayer(AController* NewContr
 		// A returning player keeps their selection, including duplicates, but must Ready again.
 		State->SetReadyState(false);
 		AssignCharacterSlot(NewController, false);
-		UpdateLobbyPlayerCount(GetNumPlayers());
+		UpdateLobbyCounts(GetNumPlayers());
 		UE_LOG(LogCh4_multiGame, Log, TEXT("[SteamTravel] Lobby player initialized: Controller=%s Character=%s Ready=false"),
 			*GetNameSafe(NewController), *UEnum::GetValueAsString(State->GetCharacterType()));
 	}
@@ -235,7 +235,7 @@ void ACh4_multiGameLobbyGameMode::PostLogin(APlayerController* NewPlayer)
 			TWeakObjectPtr<AController>(NewPlayer));
 	}
 
-	UpdateLobbyPlayerCount(GetNumPlayers());
+	UpdateLobbyCounts(GetNumPlayers());
 	const FString PlayerLabel = GetPlayerLogLabel(NewPlayer);
 	const FString PawnLabel = GetNameSafe(NewPlayer->GetPawn());
 	UE_LOG(LogCh4_multiGame, Log,
@@ -258,6 +258,8 @@ void ACh4_multiGameLobbyGameMode::Logout(AController* Exiting)
 {
 	const FString PlayerLabel = GetPlayerLogLabel(Exiting);
 	const bool bWasPlayerController = IsValid(Cast<APlayerController>(Exiting));
+	const ACh4_multiGameLobbyPlayerState* ExitingLobbyPlayerState =
+		Exiting ? Exiting->GetPlayerState<ACh4_multiGameLobbyPlayerState>() : nullptr;
 	const int32 ReleasedCharacterSlot = HasAuthority() && bWasPlayerController
 		? ReleaseCharacterSlot(Exiting)
 		: INDEX_NONE;
@@ -272,7 +274,7 @@ void ACh4_multiGameLobbyGameMode::Logout(AController* Exiting)
 		return;
 	}
 
-	UpdateLobbyPlayerCount(RemainingPlayerCount);
+	UpdateLobbyCounts(RemainingPlayerCount, ExitingLobbyPlayerState);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Player Left: %s"), *PlayerLabel);
 	if (ReleasedCharacterSlot != INDEX_NONE)
 	{
@@ -290,13 +292,13 @@ void ACh4_multiGameLobbyGameMode::Logout(AController* Exiting)
 		FColor::Yellow,
 		10.0f);
 
-	// PlayerArray cleanup finishes after Logout. Recheck on the next event-loop turn
-	// so a departing non-ready player cannot remain in the Ready count.
+	// PlayerArray cleanup finishes after Logout. Recompute both replicated counts on
+	// the next event-loop turn before evaluating the existing all-Ready travel rule.
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimerForNextTick(
 			this,
-			&ACh4_multiGameLobbyGameMode::CheckAllPlayersReady);
+			&ACh4_multiGameLobbyGameMode::HandleDeferredLobbyRosterChange);
 	}
 }
 
@@ -330,6 +332,7 @@ void ACh4_multiGameLobbyGameMode::HandlePlayerReady(APlayerController* Requestin
 		TEXT("[Lobby] Player %s: %s"),
 		bNewReadyState ? TEXT("Ready") : TEXT("Not Ready"),
 		*GetPlayerLogLabel(RequestingPlayer));
+	UpdateLobbyCounts(GetNumPlayers());
 	CheckAllPlayersReady();
 }
 
@@ -338,17 +341,36 @@ ACh4_multiGameLobbyGameState* ACh4_multiGameLobbyGameMode::GetLobbyGameState() c
 	return GetWorld() ? GetWorld()->GetGameState<ACh4_multiGameLobbyGameState>() : nullptr;
 }
 
-void ACh4_multiGameLobbyGameMode::UpdateLobbyPlayerCount(const int32 NewPlayerCount)
+void ACh4_multiGameLobbyGameMode::UpdateLobbyCounts(
+	const int32 NewPlayerCount,
+	const ACh4_multiGameLobbyPlayerState* ExcludedPlayerState)
 {
 	if (ACh4_multiGameLobbyGameState* LobbyGameState = GetLobbyGameState())
 	{
-		LobbyGameState->SetPlayerCounts(NewPlayerCount, MaxLobbyPlayers);
+		int32 ReadyPlayers = 0;
+		int32 TotalPlayers = 0;
+		GetReadyPlayerCounts(ReadyPlayers, TotalPlayers, ExcludedPlayerState);
+		LobbyGameState->SetLobbyCounts(
+			NewPlayerCount,
+			FMath::Min(ReadyPlayers, TotalPlayers),
+			MaxLobbyPlayers);
 	}
 	else
 	{
 		UE_LOG(LogCh4_multiGame, Error,
 			TEXT("[Lobby] ACh4_multiGameLobbyGameState is not active. Check the Lobby GameMode assignment."));
 	}
+}
+
+void ACh4_multiGameLobbyGameMode::HandleDeferredLobbyRosterChange()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	UpdateLobbyCounts(GetNumPlayers());
+	CheckAllPlayersReady();
 }
 
 void ACh4_multiGameLobbyGameMode::CheckAllPlayersReady()
@@ -572,7 +594,8 @@ int32 ACh4_multiGameLobbyGameMode::FindAssignedCharacterSlot(AController* Contro
 
 void ACh4_multiGameLobbyGameMode::GetReadyPlayerCounts(
 	int32& OutReadyPlayers,
-	int32& OutTotalPlayers) const
+	int32& OutTotalPlayers,
+	const ACh4_multiGameLobbyPlayerState* ExcludedPlayerState) const
 {
 	OutReadyPlayers = 0;
 	OutTotalPlayers = 0;
@@ -587,7 +610,9 @@ void ACh4_multiGameLobbyGameMode::GetReadyPlayerCounts(
 	{
 		const ACh4_multiGameLobbyPlayerState* LobbyPlayerState =
 			Cast<ACh4_multiGameLobbyPlayerState>(PlayerState);
-		if (!IsValid(LobbyPlayerState) || LobbyPlayerState->IsInactive())
+		if (!IsValid(LobbyPlayerState)
+			|| LobbyPlayerState == ExcludedPlayerState
+			|| LobbyPlayerState->IsInactive())
 		{
 			continue;
 		}
