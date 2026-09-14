@@ -3,7 +3,6 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/DirectionalLightComponent.h"
-#include "Components/SkyLightComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/TextureCube.h"
 #include "Engine/DataTable.h"
@@ -24,13 +23,16 @@ ACh4_CharacterPreviewStudio::ACh4_CharacterPreviewStudio()
 	StudioRoot = CreateDefaultSubobject<USceneComponent>(TEXT("StudioRoot"));
 	RootComponent = StudioRoot;
 
-	// 2. Preview Mannequin Mesh
+	// 2. Preview Mannequin Mesh (스튜디오 전용 라이팅 채널 1로 격리)
 	PreviewMeshComponent = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("PreviewMeshComponent"));
 	PreviewMeshComponent->SetupAttachment(StudioRoot);
 	PreviewMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	PreviewMeshComponent->SetCastShadow(false);
 	PreviewMeshComponent->SetGenerateOverlapEvents(false);
 	PreviewMeshComponent->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	PreviewMeshComponent->LightingChannels.bChannel0 = false;
+	PreviewMeshComponent->LightingChannels.bChannel1 = true;
+	PreviewMeshComponent->LightingChannels.bChannel2 = false;
 
 	// 3. Hat Component
 	HatMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HatMeshComponent"));
@@ -38,6 +40,9 @@ ACh4_CharacterPreviewStudio::ACh4_CharacterPreviewStudio()
 	HatMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	HatMeshComponent->SetCastShadow(false);
 	HatMeshComponent->ComponentTags.Add(FName(TEXT("Headwear")));
+	HatMeshComponent->LightingChannels.bChannel0 = false;
+	HatMeshComponent->LightingChannels.bChannel1 = true;
+	HatMeshComponent->LightingChannels.bChannel2 = false;
 
 	// 4. Backdrop Component (Clean Studio Background)
 	BackdropMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BackdropMeshComponent"));
@@ -47,6 +52,9 @@ ACh4_CharacterPreviewStudio::ACh4_CharacterPreviewStudio()
 	BackdropMeshComponent->SetRelativeScale3D(FVector(40.0f, 40.0f, 1.0f));
 	BackdropMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	BackdropMeshComponent->SetCastShadow(false);
+	BackdropMeshComponent->LightingChannels.bChannel0 = false;
+	BackdropMeshComponent->LightingChannels.bChannel1 = true;
+	BackdropMeshComponent->LightingChannels.bChannel2 = false;
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneFinder(TEXT("/Engine/BasicShapes/Plane.Plane"));
 	if (PlaneFinder.Succeeded())
@@ -109,13 +117,16 @@ ACh4_CharacterPreviewStudio::ACh4_CharacterPreviewStudio()
 	CaptureComponent->ShowOnlyComponents.Add(HatMeshComponent);
 	CaptureComponent->ShowOnlyComponents.Add(BackdropMeshComponent);
 
-	// 5. 3-Point Shadowless Studio Lighting (화사하고 부드러운 스튜디오 조명)
+	// 5. 3-Point Studio Lighting (인게임 월드에 빛 누출이 없도록 Channel 1 전용으로 격리)
 	KeyLightComponent = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("KeyLightComponent"));
 	KeyLightComponent->SetupAttachment(StudioRoot);
 	KeyLightComponent->SetRelativeRotation(FRotator(-15.0f, 150.0f, 0.0f));
 	KeyLightComponent->SetIntensity(3.2f);
 	KeyLightComponent->SetLightColor(FLinearColor(1.0f, 0.98f, 0.95f));
 	KeyLightComponent->SetCastShadows(false);
+	KeyLightComponent->LightingChannels.bChannel0 = false;
+	KeyLightComponent->LightingChannels.bChannel1 = true;
+	KeyLightComponent->LightingChannels.bChannel2 = false;
 
 	FillLightComponent = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("FillLightComponent"));
 	FillLightComponent->SetupAttachment(StudioRoot);
@@ -123,12 +134,19 @@ ACh4_CharacterPreviewStudio::ACh4_CharacterPreviewStudio()
 	FillLightComponent->SetIntensity(2.2f);
 	FillLightComponent->SetLightColor(FLinearColor(0.96f, 0.98f, 1.0f));
 	FillLightComponent->SetCastShadows(false);
+	FillLightComponent->LightingChannels.bChannel0 = false;
+	FillLightComponent->LightingChannels.bChannel1 = true;
+	FillLightComponent->LightingChannels.bChannel2 = false;
 
-	SkyLightComponent = CreateDefaultSubobject<USkyLightComponent>(TEXT("SkyLightComponent"));
-	SkyLightComponent->SetupAttachment(StudioRoot);
-	SkyLightComponent->SetIntensity(1.8f);
-	SkyLightComponent->SetLightColor(FLinearColor(1.0f, 1.0f, 1.0f));
-	SkyLightComponent->SetCastShadows(false);
+	RimLightComponent = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("RimLightComponent"));
+	RimLightComponent->SetupAttachment(StudioRoot);
+	RimLightComponent->SetRelativeRotation(FRotator(-40.0f, 0.0f, 0.0f));
+	RimLightComponent->SetIntensity(1.6f);
+	RimLightComponent->SetLightColor(FLinearColor(1.0f, 1.0f, 1.0f));
+	RimLightComponent->SetCastShadows(false);
+	RimLightComponent->LightingChannels.bChannel0 = false;
+	RimLightComponent->LightingChannels.bChannel1 = true;
+	RimLightComponent->LightingChannels.bChannel2 = false;
 
 	// 6. Default Asset References
 	static ConstructorHelpers::FObjectFinder<UTextureRenderTarget2D> RTFinder(
@@ -171,24 +189,38 @@ void ACh4_CharacterPreviewStudio::BeginPlay()
 
 	UpdateCameraTransform();
 
-	// 1. 런타임 조명 강도 보정 (깔끔하고 화사한 카툰 스튜디오 룩)
+	// 1. 런타임 조명 강도 보정 (깔끔하고 화사한 카툰 스튜디오 룩, Channel 1 격리)
 	if (KeyLightComponent)
 	{
 		KeyLightComponent->SetIntensity(3.2f);
 		KeyLightComponent->SetLightColor(FLinearColor(1.0f, 0.98f, 0.95f));
 		KeyLightComponent->SetRelativeRotation(FRotator(-15.0f, 150.0f, 0.0f));
+		KeyLightComponent->LightingChannels.bChannel0 = false;
+		KeyLightComponent->LightingChannels.bChannel1 = true;
+		KeyLightComponent->LightingChannels.bChannel2 = false;
 	}
 	if (FillLightComponent)
 	{
 		FillLightComponent->SetIntensity(2.2f);
 		FillLightComponent->SetLightColor(FLinearColor(0.96f, 0.98f, 1.0f));
 		FillLightComponent->SetRelativeRotation(FRotator(-10.0f, -150.0f, 0.0f));
+		FillLightComponent->LightingChannels.bChannel0 = false;
+		FillLightComponent->LightingChannels.bChannel1 = true;
+		FillLightComponent->LightingChannels.bChannel2 = false;
 	}
-	if (SkyLightComponent)
+	if (RimLightComponent)
 	{
-		SkyLightComponent->SetIntensity(1.8f);
-		SkyLightComponent->SetLightColor(FLinearColor(1.0f, 1.0f, 1.0f));
+		RimLightComponent->SetIntensity(1.6f);
+		RimLightComponent->SetLightColor(FLinearColor(1.0f, 1.0f, 1.0f));
+		RimLightComponent->SetRelativeRotation(FRotator(-40.0f, 0.0f, 0.0f));
+		RimLightComponent->LightingChannels.bChannel0 = false;
+		RimLightComponent->LightingChannels.bChannel1 = true;
+		RimLightComponent->LightingChannels.bChannel2 = false;
 	}
+
+	ApplyStudioLightingChannels(PreviewMeshComponent);
+	ApplyStudioLightingChannels(HatMeshComponent);
+	ApplyStudioLightingChannels(BackdropMeshComponent);
 
 	if (CaptureComponent)
 	{
@@ -468,6 +500,8 @@ void ACh4_CharacterPreviewStudio::SetPreviewCharacterType(ECh4CharacterType NewT
 			PreviewMeshComponent->SetAnimInstanceClass(CDOMesh->GetAnimClass());
 		}
 
+		ApplyStudioLightingChannels(PreviewMeshComponent);
+
 		if (HatMeshComponent)
 		{
 			HatMeshComponent->AttachToComponent(
@@ -579,6 +613,7 @@ void ACh4_CharacterPreviewStudio::ApplyHeadwearInternal(FName HeadwearID)
 			{
 				HatMeshComponent->SetVisibility(true);
 				HatMeshComponent->SetForcedLodModel(1);
+				ApplyStudioLightingChannels(HatMeshComponent);
 				HatMeshComponent->MarkRenderStateDirty();
 				if (CaptureComponent)
 				{
@@ -604,5 +639,29 @@ void ACh4_CharacterPreviewStudio::ResetPreviewRotation()
 		FRotator NewRot = PreviewMeshComponent->GetRelativeRotation();
 		NewRot.Yaw = -90.0f; // Standard UE character mesh forward offset
 		PreviewMeshComponent->SetRelativeRotation(NewRot);
+	}
+}
+
+void ACh4_CharacterPreviewStudio::ApplyStudioLightingChannels(UPrimitiveComponent* Comp)
+{
+	if (Comp)
+	{
+		Comp->LightingChannels.bChannel0 = false;
+		Comp->LightingChannels.bChannel1 = true;
+		Comp->LightingChannels.bChannel2 = false;
+		Comp->MarkRenderStateDirty();
+
+		TArray<USceneComponent*> SubComponents;
+		Comp->GetChildrenComponents(true, SubComponents);
+		for (USceneComponent* Child : SubComponents)
+		{
+			if (UPrimitiveComponent* PrimChild = Cast<UPrimitiveComponent>(Child))
+			{
+				PrimChild->LightingChannels.bChannel0 = false;
+				PrimChild->LightingChannels.bChannel1 = true;
+				PrimChild->LightingChannels.bChannel2 = false;
+				PrimChild->MarkRenderStateDirty();
+			}
+		}
 	}
 }

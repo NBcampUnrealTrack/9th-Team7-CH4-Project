@@ -9,7 +9,6 @@ class USceneCaptureComponent2D;
 class USkeletalMeshComponent;
 class UStaticMeshComponent;
 class UDirectionalLightComponent;
-class USkyLightComponent;
 class UTextureRenderTarget2D;
 class UDataTable;
 
@@ -88,7 +87,10 @@ protected:
 	TObjectPtr<UDirectionalLightComponent> FillLightComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Preview|Components")
-	TObjectPtr<USkyLightComponent> SkyLightComponent;
+	TObjectPtr<UDirectionalLightComponent> RimLightComponent;
+
+	/** 컴포넌트를 스튜디오 전용 라이팅 채널(Channel 1)로 격리 설정합니다. */
+	void ApplyStudioLightingChannels(class UPrimitiveComponent* Comp);
 
 	/** 스튜디오 배경 사용 여부 (false 시 투명 배경) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Preview|Backdrop")
