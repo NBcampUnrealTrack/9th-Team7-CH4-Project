@@ -25,6 +25,9 @@ void ALevelManager::BeginPlay()
 
     if (HasAuthority())
     {
+        //서버에서 매 판 무작위 PCG Seed 생성
+        PCGSeed = FMath::RandRange(1, 999999);
+        
         MiddleZoneOrder.Empty();
 
         for (int32 Index = 0; Index < MiddleRoadActors.Num(); ++Index)
@@ -42,6 +45,9 @@ void ALevelManager::BeginPlay()
         }
 
         ArrangePlacedZones();
+        
+        //도로 재배치 완료 후 PCG 장애물 스폰 실행
+        TriggerPCGGeneration();
     }
 }
 
@@ -53,7 +59,43 @@ void ALevelManager::OnRep_MiddleZoneOrder()
     }
 
     ArrangePlacedZones();
+    
 }
+
+void ALevelManager::OnRep_PCGSeed()
+{
+
+}
+
+void ALevelManager::TriggerPCGGeneration()
+{
+    if (!HasAuthority() || PCGSeed == 0)
+    {
+        return;
+    }
+
+    // 도로마다 약간씩 다른 시드를 부여하여 패턴이 겹치지 않게 처리 (+Index)
+    int32 CurrentIndex = 0;
+
+    if (StartRoadActor)
+    {
+        StartRoadActor->GenerateObstacles(PCGSeed + CurrentIndex++);
+    }
+
+    for (ARoadBase* Road : MiddleRoadActors)
+    {
+        if (Road)
+        {
+            Road->GenerateObstacles(PCGSeed + CurrentIndex++);
+        }
+    }
+
+    if (EndRoadActor)
+    {
+        EndRoadActor->GenerateObstacles(PCGSeed + CurrentIndex++);
+    }
+}
+
 
 bool ALevelManager::IsLevelManagerManagedActor(const AActor* Actor) const
 {
@@ -464,4 +506,5 @@ void ALevelManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
     DOREPLIFETIME(ALevelManager, bUseAutoArrange);
     DOREPLIFETIME(ALevelManager, bShuffleMiddleZones);
     DOREPLIFETIME(ALevelManager, MiddleZoneOrder);
+    DOREPLIFETIME(ALevelManager, PCGSeed);
 }
