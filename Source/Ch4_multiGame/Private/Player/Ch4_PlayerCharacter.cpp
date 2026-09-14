@@ -33,10 +33,7 @@
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
-	PrimaryActorTick.bCanEverTick = true;
-	// 카메라 가림 판정은 로컬 조종 캐릭터만 필요하므로, 기본은 꺼두고
-	// BeginPlay/PawnClientRestart에서 IsLocallyControlled()에 따라 켠다.
-	PrimaryActorTick.bStartWithTickEnabled = false;
+	PrimaryActorTick.bCanEverTick = false;
 	
 	SpringArmComponent = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArmComponent"));
 	SpringArmComponent->SetupAttachment(RootComponent);
@@ -103,8 +100,7 @@ void ACh4_PlayerCharacter::BeginPlay()
 	{
 		InitializeCharacterPhysics();
 	}
-
-	// 카메라 가림(Occlusion) 판정은 내가 직접 조종하는 클라이언트에서만 필요하다.
+	// 카고 상호작용 및 아웃라인을 위해 로컬 조종 클라이언트에서 Tick 활성화
 	SetActorTickEnabled(IsLocallyControlled());
 	SetupCameraOutlinePostProcess();
 
@@ -156,8 +152,7 @@ void ACh4_PlayerCharacter::PawnClientRestart()
 	// Remote clients commonly receive possession after BeginPlay. Register the pawn IMC here too.
 	AddPlayerInputMappingContext();
 	UpdateNameplate();
-
-	// 이 시점에서야 로컬로 빙의되는 경우(늦은 빙의)를 대비해 다시 한 번 갱신한다.
+	// 로컬 빙의 시점(늦은 빙의)을 대비해 Tick 및 아웃라인 머티리얼 갱신
 	SetActorTickEnabled(IsLocallyControlled());
 	SetupCameraOutlinePostProcess();
 }
@@ -697,9 +692,9 @@ void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
 
 	InterruptEmotionMontage();
 	
-	if (IsValid(JumpSound) == true)
+	if (IsLocallyControlled() == true && IsValid(JumpSound) == true)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, JumpSound, GetActorLocation());
+		UGameplayStatics::PlaySound2D(this, JumpSound);
 	}
 	
 	Jump();
@@ -856,154 +851,10 @@ void ACh4_PlayerCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	// SetActorTickEnabled로 로컬 조종 캐릭터에서만 켜지도록 이미 걸러져 있지만,
-	// 혹시 모를 상태 불일치를 대비해 한 번 더 방어적으로 체크한다.
+	// 로컬 조종 캐릭터에서 카고 상호작용 포커스 및 아웃라인 갱신
 	if (IsLocallyControlled())
 	{
-		UpdateCameraOcclusion(DeltaSeconds);
 		UpdateCargoInteractionFocus();
-	}
-}
-
-void ACh4_PlayerCharacter::UpdateCameraOcclusion(float DeltaSeconds)
-{
-	if (!CameraComponent || !GetMesh() || !GetWorld())
-	{
-		return;
-	}
-
-	const FVector CameraLoc = CameraComponent->GetComponentLocation();
-	// 캐릭터 발 위치보다는 몸통(메시) 중심을 향해 쏴야 카메라 바로 앞의 얇은 벽/기둥까지 잘 걸린다.
-	const FVector TargetLoc = GetActorLocation();
-
-	TArray<FHitResult> Hits;
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(CameraOcclusion), false, this);
-	Params.AddIgnoredActor(this);
-
-	const bool bHitAnything = GetWorld()->LineTraceMultiByChannel(
-		Hits,
-		CameraLoc,
-		TargetLoc,
-		CameraOcclusionChannel,
-		Params);
-
-#if ENABLE_DRAW_DEBUG
-	if (bDebugDrawOcclusionTrace)
-	{
-		// Duration -1은 "이번 프레임에만 그리기" - 매 틱 다시 호출되므로 토글을 켜두면 계속 갱신되어 보인다.
-		DrawDebugLine(GetWorld(), CameraLoc, TargetLoc, bHitAnything ? FColor::Red : FColor::Green, false, -1.0f, 0, 1.5f);
-		for (const FHitResult& Hit : Hits)
-		{
-			DrawDebugPoint(GetWorld(), Hit.ImpactPoint, 10.0f, FColor::Yellow, false, -1.0f);
-			DrawDebugString(GetWorld(), Hit.ImpactPoint, GetNameSafe(Hit.GetComponent()), nullptr, FColor::White, 0.0f, false, 1.0f);
-		}
-	}
-#endif
-
-	// 이번 프레임에 실제로 카메라를 가리고 있는 컴포넌트 집합
-	TSet<UPrimitiveComponent*> CurrentlyOccluding;
-	CurrentlyOccluding.Reserve(Hits.Num());
-	for (const FHitResult& Hit : Hits)
-	{
-		if (UPrimitiveComponent* HitComponent = Hit.GetComponent())
-		{
-			CurrentlyOccluding.Add(HitComponent);
-		}
-	}
-
-	// 새로 가리기 시작한 컴포넌트 등록 (진행도 0에서 시작해서 서서히 디졸브됨)
-	for (UPrimitiveComponent* Comp : CurrentlyOccluding)
-	{
-		const TWeakObjectPtr<UPrimitiveComponent> WeakComp(Comp);
-		if (!OccludingComponents.Contains(WeakComp))
-		{
-			FCh4CameraOcclusionState NewState;
-			NewState.FadeAmount = 0.0f;
-
-			// 되돌릴 때 쓸 원본 머티리얼을 슬롯 순서대로 캐싱해둔다.
-			const int32 NumMaterials = Comp->GetNumMaterials();
-			NewState.OriginalMaterials.Reserve(NumMaterials);
-			for (int32 MatIndex = 0; MatIndex < NumMaterials; ++MatIndex)
-			{
-				NewState.OriginalMaterials.Add(Comp->GetMaterial(MatIndex));
-			}
-
-			OccludingComponents.Add(Comp, MoveTemp(NewState));
-		}
-	}
-
-	// 등록된 컴포넌트들의 페이드 값을 갱신하고, 다 사라진 뒤 원복까지 끝난 것은 목록에서 제거
-	for (auto It = OccludingComponents.CreateIterator(); It; ++It)
-	{
-		UPrimitiveComponent* Comp = It->Key.Get();
-		if (!IsValid(Comp))
-		{
-			It.RemoveCurrent();
-			continue;
-		}
-
-		const bool bStillOccluding = CurrentlyOccluding.Contains(Comp);
-		const float TargetAmount = bStillOccluding ? MaxDissolveAmount : 0.0f;
-
-		FCh4CameraOcclusionState& State = It->Value;
-		State.FadeAmount = FMath::FInterpConstantTo(State.FadeAmount, TargetAmount, DeltaSeconds, OcclusionFadeSpeed);
-
-		if (State.FadeAmount > 0.0f)
-		{
-			ApplyOcclusionMaterial(Comp, State.FadeAmount);
-		}
-		else
-		{
-			// 완전히 원래대로 돌아왔으면 원본 머티리얼로 복원하고 목록에서 제거
-			RestoreOriginalMaterials(Comp, State);
-		}
-
-		if (!bStillOccluding && FMath::IsNearlyZero(State.FadeAmount))
-		{
-			It.RemoveCurrent();
-		}
-	}
-}
-
-void ACh4_PlayerCharacter::ApplyOcclusionMaterial(UPrimitiveComponent* Component, float DissolveAmount)
-{
-	if (!Component || !OcclusionMaterial)
-	{
-		return;
-	}
-
-	const int32 NumMaterials = Component->GetNumMaterials();
-	for (int32 MatIndex = 0; MatIndex < NumMaterials; ++MatIndex)
-	{
-		// 이미 우리가 바꿔치기한 다이나믹 인스턴스라면 재생성하지 않고 파라미터만 갱신한다.
-		UMaterialInstanceDynamic* DynMat = Cast<UMaterialInstanceDynamic>(Component->GetMaterial(MatIndex));
-		if (!DynMat || DynMat->Parent != OcclusionMaterial)
-		{
-			DynMat = UMaterialInstanceDynamic::Create(OcclusionMaterial, Component);
-			Component->SetMaterial(MatIndex, DynMat);
-		}
-
-		if (DynMat)
-		{
-			DynMat->SetScalarParameterValue(DissolveParameterName, DissolveAmount);
-		}
-	}
-}
-
-void ACh4_PlayerCharacter::RestoreOriginalMaterials(UPrimitiveComponent* Component, const FCh4CameraOcclusionState& State)
-{
-	if (!Component)
-	{
-		return;
-	}
-
-	for (int32 MatIndex = 0; MatIndex < State.OriginalMaterials.Num(); ++MatIndex)
-	{
-		// 원본 머티리얼 애셋이 그 사이 언로드/삭제됐을 수도 있으니 방어적으로 체크한다.
-		if (UMaterialInterface* OriginalMat = State.OriginalMaterials[MatIndex].Get())
-		{
-			Component->SetMaterial(MatIndex, OriginalMat);
-		}
 	}
 }
 
@@ -1143,9 +994,9 @@ void ACh4_PlayerCharacter::OnRep_IsStunned()
 				}
 			}
 			
-			if (IsValid(StunSound) == true)
+			if (IsLocallyControlled() == true && IsValid(StunSound) == true)
 			{
-				UGameplayStatics::PlaySoundAtLocation(this, StunSound, GetActorLocation());
+				UGameplayStatics::PlaySound2D(this, StunSound);
 			}
 		}
 	}
@@ -1459,9 +1310,9 @@ void ACh4_PlayerCharacter::MulticastRPC_AttachGrab_Implementation(UPrimitiveComp
 	   FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 	   GrabSocketName);
 	
-	if (IsValid(GrabSound) == true)
+	if (IsLocallyControlled() == true && IsValid(GrabSound) == true)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, GrabSound, GetActorLocation());
+		UGameplayStatics::PlaySound2D(this, GrabSound);
 	}
 }
 
@@ -1487,9 +1338,9 @@ void ACh4_PlayerCharacter::MulticastRPC_ReleaseGrab_Implementation(UPrimitiveCom
 	TargetComponent->SetSimulatePhysics(true);
 	TargetComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	
-	if (IsValid(GrabReleaseSound) == true)
+	if (IsLocallyControlled() == true && IsValid(GrabReleaseSound) == true)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, GrabReleaseSound, GetActorLocation());
+		UGameplayStatics::PlaySound2D(this, GrabReleaseSound);
 	}
 }
 

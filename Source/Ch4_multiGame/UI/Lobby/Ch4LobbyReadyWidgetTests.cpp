@@ -48,10 +48,12 @@ bool FCh4LobbyReadyStatusContract::RunTest(const FString&)
 		WidgetDefaults
 			&& WidgetDefaults->GetStatusColor(false).GetSpecifiedColor().Equals(FLinearColor::Red));
 
+#if WITH_METADATA
 	const FProperty* TextProperty = FindFProperty<FProperty>(
 		UCh4LobbyReadyWidget::StaticClass(), TEXT("Text_ReadyStatus"));
 	TestTrue(TEXT("Text_ReadyStatus is a required BindWidget"),
 		TextProperty && TextProperty->HasMetaData(TEXT("BindWidget")));
+#endif
 
 	const FProperty* AnimProperty = FindFProperty<FProperty>(
 		UCh4LobbyReadyWidget::StaticClass(), TEXT("ReadyPopAnim"));
