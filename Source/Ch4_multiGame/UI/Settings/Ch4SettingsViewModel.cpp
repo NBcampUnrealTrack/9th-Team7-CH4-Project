@@ -1,4 +1,5 @@
 #include "UI/Settings/Ch4SettingsViewModel.h"
+#include "Ch4_multiGamePlayerController.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Camera/CameraComponent.h"
@@ -136,6 +137,7 @@ void UCh4SettingsViewModel::LoadSettings()
 	ApplySoundVolume(SoundClass_Master, MasterVolume / 100.0f);
 	ApplySoundVolume(SoundClass_BGM, BGMVolume / 100.0f);
 	ApplySoundVolume(SoundClass_SFX, SFXVolume / 100.0f);
+	ApplyControlSettings();
 
 	bIsInternalUpdating = false;
 }
@@ -151,6 +153,8 @@ void UCh4SettingsViewModel::SaveSettings()
 	GConfig->SetFloat(ConfigSection, TEXT("SFXVolume"), SFXVolume, GGameIni);
 	GConfig->SetInt(ConfigSection, TEXT("VoiceMode"), VoiceMode, GGameIni);
 	GConfig->SetFloat(ConfigSection, TEXT("MicSensitivity"), MicSensitivity, GGameIni);
+
+	ApplyControlSettings();
 
 	if (UWorld* World = GetWorld())
 	{
@@ -170,6 +174,8 @@ void UCh4SettingsViewModel::RequestDebouncedSave()
 	GConfig->SetFloat(ConfigSection, TEXT("SFXVolume"), SFXVolume, GGameIni);
 	GConfig->SetInt(ConfigSection, TEXT("VoiceMode"), VoiceMode, GGameIni);
 	GConfig->SetFloat(ConfigSection, TEXT("MicSensitivity"), MicSensitivity, GGameIni);
+
+	ApplyControlSettings();
 
 	// 2. 무거운 하드디스크 I/O Flush는 조작이 멈추고 0.3초 뒤 1회만 지연 실행 (슬라이더 렉 완전 방지)
 	if (UWorld* World = GetWorld())
@@ -299,6 +305,23 @@ void UCh4SettingsViewModel::ApplyFOV(float Value)
 				if (UCameraComponent* CamComp = Pawn->FindComponentByClass<UCameraComponent>())
 				{
 					CamComp->SetFieldOfView(Value);
+				}
+			}
+		}
+	}
+}
+
+void UCh4SettingsViewModel::ApplyControlSettings()
+{
+	if (UWorld* World = GetWorld())
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (ACh4_multiGamePlayerController* PC = Cast<ACh4_multiGamePlayerController>(It->Get()))
+			{
+				if (PC->IsLocalPlayerController())
+				{
+					PC->SetControlSettings(MouseSensitivity, bInvertY);
 				}
 			}
 		}
