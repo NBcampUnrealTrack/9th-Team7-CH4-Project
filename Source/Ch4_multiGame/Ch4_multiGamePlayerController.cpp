@@ -185,6 +185,8 @@ void ACh4_multiGamePlayerController::BeginPlay()
 	// only execute on local player controllers
 	if (IsLocalPlayerController())
 	{
+		UpdateCachedControlSettings();
+
 		// 메인 메뉴(L_MainMenu)에서는 인게임 HUD를 생성하지 않고, 로비 및 실제 인게임 맵에서만 생성
 		const FString CurrentMapName = GetWorld() ? GetWorld()->GetMapName() : FString();
 		const bool bIsMainMenu = CurrentMapName.Contains(TEXT("MainMenu")) || CurrentMapName.Contains(TEXT("L_MainMenu"));
@@ -827,16 +829,30 @@ void ACh4_multiGamePlayerController::QuitGame()
 	UKismetSystemLibrary::QuitGame(GetWorld(), this, EQuitPreference::Quit, false);
 }
 
+void ACh4_multiGamePlayerController::SetControlSettings(float NewSensitivity, bool bNewInvertY)
+{
+	CachedMouseSensitivity = FMath::Clamp(NewSensitivity, 0.1f, 3.0f);
+	bCachedInvertY = bNewInvertY;
+}
+
+void ACh4_multiGamePlayerController::UpdateCachedControlSettings()
+{
+	float Sensitivity = 1.0f;
+	bool bInvert = false;
+	if (GConfig)
+	{
+		GConfig->GetFloat(TEXT("Ch4_multiGame.Settings"), TEXT("MouseSensitivity"), Sensitivity, GGameIni);
+		GConfig->GetBool(TEXT("Ch4_multiGame.Settings"), TEXT("InvertY"), bInvert, GGameIni);
+	}
+
+	CachedMouseSensitivity = FMath::Clamp(Sensitivity, 0.1f, 3.0f);
+	bCachedInvertY = bInvert;
+}
+
 void ACh4_multiGamePlayerController::AddPitchInput(float Val)
 {
-	// Settings에 저장된 마우스 감도와 Y축 반전 불러오기
-	float Sensitivity = 1.0f;
-	bool bInvertY = false;
-	GConfig->GetFloat(TEXT("Ch4_multiGame.Settings"), TEXT("MouseSensitivity"), Sensitivity, GGameIni);
-	GConfig->GetBool(TEXT("Ch4_multiGame.Settings"), TEXT("InvertY"), bInvertY, GGameIni);
-
-	float FinalVal = Val * Sensitivity;
-	if (bInvertY)
+	float FinalVal = Val * CachedMouseSensitivity;
+	if (bCachedInvertY)
 	{
 		FinalVal = -FinalVal; // Y축 반전
 	}
@@ -846,9 +862,5 @@ void ACh4_multiGamePlayerController::AddPitchInput(float Val)
 
 void ACh4_multiGamePlayerController::AddYawInput(float Val)
 {
-	// Settings에 저장된 마우스 감도 불러오기
-	float Sensitivity = 1.0f;
-	GConfig->GetFloat(TEXT("Ch4_multiGame.Settings"), TEXT("MouseSensitivity"), Sensitivity, GGameIni);
-
-	Super::AddYawInput(Val * Sensitivity);
+	Super::AddYawInput(Val * CachedMouseSensitivity);
 }

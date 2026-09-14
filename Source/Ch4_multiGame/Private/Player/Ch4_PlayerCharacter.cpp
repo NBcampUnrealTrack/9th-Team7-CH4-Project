@@ -31,9 +31,42 @@
 #include "UObject/ConstructorHelpers.h"
 #include "Engine/OverlapResult.h"
 
+namespace
+{
+	FTimerHandle LocalCargoFocusTimerHandle;
+}
+
+void ACh4_PlayerCharacter::InitLocalPlayerCargoFocus()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	PrimaryActorTick.bCanEverTick = true;
+	if (!PrimaryActorTick.IsTickFunctionRegistered())
+	{
+		PrimaryActorTick.RegisterTickFunction(GetLevel());
+	}
+	SetActorTickEnabled(true);
+	SetupCameraOutlinePostProcess();
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			LocalCargoFocusTimerHandle,
+			this,
+			&ACh4_PlayerCharacter::UpdateCargoInteractionFocus,
+			0.05f,
+			true
+		);
+	}
+}
+
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 	
 	SpringArmComponent = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArmComponent"));
 	SpringArmComponent->SetupAttachment(RootComponent);
@@ -100,9 +133,8 @@ void ACh4_PlayerCharacter::BeginPlay()
 	{
 		InitializeCharacterPhysics();
 	}
-	// 카고 상호작용 및 아웃라인을 위해 로컬 조종 클라이언트에서 Tick 활성화
-	SetActorTickEnabled(IsLocallyControlled());
-	SetupCameraOutlinePostProcess();
+	// 카고 상호작용 및 아웃라인을 위해 로컬 조종 클라이언트에서 Tick/타이머 활성화
+	InitLocalPlayerCargoFocus();
 
 	// CargoPromptComponent 초기화 및 기본 숨김 보장
 	if (CargoPromptComponent)
@@ -124,6 +156,11 @@ void ACh4_PlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	ClearCargoInteractionFocus();
 
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(LocalCargoFocusTimerHandle);
+	}
+
 	if (HasAuthority() && GrabbedCart)
 	{
 		GrabbedCart->ReleasePlayer(this);
@@ -136,6 +173,7 @@ void ACh4_PlayerCharacter::PossessedBy(AController* NewController)
 	Super::PossessedBy(NewController);
 	ApplyCharacterTypeFromPlayerState();
 	UpdateNameplate();
+	InitLocalPlayerCargoFocus();
 }
 
 void ACh4_PlayerCharacter::OnRep_PlayerState()
@@ -143,6 +181,7 @@ void ACh4_PlayerCharacter::OnRep_PlayerState()
 	Super::OnRep_PlayerState();
 	ApplyCharacterTypeFromPlayerState();
 	UpdateNameplate();
+	InitLocalPlayerCargoFocus();
 }
 
 void ACh4_PlayerCharacter::PawnClientRestart()
@@ -152,9 +191,8 @@ void ACh4_PlayerCharacter::PawnClientRestart()
 	// Remote clients commonly receive possession after BeginPlay. Register the pawn IMC here too.
 	AddPlayerInputMappingContext();
 	UpdateNameplate();
-	// 로컬 빙의 시점(늦은 빙의)을 대비해 Tick 및 아웃라인 머티리얼 갱신
-	SetActorTickEnabled(IsLocallyControlled());
-	SetupCameraOutlinePostProcess();
+	// 로컬 빙의 시점(늦은 빙의)을 대비해 Tick 및 아웃라인 머티리얼/타이머 갱신
+	InitLocalPlayerCargoFocus();
 }
 
 void ACh4_PlayerCharacter::AddPlayerInputMappingContext()
@@ -387,6 +425,8 @@ void ACh4_PlayerCharacter::SetHatMesh(class UStaticMesh* NewHat)
 		HatMeshComponent->SetStaticMesh(nullptr);
 		HatMeshComponent->SetVisibility(false);
 	}
+
+	UpdateNameplate();
 }
 
 void ACh4_PlayerCharacter::ApplyHeadwear(FName HeadwearID)
@@ -490,9 +530,12 @@ void ACh4_PlayerCharacter::ApplyHeadwear(FName HeadwearID)
 					}
 				}
 			}
+			UpdateNameplate();
 			return;
 		}
 	}
+
+	UpdateNameplate();
 }
 
 UWidgetComponent* ACh4_PlayerCharacter::GetNameplateComponent() const
@@ -543,13 +586,21 @@ void ACh4_PlayerCharacter::UpdateNameplate_Implementation()
 
 	NameplateComp->SetVisibility(true);
 
-	// 2. Attach to head_socket (or fallback to head bone)
+	// 2. Attach to S_Headwear / head_socket (or fallback to head bone)
 	if (USkeletalMeshComponent* CharacterMesh = GetMesh())
 	{
 		FName SocketToUse = NameplateSocketName;
 		if (!CharacterMesh->DoesSocketExist(SocketToUse))
 		{
-			if (CharacterMesh->DoesSocketExist(TEXT("head")))
+			if (CharacterMesh->DoesSocketExist(TEXT("S_Headwear")))
+			{
+				SocketToUse = TEXT("S_Headwear");
+			}
+			else if (CharacterMesh->DoesSocketExist(TEXT("Head")))
+			{
+				SocketToUse = TEXT("Head");
+			}
+			else if (CharacterMesh->DoesSocketExist(TEXT("head")))
 			{
 				SocketToUse = TEXT("head");
 			}
@@ -563,7 +614,23 @@ void ACh4_PlayerCharacter::UpdateNameplate_Implementation()
 		{
 			NameplateComp->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketToUse);
 		}
-		NameplateComp->SetRelativeLocation(NameplateOffset);
+
+		// S_Headwear 및 머리 본은 이미 정수리 위치이므로 머리 위 기본 +35cm 띄우고,
+		// 모자/헬멧(DrinkingHat, SpaceHelmet, TrooperHat 등)을 착용 중인 경우 모자 꼭대기 위로 자동 보정 (+20cm)
+		float HeadZOffset = 35.0f;
+		if (HatMeshComponent && HatMeshComponent->IsVisible() && HatMeshComponent->GetStaticMesh())
+		{
+			FVector MinBounds, MaxBounds;
+			HatMeshComponent->GetLocalBounds(MinBounds, MaxBounds);
+			const float HatTop = FMath::Max(MaxBounds.Z, 0.0f);
+			HeadZOffset = FMath::Max(HeadZOffset, HatTop + 20.0f);
+		}
+
+		const FVector EffectiveOffset = (SocketToUse == TEXT("S_Headwear") || SocketToUse == TEXT("Head") || SocketToUse == TEXT("head"))
+			? FVector(0.0f, 0.0f, HeadZOffset)
+			: NameplateOffset;
+
+		NameplateComp->SetRelativeLocation(EffectiveOffset);
 		NameplateComp->SetRelativeRotation(FRotator::ZeroRotator);
 	}
 
@@ -1190,8 +1257,9 @@ void ACh4_PlayerCharacter::BeginGrabDetection()
 	// 1순위: 플레이어가 조준하여 하이라이트된 CurrentFocusedCargo가 있다면 최우선으로 잡기
 	if (CurrentFocusedCargo.IsValid() && !CurrentFocusedCargo->IsLost())
 	{
+		const float SearchRadius = FMath::Max(CargoDetectionRadius, 250.0f);
 		const float Dist = FVector::Dist(GetActorLocation(), CurrentFocusedCargo->GetActorLocation());
-		if (Dist <= CargoDetectionRadius + 40.0f)
+		if (Dist <= SearchRadius + 60.0f)
 		{
 			TryGrabActor(CurrentFocusedCargo.Get());
 			return;
@@ -1392,10 +1460,25 @@ ACargoActor* ACh4_PlayerCharacter::FindBestTargetCargo() const
 	}
 
 	const FVector PlayerLoc = GetActorLocation();
-	const FVector Forward = GetActorForwardVector();
+	const FVector ActorForward = GetActorForwardVector();
+
+	FVector CamForward = ActorForward;
+	if (CameraComponent)
+	{
+		CamForward = CameraComponent->GetForwardVector();
+	}
+
+	FVector Forward2D = ActorForward;
+	Forward2D.Z = 0.0f;
+	Forward2D.Normalize();
+
+	FVector CamForward2D = CamForward;
+	CamForward2D.Z = 0.0f;
+	CamForward2D.Normalize();
 
 	TArray<FOverlapResult> Overlaps;
-	FCollisionShape Sphere = FCollisionShape::MakeSphere(CargoDetectionRadius);
+	const float SearchRadius = FMath::Max(CargoDetectionRadius, 250.0f);
+	FCollisionShape Sphere = FCollisionShape::MakeSphere(SearchRadius);
 	FCollisionQueryParams QueryParams(TEXT("CargoInteractionTrace"), false, this);
 
 	World->OverlapMultiByObjectType(
@@ -1430,24 +1513,41 @@ ACargoActor* ACh4_PlayerCharacter::FindBestTargetCargo() const
 			continue;
 		}
 
-		FVector ToCargo = Cargo->GetActorLocation() - PlayerLoc;
-		const float Dist = ToCargo.Size();
-		if (Dist <= KINDA_SMALL_NUMBER || Dist > CargoDetectionRadius)
+		const FVector CargoLoc = Cargo->GetActorLocation();
+		const float Dist3D = FVector::Dist(PlayerLoc, CargoLoc);
+		if (Dist3D > SearchRadius)
 		{
 			continue;
 		}
 
-		ToCargo /= Dist;
-		const float Dot = FVector::DotProduct(Forward, ToCargo);
+		// 2D 수평 거리 및 방향 계산 (지면 카고와 캡슐 중심 간 Z 차이로 인한 왜곡 방지)
+		FVector ToCargo2D = CargoLoc - PlayerLoc;
+		ToCargo2D.Z = 0.0f;
+		const float Dist2D = ToCargo2D.Size();
+		if (Dist2D <= KINDA_SMALL_NUMBER)
+		{
+			ToCargo2D = Forward2D;
+		}
+		else
+		{
+			ToCargo2D /= Dist2D;
+		}
 
-		// 시야각: 캐릭터 정면 기준 80도 이내 (Dot >= 0.17f)
-		if (Dot < 0.17f)
+		// 캐릭터 몸체 전방과 카메라 전방 중 더 잘 일치하는 각도를 채택
+		const float DotActor = FVector::DotProduct(Forward2D, ToCargo2D);
+		const float DotCam = FVector::DotProduct(CamForward2D, ToCargo2D);
+		const float BestDot = FMath::Max(DotActor, DotCam);
+
+		// 발밑 근거리(130cm 이내)는 최대 120도(Dot >= -0.5f)까지 여유 있게 허용
+		// 그 외 거리는 전방 100도 이내(Dot >= -0.2f)
+		const float MinAllowedDot = (Dist2D < 130.0f) ? -0.5f : -0.2f;
+		if (BestDot < MinAllowedDot)
 		{
 			continue;
 		}
 
-		// 점수 계산: 조준점(Dot) 가중치 + 거리 역수
-		const float Score = (Dot + 1.0f) / (Dist + 10.0f);
+		// 조준점(Dot) 가중치 + 거리 역수로 종합 점수 산출
+		const float Score = (BestDot + 1.0f) / (Dist2D + 10.0f);
 		if (Score > BestScore)
 		{
 			BestScore = Score;
@@ -1502,6 +1602,11 @@ void ACh4_PlayerCharacter::UpdateCargoInteractionFocus()
 	if (AnimInstance && GrabMontage && AnimInstance->Montage_IsPlaying(GrabMontage))
 	{
 		return;
+	}
+
+	if (OutlineMID == nullptr)
+	{
+		SetupCameraOutlinePostProcess();
 	}
 
 	ACargoActor* BestCargo = FindBestTargetCargo();

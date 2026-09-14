@@ -217,6 +217,7 @@ private:
 	void ApplyVSync(bool bEnabled);
 	void ApplyFrameRate(int32 Index);
 	void ApplySoundVolume(USoundClass* SoundClass, float NormalizedVolume);
+	void ApplyControlSettings();
 	
 	static constexpr const TCHAR* ConfigSection = TEXT("Ch4_multiGame.Settings");
 	static const int32 FrameRateTable[];

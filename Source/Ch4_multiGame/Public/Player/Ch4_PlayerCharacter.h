@@ -221,6 +221,9 @@ protected:
 	/** 로컬 카메라에 아웃라인 포스트 프로세스 머티리얼 적용 */
 	void SetupCameraOutlinePostProcess();
 
+	/** 로컬 플레이어 빙의 시 카고 탐색용 Tick 및 20Hz 타이머 초기화 */
+	void InitLocalPlayerCargoFocus();
+
 	/** 로컬 플레이어 시야 전방의 최적 카고를 탐색하고 아웃라인/말풍선을 갱신 */
 	void UpdateCargoInteractionFocus();
 

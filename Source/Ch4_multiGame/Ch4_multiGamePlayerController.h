@@ -31,6 +31,22 @@ public:
 	virtual bool IsMoveInputIgnored() const override;
 	virtual bool IsLookInputIgnored() const override;
 
+	/** 마우스 감도 및 Y축 반전 설정 즉시 갱신 (UI ViewModel 등에서 호출) */
+	UFUNCTION(BlueprintCallable, Category = "Input|Control Settings")
+	void SetControlSettings(float NewSensitivity, bool bNewInvertY);
+
+	/** INI 설정에서 최신 감도/반전 값을 읽어와 캐시 갱신 */
+	UFUNCTION(BlueprintCallable, Category = "Input|Control Settings")
+	void UpdateCachedControlSettings();
+
+	/** 캐시된 마우스 감도 반환 */
+	UFUNCTION(BlueprintPure, Category = "Input|Control Settings")
+	float GetCachedMouseSensitivity() const { return CachedMouseSensitivity; }
+
+	/** 캐시된 Y축 반전 여부 반환 */
+	UFUNCTION(BlueprintPure, Category = "Input|Control Settings")
+	bool GetCachedInvertY() const { return bCachedInvertY; }
+
 	/**
 	 * Safe development command for Hamachi direct-IP tests.
 	 * Usage: JoinHamachi 25.x.x.x (an optional :7777 suffix is accepted).
@@ -196,4 +212,9 @@ private:
 	bool bSubmittedPersistedHeadwear = false;
 	TWeakObjectPtr<class ACh4_multiGameGameState> BoundResultGameState;
 
+	UPROPERTY(Transient)
+	float CachedMouseSensitivity = 1.0f;
+
+	UPROPERTY(Transient)
+	bool bCachedInvertY = false;
 };
