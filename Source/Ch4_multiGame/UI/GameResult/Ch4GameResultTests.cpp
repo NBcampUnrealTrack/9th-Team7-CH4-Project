@@ -41,6 +41,7 @@ bool FCh4GameResultPresentationTest::RunTest(const FString&)
 			&& WidgetClassProperty->HasAnyPropertyFlags(CPF_Edit)
 			&& WidgetClassProperty->MetaClass == UCh4GameResultWidget::StaticClass());
 
+#if WITH_METADATA
 	const auto HasWidgetMetadata = [this](const TCHAR* PropertyName, const TCHAR* MetadataName)
 	{
 		const FProperty* Property = FindFProperty<FProperty>(
@@ -55,6 +56,7 @@ bool FCh4GameResultPresentationTest::RunTest(const FString&)
 	TestTrue(TEXT("Countdown is optional"), HasWidgetMetadata(TEXT("Text_Countdown"), TEXT("BindWidgetOptional")));
 	TestTrue(TEXT("Confirm button is optional"), HasWidgetMetadata(TEXT("Btn_Confirm"), TEXT("BindWidgetOptional")));
 	TestTrue(TEXT("FadeInAnim is optional"), HasWidgetMetadata(TEXT("FadeInAnim"), TEXT("BindWidgetAnimOptional")));
+#endif
 
 	if (!GEngine)
 	{
