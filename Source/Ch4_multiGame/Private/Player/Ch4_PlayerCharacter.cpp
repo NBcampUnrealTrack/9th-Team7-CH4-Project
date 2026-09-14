@@ -638,9 +638,9 @@ void ACh4_PlayerCharacter::InputActionJump(const FInputActionValue& Value)
 
 	InterruptEmotionMontage();
 	
-	if (IsValid(JumpSound) == true)
+	if (IsLocallyControlled() == true && IsValid(JumpSound) == true)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, JumpSound, GetActorLocation());
+		UGameplayStatics::PlaySound2D(this, JumpSound);
 	}
 	
 	Jump();
@@ -929,9 +929,9 @@ void ACh4_PlayerCharacter::OnRep_IsStunned()
 				}
 			}
 			
-			if (IsValid(StunSound) == true)
+			if (IsLocallyControlled() == true && IsValid(StunSound) == true)
 			{
-				UGameplayStatics::PlaySoundAtLocation(this, StunSound, GetActorLocation());
+				UGameplayStatics::PlaySound2D(this, StunSound);
 			}
 		}
 	}
@@ -1201,9 +1201,9 @@ void ACh4_PlayerCharacter::MulticastRPC_AttachGrab_Implementation(UPrimitiveComp
 	   FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 	   GrabSocketName);
 	
-	if (IsValid(GrabSound) == true)
+	if (IsLocallyControlled() == true && IsValid(GrabSound) == true)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, GrabSound, GetActorLocation());
+		UGameplayStatics::PlaySound2D(this, GrabSound);
 	}
 }
 
@@ -1229,9 +1229,9 @@ void ACh4_PlayerCharacter::MulticastRPC_ReleaseGrab_Implementation(UPrimitiveCom
 	TargetComponent->SetSimulatePhysics(true);
 	TargetComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	
-	if (IsValid(GrabReleaseSound) == true)
+	if (IsLocallyControlled() == true && IsValid(GrabReleaseSound) == true)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, GrabReleaseSound, GetActorLocation());
+		UGameplayStatics::PlaySound2D(this, GrabReleaseSound);
 	}
 }
 
