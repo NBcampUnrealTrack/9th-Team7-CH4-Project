@@ -2,6 +2,7 @@
 
 #include "UI/Lobby/Ch4LobbyReadyWidget.h"
 
+#include "Animation/WidgetAnimation.h"
 #include "Components/TextBlock.h"
 
 #define LOCTEXT_NAMESPACE "Ch4LobbyReadyWidget"
@@ -18,6 +19,19 @@ void UCh4LobbyReadyWidget::UpdateReadyStatus(
 
 	Text_ReadyStatus->SetText(FormatReadyStatus(ReadyCount, CurrentPlayerCount));
 	Text_ReadyStatus->SetColorAndOpacity(GetStatusColor(bLocalPlayerReady));
+
+	const bool bStatusChanged = bHasInitialized &&
+		(ReadyCount != PreviousReadyCount || CurrentPlayerCount != PreviousPlayerCount || bLocalPlayerReady != bPreviousLocalPlayerReady);
+
+	PreviousReadyCount = ReadyCount;
+	PreviousPlayerCount = CurrentPlayerCount;
+	bPreviousLocalPlayerReady = bLocalPlayerReady;
+	bHasInitialized = true;
+
+	if (bStatusChanged && ReadyPopAnim)
+	{
+		PlayAnimation(ReadyPopAnim);
+	}
 }
 
 FText UCh4LobbyReadyWidget::FormatReadyStatus(

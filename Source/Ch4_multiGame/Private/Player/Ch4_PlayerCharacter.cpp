@@ -24,6 +24,12 @@
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/PrimitiveComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "DrawDebugHelpers.h"
+#include "Cargo/CargoActor.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Engine/OverlapResult.h"
 
 ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 {
@@ -54,6 +60,31 @@ ACh4_PlayerCharacter::ACh4_PlayerCharacter()
 	GrabBoxComponent->SetGenerateOverlapEvents(false);	
 	
 	GetCharacterMovement()->bEnablePhysicsInteraction = false;
+
+	// 카고 상호작용 말풍선 위젯 컴포넌트 (로컬 플레이어가 재사용)
+	CargoPromptComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("CargoPromptComponent"));
+	CargoPromptComponent->SetupAttachment(RootComponent);
+	CargoPromptComponent->SetWidgetSpace(EWidgetSpace::Screen);
+	CargoPromptComponent->SetDrawAtDesiredSize(true);
+	CargoPromptComponent->SetPivot(FVector2D(0.5f, 1.0f));
+	CargoPromptComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	CargoPromptComponent->SetCastShadow(false);
+	CargoPromptComponent->bReceivesDecals = false;
+	CargoPromptComponent->SetHiddenInGame(true);
+	CargoPromptComponent->SetVisibility(false);
+
+	static ConstructorHelpers::FClassFinder<UUserWidget> PromptWidgetFinder(TEXT("/Game/UI/WBP_InteractPrompt.WBP_InteractPrompt_C"));
+	if (PromptWidgetFinder.Succeeded())
+	{
+		CargoPromptWidgetClass = PromptWidgetFinder.Class;
+		CargoPromptComponent->SetWidgetClass(CargoPromptWidgetClass);
+	}
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> OutlineMatFinder(TEXT("/Game/Material/Outline.Outline"));
+	if (OutlineMatFinder.Succeeded())
+	{
+		OutlineMaterial = OutlineMatFinder.Object;
+	}
 }
 
 void ACh4_PlayerCharacter::BeginPlay()
@@ -69,10 +100,30 @@ void ACh4_PlayerCharacter::BeginPlay()
 	{
 		InitializeCharacterPhysics();
 	}
+	// 카고 상호작용 및 아웃라인을 위해 로컬 조종 클라이언트에서 Tick 활성화
+	SetActorTickEnabled(IsLocallyControlled());
+	SetupCameraOutlinePostProcess();
+
+	// CargoPromptComponent 초기화 및 기본 숨김 보장
+	if (CargoPromptComponent)
+	{
+		CargoPromptComponent->SetHiddenInGame(true);
+		CargoPromptComponent->SetVisibility(false);
+		if (!CargoPromptComponent->GetWidgetClass())
+		{
+			if (UClass* WidgetCls = LoadClass<UUserWidget>(nullptr, TEXT("/Game/UI/WBP_InteractPrompt.WBP_InteractPrompt_C")))
+			{
+				CargoPromptWidgetClass = WidgetCls;
+				CargoPromptComponent->SetWidgetClass(WidgetCls);
+			}
+		}
+	}
 }
 
 void ACh4_PlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	ClearCargoInteractionFocus();
+
 	if (HasAuthority() && GrabbedCart)
 	{
 		GrabbedCart->ReleasePlayer(this);
@@ -101,6 +152,9 @@ void ACh4_PlayerCharacter::PawnClientRestart()
 	// Remote clients commonly receive possession after BeginPlay. Register the pawn IMC here too.
 	AddPlayerInputMappingContext();
 	UpdateNameplate();
+	// 로컬 빙의 시점(늦은 빙의)을 대비해 Tick 및 아웃라인 머티리얼 갱신
+	SetActorTickEnabled(IsLocallyControlled());
+	SetupCameraOutlinePostProcess();
 }
 
 void ACh4_PlayerCharacter::AddPlayerInputMappingContext()
@@ -793,6 +847,17 @@ void ACh4_PlayerCharacter::InputActionZoom(const struct FInputActionValue& Value
 	SpringArmComponent->TargetArmLength = FMath::Clamp(SpringArmComponent->TargetArmLength - ScrollValue,	MinZoom, MaxZoom);
 }
 
+void ACh4_PlayerCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	// 로컬 조종 캐릭터에서 카고 상호작용 포커스 및 아웃라인 갱신
+	if (IsLocallyControlled())
+	{
+		UpdateCargoInteractionFocus();
+	}
+}
+
 void ACh4_PlayerCharacter::ServerRPC_RequestCartGrab_Implementation(ACartBase* TargetCart)
 {
 	if (bIsStunned || GrabbedComponent || GrabbedCart || !IsValid(TargetCart)
@@ -1110,11 +1175,30 @@ void ACh4_PlayerCharacter::BeginGrabDetection()
 		return; // 서버 또는 본인 조종 클라이언트만 판정
 	}
 
+	// 리모트 클라이언트의 서버 프록시인 경우, 클라이언트의 ServerRPC_AttachGrab을 수신하여 처리하므로
+	// 서버에서 임의로 가까운 액터를 먼저 잡아버려 타깃이 어긋나는 것을 방지한다.
+	if (HasAuthority() && !IsLocallyControlled() && IsPlayerControlled())
+	{
+		return;
+	}
+
 	if (GrabbedComponent != nullptr || GrabBoxComponent == nullptr)
 	{
 		return;
 	}
 
+	// 1순위: 플레이어가 조준하여 하이라이트된 CurrentFocusedCargo가 있다면 최우선으로 잡기
+	if (CurrentFocusedCargo.IsValid() && !CurrentFocusedCargo->IsLost())
+	{
+		const float Dist = FVector::Dist(GetActorLocation(), CurrentFocusedCargo->GetActorLocation());
+		if (Dist <= CargoDetectionRadius + 40.0f)
+		{
+			TryGrabActor(CurrentFocusedCargo.Get());
+			return;
+		}
+	}
+
+	// 2순위: 포커스된 Cargo가 없을 때의 폴백 - 손 콜리전 박스 내 오버랩 액터 검색
 	GrabBoxComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	GrabBoxComponent->SetGenerateOverlapEvents(true);
 	GrabBoxComponent->OnComponentBeginOverlap.AddUniqueDynamic(this, &ACh4_PlayerCharacter::OnGrabBoxBeginOverlap);
@@ -1125,13 +1209,28 @@ void ACh4_PlayerCharacter::BeginGrabDetection()
 
 	TArray<AActor*> OverlappingActors;
 	GrabBoxComponent->GetOverlappingActors(OverlappingActors);
+
+	// 손에 가장 가까운 Grabbable 액터 선택
+	AActor* BestFallbackActor = nullptr;
+	float BestDistSq = MAX_FLT;
+	const FVector HandLoc = GrabBoxComponent->GetComponentLocation();
+
 	for (AActor* OverlappingActor : OverlappingActors)
 	{
 		if (OverlappingActor && OverlappingActor->Implements<UGrabbableInterface>())
 		{
-			TryGrabActor(OverlappingActor);
-			break;
+			const float D = FVector::DistSquared(HandLoc, OverlappingActor->GetActorLocation());
+			if (D < BestDistSq)
+			{
+				BestDistSq = D;
+				BestFallbackActor = OverlappingActor;
+			}
 		}
+	}
+
+	if (BestFallbackActor)
+	{
+		TryGrabActor(BestFallbackActor);
 	}
 }
 
@@ -1161,6 +1260,7 @@ void ACh4_PlayerCharacter::TryGrabActor(AActor* TargetActor)
 		return;
 	}
 
+	ClearCargoInteractionFocus();
 	ServerRPC_AttachGrab(GI->GetGrabbableComponent());
 
 	// 한 번 잡았으면 이 구간에서 더 검사할 필요가 없으니 바로 꺼준다.
@@ -1170,6 +1270,15 @@ void ACh4_PlayerCharacter::TryGrabActor(AActor* TargetActor)
 void ACh4_PlayerCharacter::OnGrabBoxBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
+	if (CurrentFocusedCargo.IsValid())
+	{
+		// 조준 중인 카고가 있는 경우, 다른 액터가 손에 스쳤다고 가로채지 않도록 무시
+		if (OtherActor != CurrentFocusedCargo.Get())
+		{
+			return;
+		}
+	}
+
 	if (OtherActor && OtherActor->Implements<UGrabbableInterface>())
 	{
 		TryGrabActor(OtherActor);
@@ -1271,5 +1380,209 @@ void ACh4_PlayerCharacter::MulticastRPC_PlayGrabReleaseMontage_Implementation()
 	if (GrabReleaseMontage)
 	{
 		PlayAnimMontage(GrabReleaseMontage);
+	}
+}
+
+ACargoActor* ACh4_PlayerCharacter::FindBestTargetCargo() const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	const FVector PlayerLoc = GetActorLocation();
+	const FVector Forward = GetActorForwardVector();
+
+	TArray<FOverlapResult> Overlaps;
+	FCollisionShape Sphere = FCollisionShape::MakeSphere(CargoDetectionRadius);
+	FCollisionQueryParams QueryParams(TEXT("CargoInteractionTrace"), false, this);
+
+	World->OverlapMultiByObjectType(
+		Overlaps,
+		PlayerLoc,
+		FQuat::Identity,
+		FCollisionObjectQueryParams(ECC_PhysicsBody),
+		Sphere,
+		QueryParams
+	);
+
+	ACargoActor* BestTarget = nullptr;
+	float BestScore = -1.0f;
+
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		AActor* OverlapActor = Overlap.GetActor();
+		if (!OverlapActor)
+		{
+			continue;
+		}
+
+		ACargoActor* Cargo = Cast<ACargoActor>(OverlapActor);
+		if (!Cargo || Cargo->IsLost())
+		{
+			continue;
+		}
+
+		UPrimitiveComponent* GrabbableComp = Cargo->GetGrabbableComponent();
+		if (!GrabbableComp)
+		{
+			continue;
+		}
+
+		FVector ToCargo = Cargo->GetActorLocation() - PlayerLoc;
+		const float Dist = ToCargo.Size();
+		if (Dist <= KINDA_SMALL_NUMBER || Dist > CargoDetectionRadius)
+		{
+			continue;
+		}
+
+		ToCargo /= Dist;
+		const float Dot = FVector::DotProduct(Forward, ToCargo);
+
+		// 시야각: 캐릭터 정면 기준 80도 이내 (Dot >= 0.17f)
+		if (Dot < 0.17f)
+		{
+			continue;
+		}
+
+		// 점수 계산: 조준점(Dot) 가중치 + 거리 역수
+		const float Score = (Dot + 1.0f) / (Dist + 10.0f);
+		if (Score > BestScore)
+		{
+			BestScore = Score;
+			BestTarget = Cargo;
+		}
+	}
+
+	return BestTarget;
+}
+
+void ACh4_PlayerCharacter::SetupCameraOutlinePostProcess()
+{
+	if (!IsLocallyControlled() || !CameraComponent)
+	{
+		return;
+	}
+
+	if (OutlineMID != nullptr)
+	{
+		return;
+	}
+
+	if (OutlineMaterial == nullptr)
+	{
+		OutlineMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Material/Outline.Outline"));
+	}
+
+	if (OutlineMaterial)
+	{
+		OutlineMID = UMaterialInstanceDynamic::Create(OutlineMaterial, this);
+		if (OutlineMID)
+		{
+			OutlineMID->SetVectorParameterValue(TEXT("ItemOutlineColor"), CargoOutlineColor);
+			OutlineMID->SetScalarParameterValue(TEXT("ItemStencilValue"), static_cast<float>(CargoStencilValue));
+			CameraComponent->PostProcessBlendWeight = 1.0f;
+			CameraComponent->PostProcessSettings.AddBlendable(OutlineMID, 1.0f);
+		}
+	}
+}
+
+void ACh4_PlayerCharacter::UpdateCargoInteractionFocus()
+{
+	// 플레이어가 기절했거나, 이미 물건/카트를 잡고 있다면 포커스 해제
+	if (bIsStunned || GrabbedComponent != nullptr || GrabbedCart != nullptr)
+	{
+		ClearCargoInteractionFocus();
+		return;
+	}
+
+	// 잡기 애니메이션(GrabMontage)이 재생 중일 때는 시선이 흔들려도 원래 잡으려던 타깃을 유지
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (AnimInstance && GrabMontage && AnimInstance->Montage_IsPlaying(GrabMontage))
+	{
+		return;
+	}
+
+	ACargoActor* BestCargo = FindBestTargetCargo();
+
+	// 타깃 전환 처리
+	if (BestCargo != CurrentFocusedCargo.Get())
+	{
+		if (CurrentFocusedCargo.IsValid())
+		{
+			if (UPrimitiveComponent* PrevComp = CurrentFocusedCargo->GetGrabbableComponent())
+			{
+				PrevComp->SetRenderCustomDepth(false);
+				PrevComp->SetCustomDepthStencilValue(0);
+			}
+		}
+
+		CurrentFocusedCargo = BestCargo;
+
+		if (CurrentFocusedCargo.IsValid())
+		{
+			if (UPrimitiveComponent* NewComp = CurrentFocusedCargo->GetGrabbableComponent())
+			{
+				NewComp->SetCustomDepthStencilValue(CargoStencilValue);
+				NewComp->SetRenderCustomDepth(true);
+			}
+		}
+	}
+
+	// 프롬프트 위젯 갱신
+	if (CurrentFocusedCargo.IsValid() && CargoPromptComponent)
+	{
+		ACargoActor* Target = CurrentFocusedCargo.Get();
+		FVector Origin, BoxExtent;
+		Target->GetActorBounds(false, Origin, BoxExtent);
+
+		const FVector PromptWorldLoc = Origin + FVector(0.0f, 0.0f, BoxExtent.Z + 15.0f);
+		CargoPromptComponent->SetWorldLocation(PromptWorldLoc);
+
+		if (!CargoPromptComponent->IsVisible())
+		{
+			CargoPromptComponent->SetHiddenInGame(false);
+			CargoPromptComponent->SetVisibility(true);
+
+			if (UUserWidget* UserWidget = CargoPromptComponent->GetUserWidgetObject())
+			{
+				if (UTextBlock* ActionText = Cast<UTextBlock>(UserWidget->GetWidgetFromName(TEXT("Text_Action"))))
+				{
+					ActionText->SetText(FText::FromString(TEXT("GRAB")));
+				}
+				if (UTextBlock* KeyText = Cast<UTextBlock>(UserWidget->GetWidgetFromName(TEXT("Text_Key"))))
+				{
+					KeyText->SetText(FText::FromString(TEXT("E")));
+				}
+			}
+		}
+	}
+	else
+	{
+		if (CargoPromptComponent && CargoPromptComponent->IsVisible())
+		{
+			CargoPromptComponent->SetVisibility(false);
+			CargoPromptComponent->SetHiddenInGame(true);
+		}
+	}
+}
+
+void ACh4_PlayerCharacter::ClearCargoInteractionFocus()
+{
+	if (CurrentFocusedCargo.IsValid())
+	{
+		if (UPrimitiveComponent* Comp = CurrentFocusedCargo->GetGrabbableComponent())
+		{
+			Comp->SetRenderCustomDepth(false);
+			Comp->SetCustomDepthStencilValue(0);
+		}
+		CurrentFocusedCargo.Reset();
+	}
+
+	if (CargoPromptComponent && CargoPromptComponent->IsVisible())
+	{
+		CargoPromptComponent->SetVisibility(false);
+		CargoPromptComponent->SetHiddenInGame(true);
 	}
 }

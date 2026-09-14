@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Player/Ch4CharacterTypes.h"
+
+class ACargoActor;
 #include "Ch4_PlayerCharacter.generated.h"
 
 UCLASS()
@@ -37,6 +39,7 @@ protected:
 	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
 	
 public:
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void PawnClientRestart() override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
@@ -150,7 +153,7 @@ public:
 	FName NameplateSocketName = TEXT("head_socket");
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="UI|Nameplate")
-	FVector NameplateOffset = FVector(0.0f, 0.0f, 32.0f);
+	FVector NameplateOffset = FVector(0.0f, 0.0f, 80.0f);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="UI|Nameplate")
 	float NameplateMaxDrawDistance = 2500.0f;
@@ -182,6 +185,50 @@ protected:
 
 	FTimerHandle NameplateRetryTimerHandle;
 	int32 NameplateRetryCount = 0;
+
+	// --- Cargo Interaction Focus (Player-Driven) ---
+	/** 현재 상호작용 포커스를 받고 있는 카고 (로컬 플레이어 전용) */
+	TWeakObjectPtr<class ACargoActor> CurrentFocusedCargo;
+
+	/** 타깃 카고 위에 띄워줄 단일 재사용 인터랙션 말풍선 위젯 컴포넌트 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interaction|Cargo")
+	TObjectPtr<class UWidgetComponent> CargoPromptComponent;
+
+	/** 말풍선에 사용할 위젯 클래스 (기본값: WBP_InteractPrompt) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Interaction|Cargo")
+	TSubclassOf<class UUserWidget> CargoPromptWidgetClass;
+
+	/** 카고 탐지 반경 (cm 단위, 기본 180cm) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Interaction|Cargo")
+	float CargoDetectionRadius = 180.0f;
+
+	/** 아웃라인에 사용할 포스트 프로세스 머티리얼 (/Game/Material/Outline) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Interaction|Cargo")
+	TObjectPtr<class UMaterialInterface> OutlineMaterial;
+
+	/** 카고 포커스 시 적용할 선명한 아웃라인 색상 (기본: 선명한 네온 골드/옐로우) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Interaction|Cargo")
+	FLinearColor CargoOutlineColor = FLinearColor(2.5f, 1.8f, 0.1f, 1.0f);
+
+	/** 카고 포커스 시 적용할 Custom Depth Stencil 값 (머티리얼의 ItemStencilValue와 매칭) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Interaction|Cargo")
+	int32 CargoStencilValue = 1;
+
+	/** 로컬 카메라용 다이내믹 머티리얼 인스턴스 */
+	UPROPERTY(Transient)
+	TObjectPtr<class UMaterialInstanceDynamic> OutlineMID;
+
+	/** 로컬 카메라에 아웃라인 포스트 프로세스 머티리얼 적용 */
+	void SetupCameraOutlinePostProcess();
+
+	/** 로컬 플레이어 시야 전방의 최적 카고를 탐색하고 아웃라인/말풍선을 갱신 */
+	void UpdateCargoInteractionFocus();
+
+	/** 전방 화각(Dot Product)과 거리를 종합 평가하여 가장 적합한 카고 1개를 반환 */
+	class ACargoActor* FindBestTargetCargo() const;
+
+	/** 현재 포커스 중인 카고의 아웃라인을 끄고 말풍선을 숨김 */
+	void ClearCargoInteractionFocus();
 
 	void InitializeCharacterPhysics();
 

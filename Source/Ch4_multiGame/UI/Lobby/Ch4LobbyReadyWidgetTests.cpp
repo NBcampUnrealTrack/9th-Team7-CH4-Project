@@ -55,6 +55,11 @@ bool FCh4LobbyReadyStatusContract::RunTest(const FString&)
 		TextProperty && TextProperty->HasMetaData(TEXT("BindWidget")));
 #endif
 
+	const FProperty* AnimProperty = FindFProperty<FProperty>(
+		UCh4LobbyReadyWidget::StaticClass(), TEXT("ReadyPopAnim"));
+	TestTrue(TEXT("ReadyPopAnim is an optional BindWidgetAnim"),
+		AnimProperty && AnimProperty->HasMetaData(TEXT("BindWidgetAnimOptional")));
+
 	const FClassProperty* WidgetClassProperty = FindFProperty<FClassProperty>(
 		ACh4_multiGameLobbyPlayerController::StaticClass(), TEXT("LobbyReadyWidgetClass"));
 	TestTrue(TEXT("Lobby Controller exposes only Ch4 Lobby Ready Widget subclasses"),

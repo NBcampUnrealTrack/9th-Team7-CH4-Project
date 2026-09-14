@@ -36,6 +36,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="UI|Lobby Ready")
 	TSubclassOf<UCh4LobbyReadyWidget> LobbyReadyWidgetClass;
 
+	/** Development cheat: updates Lobby Ready UI for visual/animation testing. Usage: TestLobbyReady 1 2 1 */
+	UFUNCTION(Exec, BlueprintCallable, Category="Lobby|Debug")
+	void TestLobbyReady(int32 ReadyCount = 1, int32 TotalCount = 2, bool bReady = true);
+
 private:
 	void InitializeLobbyReadyUI();
 	void BindLobbyReadyState();
