@@ -25,7 +25,8 @@ public class Ch4_multiGame : ModuleRules
 			"ModelViewViewModel",
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",
-			"Landscape"
+			"Landscape",
+			"PCG"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "Foliage", "MoviePlayer", "DeveloperSettings", "EngineSettings" });

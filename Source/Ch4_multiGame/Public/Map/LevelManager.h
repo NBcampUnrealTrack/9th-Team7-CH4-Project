@@ -67,6 +67,16 @@ public:
 
     UPROPERTY(EditInstanceOnly, Category = "Zone Setup|End")
     AZonePostProcessVolume* EndPostProcessVolume;
+    
+    // 서버에서 생성하여 클라이언트로 복제될 PCG 시드
+    UPROPERTY(ReplicatedUsing = OnRep_PCGSeed)
+    int32 PCGSeed = 0;
+
+    UFUNCTION()
+    void OnRep_PCGSeed();
+
+    // 모든 도로에 PCG 생성 명령을 전달하는 함수
+    void TriggerPCGGeneration();
 
 protected:
     virtual void BeginPlay() override;
