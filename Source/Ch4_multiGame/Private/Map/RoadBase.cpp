@@ -1,8 +1,8 @@
 #include "Map/RoadBase.h"
-
 #include "Components/BoxComponent.h"
 #include "Components/SplineComponent.h"
 #include "Components/SplineMeshComponent.h"
+#include "PCGComponent.h"
 
 ARoadBase::ARoadBase()
 {
@@ -37,6 +37,9 @@ ARoadBase::ARoadBase()
 
 	// 모든 환경에서 사용할 기본 배경 영역(지울예정)
 	BackgroundBounds->SetBoxExtent(FVector(20000.0f, 20000.0f, 48000.0f));
+	
+	// PCG 컴포넌트
+	PCGComponent = CreateDefaultSubobject<UPCGComponent>(TEXT("PCGComponent"));
 }
 
 void ARoadBase::BeginPlay()
@@ -177,6 +180,22 @@ void ARoadBase::OnConstruction(const FTransform& Transform)
 		SplineMeshComponents.Add(SplineMeshComp);
 	}
 }
+
+
+void ARoadBase::GenerateObstacles(int32 InRandomSeed)
+{
+	if (!PCGComponent || !PCGComponent->GetGraph())
+	{
+		return;
+	}
+
+	RandomSeed = InRandomSeed;
+
+	// 기존 장애물 정리 후 재배치
+	PCGComponent->CleanupLocal(true);
+	PCGComponent->GenerateLocal(true);
+}
+
 
 void ARoadBase::DrawBackgroundGuides()
 {

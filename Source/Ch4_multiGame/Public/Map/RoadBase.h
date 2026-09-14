@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/SplineMeshComponent.h"
+#include "PCGComponent.h"
 #include "RoadBase.generated.h"
 
 class UBoxComponent;
@@ -20,6 +21,10 @@ public:
 	ARoadBase();
 
 	virtual void OnConstruction(const FTransform& Transform) override;
+	
+	// LevelManager가 호출해 줄 런타임 PCG 장애물 생성 함수
+	UFUNCTION(BlueprintCallable, Category = "PCG")
+	void GenerateObstacles(int32 InRandomSeed);
 
 	void DrawBackgroundGuides();
 
@@ -81,4 +86,12 @@ public:
 	// 배경 영역 표시할지 설정(지울예정)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Guide")
 	bool bShowBackgroundBounds = true;
+	
+	// 도로 생성 시 호출할 PCG 컴포넌트
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PCG")
+	TObjectPtr<UPCGComponent> PCGComponent;
+	
+	// PCG가 읽어갈 수 있도록 EditAnywhere, BlueprintReadWrite 설정
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+	int32 RandomSeed = 0;
 };
