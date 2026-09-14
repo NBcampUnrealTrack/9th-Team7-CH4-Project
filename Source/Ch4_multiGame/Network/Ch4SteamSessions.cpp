@@ -297,7 +297,7 @@ void UCh4_multiGameGameInstance::HandleSteamFindComplete(bool bSucceeded)
 		SteamRooms.Add(Entry);
 	}
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[SteamSession] Found %d compatible sessions"), SteamRooms.Num());
-	CompleteSteamOperation(true, FText::Format(LOCTEXT("FoundRooms", "Found {0} Steam room(s)."), FText::AsNumber(SteamRooms.Num())));
+	CompleteSteamOperation(true, FText::GetEmpty());
 }
 
 bool UCh4_multiGameGameInstance::JoinSteamGame(UCh4RoomEntryData* Room)
