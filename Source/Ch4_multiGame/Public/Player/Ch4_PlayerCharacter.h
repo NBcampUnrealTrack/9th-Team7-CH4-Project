@@ -37,7 +37,6 @@ protected:
 	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
 	
 public:
-	virtual void Tick(float DeltaSeconds) override;
 	virtual void PawnClientRestart() override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
@@ -200,6 +199,7 @@ protected:
 	void InputActionCartGrab(const struct FInputActionValue& Value);
 	void InputActionZoom(const struct FInputActionValue& Value);
 	
+	
 	// MovementMode가 변경될 때 호출
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
 
@@ -319,50 +319,4 @@ protected:
 	float MaxZoom = 600.f;
 	
 	float TargetArmLength = 300.0f;
-
-protected:
-	/** 가리고 있거나 페이드 아웃 중인 컴포넌트 1개의 상태 */
-	struct FCh4CameraOcclusionState
-	{
-		// 0 = 원래대로, 1 = 완전 디졸브
-		float FadeAmount = 0.0f;
-		// 되돌리기용 원본 머티리얼 (슬롯 순서대로)
-		TArray<TWeakObjectPtr<class UMaterialInterface>> OriginalMaterials;
-	};
-
-	/** 카메라 ~ 캐릭터 사이 라인(스피어) 트레이스로 가리는 액터를 찾아 디졸브 처리한다. */
-	void UpdateCameraOcclusion(float DeltaSeconds);
-
-	/** 컴포넌트의 머티리얼을 OcclusionMaterial(디졸브 전용)로 바꿔치기하고 진행도를 적용한다. */
-	void ApplyOcclusionMaterial(class UPrimitiveComponent* Component, float DissolveAmount);
-
-	/** 가림이 끝난 컴포넌트의 머티리얼을 원래대로 되돌린다. */
-	void RestoreOriginalMaterials(class UPrimitiveComponent* Component, const FCh4CameraOcclusionState& State);
-
-	// 초당 디졸브 페이드 속도 (1이면 1초에 완전히 사라지거나 나타남)
-	UPROPERTY(EditDefaultsOnly, Category="Camera|Occlusion")
-	float OcclusionFadeSpeed = 4.0f;
-
-	// 계속 가려져 있을 때 도달할 최대 디졸브 값 (1.0=완전 투명, 그보다 작으면 반투명 상태에서 멈춤)
-	UPROPERTY(EditDefaultsOnly, Category="Camera|Occlusion", meta=(ClampMin="0.0", ClampMax="1.0"))
-	float MaxDissolveAmount = 0.5f;
-	
-	// 머티리얼에 노출된 디졸브(격자 페이드) 스칼라 파라미터 이름
-	UPROPERTY(EditDefaultsOnly, Category="Camera|Occlusion")
-	FName DissolveParameterName = TEXT("DissolveAmount");
-
-	// 가림 판정에 사용할 트레이스 채널 (다른 시스템과 겹치지 않도록 전용 채널 사용 권장)
-	UPROPERTY(EditDefaultsOnly, Category="Camera|Occlusion")
-	TEnumAsByte<ECollisionChannel> CameraOcclusionChannel = ECC_Visibility;
-
-	// 가릴 때 임시로 덮어씌울 전용 디졸브 머티리얼 (Masked + Dither Temporal AA + DissolveAmount 파라미터)
-	UPROPERTY(EditDefaultsOnly, Category="Camera|Occlusion")
-	TObjectPtr<class UMaterialInterface> OcclusionMaterial;
-
-	// 켜면 PIE 화면에 카메라->캐릭터 라인 트레이스와 히트 지점을 매 틱 그려준다 (Shipping 빌드에서는 자동으로 제거됨)
-	UPROPERTY(EditDefaultsOnly, Category="Camera|Occlusion|Debug")
-	bool bDebugDrawOcclusionTrace = false;
-
-	// 현재 가리고 있거나 페이드 아웃 중인 컴포넌트 -> 상태
-	TMap<TWeakObjectPtr<class UPrimitiveComponent>, FCh4CameraOcclusionState> OccludingComponents;
 };
