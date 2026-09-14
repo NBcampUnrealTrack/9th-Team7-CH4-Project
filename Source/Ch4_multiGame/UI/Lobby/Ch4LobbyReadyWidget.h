@@ -7,6 +7,7 @@
 #include "Ch4LobbyReadyWidget.generated.h"
 
 class UTextBlock;
+class UWidgetAnimation;
 
 /** C++ presentation base for the always-visible Lobby Ready summary. */
 UCLASS(Abstract, Blueprintable)
@@ -28,9 +29,18 @@ protected:
 	UPROPERTY(meta=(BindWidget))
 	TObjectPtr<UTextBlock> Text_ReadyStatus;
 
+	UPROPERTY(Transient, meta=(BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> ReadyPopAnim;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Ready|Style")
 	FSlateColor ReadyColor = FSlateColor(FLinearColor::Green);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Ready|Style")
 	FSlateColor NotReadyColor = FSlateColor(FLinearColor::Red);
+
+private:
+	int32 PreviousReadyCount = -1;
+	int32 PreviousPlayerCount = -1;
+	bool bPreviousLocalPlayerReady = false;
+	bool bHasInitialized = false;
 };

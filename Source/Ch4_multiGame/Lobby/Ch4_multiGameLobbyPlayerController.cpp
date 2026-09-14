@@ -273,3 +273,17 @@ void ACh4_multiGameLobbyPlayerController::ServerSetReady_Implementation()
 
 	LobbyGameMode->HandlePlayerReady(this);
 }
+
+void ACh4_multiGameLobbyPlayerController::TestLobbyReady(const int32 ReadyCount, const int32 TotalCount, const bool bReady)
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	InitializeLobbyReadyUI();
+	if (LobbyReadyWidget)
+	{
+		LobbyReadyWidget->UpdateReadyStatus(ReadyCount, TotalCount, bReady);
+	}
+}
