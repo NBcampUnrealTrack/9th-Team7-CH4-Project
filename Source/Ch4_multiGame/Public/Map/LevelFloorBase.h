@@ -17,21 +17,12 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void OnConstruction(const FTransform& Transform) override;
-	
-	void DrawBackgroundGuides();
+
 
 public:
 	// 환경 전체의 충돌 영역
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Environment")
 	TObjectPtr<UBoxComponent> CollisionBox;
-
-	// 배경을 배치할 영역을 보여주는 에디터용 가이드(지울예정)
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Environment Guide")
-	TObjectPtr<UBoxComponent> BackgroundBounds;
-
-	// 배경 영역을 몇 등분할지 설정(지울예정)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Guide")
-	int32 DivisionCount = 8;
 	
 	// --- 오버랩 진입(Begin) 시 사용할 태그 설정 ---
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment | BeginOverlap")
