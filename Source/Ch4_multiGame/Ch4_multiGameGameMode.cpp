@@ -29,6 +29,36 @@ ACh4_multiGameGameMode::ACh4_multiGameGameMode()
 	LobbyMap = TSoftObjectPtr<UWorld>(FSoftObjectPath(TEXT("/Game/Lobby/L_Lobby.L_Lobby")));
 }
 
+void ACh4_multiGameGameMode::PostLogin(APlayerController* NewPlayer)
+{
+	Super::PostLogin(NewPlayer);
+
+	if (HasAuthority())
+	{
+		if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+		{
+			GI->UpdateSteamSessionPlayerCount(GetNumPlayers());
+		}
+	}
+}
+
+void ACh4_multiGameGameMode::Logout(AController* Exiting)
+{
+	const int32 RemainingPlayerCount = IsValid(Cast<APlayerController>(Exiting))
+		? FMath::Max(GetNumPlayers() - 1, 0)
+		: GetNumPlayers();
+
+	Super::Logout(Exiting);
+
+	if (HasAuthority())
+	{
+		if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+		{
+			GI->UpdateSteamSessionPlayerCount(RemainingPlayerCount);
+		}
+	}
+}
+
 bool ACh4_multiGameGameMode::RegisterGameplayCart(ACartBase* Cart)
 {
 	if (!HasAuthority() || !IsValid(Cart) || Cart->IsActorBeingDestroyed()
