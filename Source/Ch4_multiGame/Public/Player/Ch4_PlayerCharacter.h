@@ -377,6 +377,9 @@ protected:
 	
 	float TargetArmLength = 300.0f;
 
-	UFUNCTION(NetMulticast, Reliable)
-	void MulticastRPC_SetRagdollEnabled(bool bEnabled);
+	UPROPERTY(ReplicatedUsing = OnRep_RagdollEnabled)
+	bool bRagdollEnabled = true;
+
+	UFUNCTION()
+	void OnRep_RagdollEnabled();
 };
