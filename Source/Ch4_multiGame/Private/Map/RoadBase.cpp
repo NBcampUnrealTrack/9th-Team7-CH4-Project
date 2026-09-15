@@ -9,7 +9,10 @@ ARoadBase::ARoadBase()
 	PrimaryActorTick.bCanEverTick = false;
 
 	bReplicates = true;
-	SetReplicateMovement(true);
+	// LevelManager replicates the authoritative order and deterministically arranges
+	// the same placed road actors on every peer. Replicating each road transform as
+	// well creates a second transform source when a distant road becomes relevant.
+	SetReplicateMovement(false);
 
 	// 루트 컴포넌트
 	USceneComponent* RootComp = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
@@ -39,7 +42,9 @@ void ARoadBase::BeginPlay()
 {
 	Super::BeginPlay();
 
-
+	// Existing Blueprint assets may still serialize the former true default.
+	// Enforce the runtime ownership rule without requiring a binary asset resave.
+	SetReplicateMovement(false);
 }
 
 void ARoadBase::OnConstruction(const FTransform& Transform)

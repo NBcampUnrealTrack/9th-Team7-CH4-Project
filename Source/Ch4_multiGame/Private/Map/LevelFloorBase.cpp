@@ -34,6 +34,10 @@ void ALevelFloorBase::BeginPlay()
 {
     Super::BeginPlay();
 
+    // Existing environment Blueprints serialize the previous movement-replication
+    // default. Their placement is already reproduced from LevelManager state.
+    SetReplicateMovement(false);
+
     CollisionBox->OnComponentBeginOverlap.AddDynamic(
        this,
        &ALevelFloorBase::OnCollisionBoxBeginOverlap);

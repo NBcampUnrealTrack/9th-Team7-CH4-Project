@@ -40,8 +40,14 @@ protected:
 	
 public:
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void SetBase(FMovementBaseInterfaceData* MovementBaseInterfaceData, const FName BoneName = NAME_None, bool bNotifyActor = true) override;
 	virtual void PawnClientRestart() override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+
+	/** Writes one complete partial-ragdoll snapshot. Use ch4.Ragdoll.Dump in PIE/Standalone. */
+	void DumpRagdollDiagnosticState(const TCHAR* Reason) const;
+
+	bool IsRagdollEnabledForDiagnostics() const { return bRagdollEnabled; }
 
 	UPROPERTY(VisibleAnywhere, Category="Camera")
 	class USpringArmComponent* SpringArmComponent;

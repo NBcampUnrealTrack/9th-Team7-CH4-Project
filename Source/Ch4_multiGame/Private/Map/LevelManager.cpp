@@ -245,6 +245,32 @@ void ALevelManager::ArrangePlacedZones()
         return;
     }
 
+    auto UseDeterministicPlacementOnly = [](AActor* Actor)
+    {
+        if (Actor)
+        {
+            Actor->SetReplicateMovement(false);
+        }
+    };
+
+    // MiddleZoneOrder is the replicated source of truth. Disable actor movement
+    // replication before applying the arrangement so a later relevancy update
+    // cannot overwrite the client's matching local placement.
+    UseDeterministicPlacementOnly(StartRoadActor);
+    UseDeterministicPlacementOnly(StartEnvironmentActor);
+    UseDeterministicPlacementOnly(EndRoadActor);
+    UseDeterministicPlacementOnly(EndEnvironmentActor);
+
+    for (ARoadBase* Road : MiddleRoadActors)
+    {
+        UseDeterministicPlacementOnly(Road);
+    }
+
+    for (ALevelFloorBase* Environment : MiddleEnvironmentActors)
+    {
+        UseDeterministicPlacementOnly(Environment);
+    }
+
     const float EnvironmentBaseZ = StartEnvironmentActor->GetActorLocation().Z;
 
     auto SetRootMobility = [](AActor* Actor, EComponentMobility::Type Mobility)

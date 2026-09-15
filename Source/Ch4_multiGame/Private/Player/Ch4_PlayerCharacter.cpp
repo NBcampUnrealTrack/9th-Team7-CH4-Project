@@ -18,12 +18,16 @@
 #include "Player/EmotionDataAsset.h"
 #include "Player/GrabbableInterface.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "Components/WidgetComponent.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/TextBlock.h"
 #include "TimerManager.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "PhysicsEngine/PhysicsAsset.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/PrimitiveComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -35,6 +39,39 @@
 namespace
 {
 	FTimerHandle LocalCargoFocusTimerHandle;
+
+	TAutoConsoleVariable<int32> CVarCh4RagdollDebug(
+		TEXT("ch4.Ragdoll.Debug"),
+		0,
+		TEXT("Logs partial-ragdoll state when its movement base or replicated state changes."),
+		ECVF_Cheat);
+
+	void DumpAllRagdollStates()
+	{
+		if (!GEngine)
+		{
+			return;
+		}
+
+		for (const FWorldContext& Context : GEngine->GetWorldContexts())
+		{
+			UWorld* World = Context.World();
+			if (!World || (Context.WorldType != EWorldType::Game && Context.WorldType != EWorldType::PIE))
+			{
+				continue;
+			}
+
+			for (TActorIterator<ACh4_PlayerCharacter> It(World); It; ++It)
+			{
+				It->DumpRagdollDiagnosticState(TEXT("ConsoleDump"));
+			}
+		}
+	}
+
+	FAutoConsoleCommand Ch4DumpRagdollCommand(
+		TEXT("ch4.Ragdoll.Dump"),
+		TEXT("Dumps partial-ragdoll, physics blend, movement-base, animation and network state for every Ch4 character."),
+		FConsoleCommandDelegate::CreateStatic(&DumpAllRagdollStates));
 }
 
 void ACh4_PlayerCharacter::InitLocalPlayerCargoFocus()
@@ -357,6 +394,10 @@ void ACh4_PlayerCharacter::InitializeCharacterPhysics()
 			MeshComp->SetAllBodiesBelowSimulatePhysics(RagdollRootBone, true, bRagdollIncludeSelf);
 			PhysAnimComp->SetStrengthMultiplyer(RagdollStrengthMultiplier);
 			bCharacterPhysicsInitialized = true;
+			if (CVarCh4RagdollDebug.GetValueOnGameThread() != 0)
+			{
+				DumpRagdollDiagnosticState(TEXT("InitializeCharacterPhysics"));
+			}
 		}
 	}
 }
@@ -943,6 +984,55 @@ void ACh4_PlayerCharacter::Tick(float DeltaSeconds)
 	{
 		UpdateCargoInteractionFocus();
 	}
+}
+
+void ACh4_PlayerCharacter::SetBase(FMovementBaseInterfaceData* MovementBaseInterfaceData, const FName BoneName, bool bNotifyActor)
+{
+	UObject* PreviousBase = GetMovementBaseObject();
+	Super::SetBase(MovementBaseInterfaceData, BoneName, bNotifyActor);
+
+	if (PreviousBase != GetMovementBaseObject() && CVarCh4RagdollDebug.GetValueOnGameThread() != 0)
+	{
+		DumpRagdollDiagnosticState(TEXT("MovementBaseChanged"));
+	}
+}
+
+void ACh4_PlayerCharacter::DumpRagdollDiagnosticState(const TCHAR* Reason) const
+{
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+	const UObject* MovementBase = GetMovementBaseObject();
+	const UActorComponent* MovementBaseComponent = Cast<UActorComponent>(MovementBase);
+	const AActor* MovementBaseActor = MovementBaseComponent ? MovementBaseComponent->GetOwner() : Cast<AActor>(MovementBase);
+	const FBodyInstance* RagdollRootBody = MeshComp ? MeshComp->GetBodyInstance(RagdollRootBone) : nullptr;
+	const UAnimInstance* AnimInstance = MeshComp ? MeshComp->GetAnimInstance() : nullptr;
+	const UAnimMontage* ActiveMontage = AnimInstance ? AnimInstance->GetCurrentActiveMontage() : nullptr;
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[RagdollDebug] Reason=%s World=%s Player=%s Role=%s RemoteRole=%s Local=%d Authority=%d State=%d Initialized=%d MeshAnyPhysics=%d RootBody=%s RootSim=%d RootAwake=%d RootBlend=%.3f BlendPhysics=%d MovementMode=%s BaseActor=%s BaseComponent=%s MeshCollision=%s CapsuleCollision=%s MeshRelative=%s AnimInstance=%s ActiveMontage=%s"),
+		Reason ? Reason : TEXT("Unknown"),
+		GetWorld() ? *GetWorld()->GetPackage()->GetName() : TEXT("None"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		*UEnum::GetValueAsString(GetRemoteRole()),
+		IsLocallyControlled() ? 1 : 0,
+		HasAuthority() ? 1 : 0,
+		bRagdollEnabled ? 1 : 0,
+		bCharacterPhysicsInitialized ? 1 : 0,
+		MeshComp && MeshComp->IsAnySimulatingPhysics() ? 1 : 0,
+		*RagdollRootBone.ToString(),
+		RagdollRootBody && RagdollRootBody->IsInstanceSimulatingPhysics() ? 1 : 0,
+		RagdollRootBody && RagdollRootBody->IsInstanceAwake() ? 1 : 0,
+		RagdollRootBody ? RagdollRootBody->PhysicsBlendWeight : -1.0f,
+		MeshComp && MeshComp->bBlendPhysics ? 1 : 0,
+		Movement ? *UEnum::GetValueAsString(Movement->MovementMode) : TEXT("Invalid"),
+		*GetNameSafe(MovementBaseActor),
+		*GetNameSafe(MovementBase),
+		MeshComp ? *MeshComp->GetCollisionProfileName().ToString() : TEXT("None"),
+		GetCapsuleComponent() ? *UEnum::GetValueAsString(GetCapsuleComponent()->GetCollisionEnabled()) : TEXT("Invalid"),
+		MeshComp ? *MeshComp->GetRelativeTransform().ToHumanReadableString() : TEXT("Invalid"),
+		*GetNameSafe(AnimInstance),
+		*GetNameSafe(ActiveMontage));
 }
 
 void ACh4_PlayerCharacter::ServerRPC_RequestCartGrab_Implementation(ACartBase* TargetCart)
@@ -1844,5 +1934,10 @@ void ACh4_PlayerCharacter::OnRep_RagdollEnabled()
 	else
 	{
 		GetMesh()->SetAllBodiesSimulatePhysics(false);
+	}
+
+	if (CVarCh4RagdollDebug.GetValueOnGameThread() != 0)
+	{
+		DumpRagdollDiagnosticState(TEXT("OnRep_RagdollEnabled"));
 	}
 }
