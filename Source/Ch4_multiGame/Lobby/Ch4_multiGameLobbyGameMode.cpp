@@ -157,6 +157,16 @@ void ACh4_multiGameLobbyGameMode::StartPlay()
 {
 	Super::StartPlay();
 
+	if (HasAuthority())
+	{
+		if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+		{
+			// Returning from Gameplay keeps the same Steam session. Publish it again only
+			// after this Lobby world has initialized and can accept new players.
+			GI->RestoreSteamSessionLobbyAvailability();
+		}
+	}
+
 	int32 PlayerStartCount = 0;
 	for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
 	{
@@ -661,7 +671,67 @@ void ACh4_multiGameLobbyGameMode::StartGameTravel()
 	// initial Steam room creation uses ?listen; absolute travel drops lobby options.
 	const FString TravelURL = MapPackage;
 	PendingTravelDestination = TravelURL;
-	if (const auto* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+	if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+	{
+		TWeakObjectPtr<ACh4_multiGameLobbyGameMode> WeakThis(this);
+		GI->SetSteamSessionGameplayAvailability(
+			[WeakThis](const bool bSucceeded)
+			{
+				if (WeakThis.IsValid())
+				{
+					WeakThis->HandleGameplaySessionAvailabilityUpdated(bSucceeded);
+				}
+			});
+		return;
+	}
+
+	// The project normally uses UCh4_multiGameGameInstance. Preserve local/direct-IP
+	// travel if a test world supplies a different GameInstance class.
+	HandleGameplaySessionAvailabilityUpdated(true);
+}
+
+void ACh4_multiGameLobbyGameMode::HandleGameplaySessionAvailabilityUpdated(const bool bSucceeded)
+{
+	if (!HasAuthority() || !bTravelStarted)
+	{
+		return;
+	}
+
+	if (!bSucceeded)
+	{
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[Lobby] Travel aborted: Steam room could not be hidden before Gameplay travel"));
+		ResetTravelAfterFailure();
+		ShowServerDebugStatus(TEXT("TRAVEL FAILED\nSteam room availability update failed"), FColor::Red, 15.0f);
+		if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+		{
+			// UpdateSession may already have copied the requested flags locally even
+			// when the backend reports failure. Restore the joinable Lobby policy.
+			GI->RestoreSteamSessionLobbyAvailability();
+		}
+		return;
+	}
+
+	PerformGameTravel();
+}
+
+void ACh4_multiGameLobbyGameMode::PerformGameTravel()
+{
+	UWorld* World = GetWorld();
+	if (!HasAuthority() || !bTravelStarted || !IsValid(World) || PendingTravelDestination.IsEmpty())
+	{
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[Lobby] Travel aborted after availability update: World or destination became invalid"));
+		ResetTravelAfterFailure();
+		if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+		{
+			GI->RestoreSteamSessionLobbyAvailability();
+		}
+		return;
+	}
+
+	const FString TravelURL = PendingTravelDestination;
+	if (const UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
 	{
 		GI->LogMatchTravel(World, TravelURL, bUseSeamlessTravel);
 	}
@@ -675,8 +745,12 @@ void ACh4_multiGameLobbyGameMode::StartGameTravel()
 		ResetTravelAfterFailure();
 		UE_LOG(LogCh4_multiGame, Error,
 			TEXT("[Lobby] ServerTravel failed for %s"),
-			*MapPackage);
+			*TravelURL);
 		ShowServerDebugStatus(TEXT("SERVER TRAVEL FAILED\nCheck Output Log"), FColor::Red, 15.0f);
+		if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+		{
+			GI->RestoreSteamSessionLobbyAvailability();
+		}
 	}
 }
 
