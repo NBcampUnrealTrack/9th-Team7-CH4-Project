@@ -177,8 +177,11 @@ private:
     UPROPERTY(Replicated)
     TArray<TObjectPtr<ACh4_PlayerCharacter>> AnchorOccupants;
 
-    UPROPERTY(Replicated)
+    UPROPERTY(ReplicatedUsing = OnRep_PreparationLocked)
     bool bPreparationLocked = false;
+
+    UFUNCTION()
+    void OnRep_PreparationLocked();
 
     bool bWasSimulatingBeforePreparationLock = true;
 

@@ -97,33 +97,27 @@ void ACartBase::BeginPlay()
     }
 
     InitializeStabilizationSettings();
+    CartMesh->SetSimulatePhysics(!bPreparationLocked);
+    CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
+    CartMesh->SetAngularDamping(FMath::Max(CartAngularDamping, 0.0f));
 
-    if (HasAuthority())
+    FBodyInstance* BodyInstance = CartMesh->GetBodyInstance();
+    if (BodyInstance)
     {
-        CartMesh->SetSimulatePhysics(!bPreparationLocked);
-        CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
-        CartMesh->SetAngularDamping(FMath::Max(CartAngularDamping, 0.0f));
-
-        FBodyInstance* BodyInstance = CartMesh->GetBodyInstance();
-        if (BodyInstance)
-        {
-            BodyInstance->InertiaTensorScale = FVector(
-                FMath::Max(CartInertiaTensorScale.X, UE_KINDA_SMALL_NUMBER),
-                FMath::Max(CartInertiaTensorScale.Y, UE_KINDA_SMALL_NUMBER),
-                FMath::Max(CartInertiaTensorScale.Z, UE_KINDA_SMALL_NUMBER));
-            BodyInstance->UpdateMassProperties();
-        }
-
-        CartMesh->SetCenterOfMass(CartCenterOfMassOffset);
-        CartMesh->SetPhysicsMaxAngularVelocityInDegrees(
-            FMath::Max(MaximumAngularVelocityDegrees, 0.0f), false, NAME_None);
-        ConfigureUprightSafetyConstraint();
+        BodyInstance->InertiaTensorScale = FVector(
+            FMath::Max(CartInertiaTensorScale.X, UE_KINDA_SMALL_NUMBER),
+            FMath::Max(CartInertiaTensorScale.Y, UE_KINDA_SMALL_NUMBER),
+            FMath::Max(CartInertiaTensorScale.Z, UE_KINDA_SMALL_NUMBER));
+        BodyInstance->UpdateMassProperties();
     }
-    else
-    {
-        // 클라이언트는 서버가 복제한 위치를 그대로 따른다.
-        CartMesh->SetSimulatePhysics(false);
-    }
+
+    CartMesh->SetCenterOfMass(CartCenterOfMassOffset);
+    CartMesh->SetPhysicsMaxAngularVelocityInDegrees(
+        FMath::Max(MaximumAngularVelocityDegrees, 0.0f), false, NAME_None);
+    ConfigureUprightSafetyConstraint();
+
+    // 클라이언트는 서버가 복제한 위치를 그대로 따른다.
+    // CartMesh->SetSimulatePhysics(false);
 }
 
 void ACartBase::Tick(float DeltaTime)
@@ -150,6 +144,14 @@ void ACartBase::Tick(float DeltaTime)
     if (bDrawCartPhysicsDebug)
     {
         DrawCartPhysicsDebug();
+    }
+}
+
+void ACartBase::OnRep_PreparationLocked()
+{
+    if (CartMesh)
+    {
+        CartMesh->SetSimulatePhysics(!bPreparationLocked);
     }
 }
 
