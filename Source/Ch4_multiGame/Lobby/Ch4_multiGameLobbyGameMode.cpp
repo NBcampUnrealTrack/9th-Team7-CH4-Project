@@ -360,6 +360,14 @@ void ACh4_multiGameLobbyGameMode::UpdateLobbyCounts(
 		UE_LOG(LogCh4_multiGame, Error,
 			TEXT("[Lobby] ACh4_multiGameLobbyGameState is not active. Check the Lobby GameMode assignment."));
 	}
+
+	if (HasAuthority())
+	{
+		if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+		{
+			GI->UpdateSteamSessionPlayerCount(NewPlayerCount);
+		}
+	}
 }
 
 void ACh4_multiGameLobbyGameMode::HandleDeferredLobbyRosterChange()

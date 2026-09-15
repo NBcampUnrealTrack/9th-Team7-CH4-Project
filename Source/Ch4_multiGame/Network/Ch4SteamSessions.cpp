@@ -120,6 +120,33 @@ TArray<UCh4RoomEntryData*> UCh4_multiGameGameInstance::GetSteamRooms() const
 	return Result;
 }
 
+void UCh4_multiGameGameInstance::UpdateSteamSessionPlayerCount(int32 NewPlayerCount)
+{
+	if (bSteamShuttingDown || !SteamSessionInterface.IsValid() || !bSteamTravelIsHost)
+	{
+		return;
+	}
+
+	FNamedOnlineSession* Session = SteamSessionInterface->GetNamedSession(NAME_GameSession);
+	if (!Session)
+	{
+		return;
+	}
+
+	const int32 MaxPlayers = Session->SessionSettings.NumPublicConnections;
+	const int32 ClampedPlayerCount = FMath::Clamp(NewPlayerCount, 1, MaxPlayers);
+	const int32 NewOpenSlots = FMath::Clamp(MaxPlayers - ClampedPlayerCount, 0, MaxPlayers);
+
+	if (Session->NumOpenPublicConnections != NewOpenSlots)
+	{
+		Session->NumOpenPublicConnections = NewOpenSlots;
+		SteamSessionInterface->UpdateSession(NAME_GameSession, Session->SessionSettings, true);
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[SteamSession] Updated advertised player count: %d/%d (NumOpenPublicConnections=%d)"),
+			ClampedPlayerCount, MaxPlayers, NewOpenSlots);
+	}
+}
+
 void UCh4_multiGameGameInstance::SetSteamOperation(ECh4SteamSessionOperation Operation, const FText& Message)
 {
 	SteamOperation = Operation;

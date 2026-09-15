@@ -65,6 +65,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Online|Steam")
 	FCh4SteamSessionComplete OnSteamSessionComplete;
 
+	/** Updates the advertised open public connection count on the active Steam session (host only). */
+	UFUNCTION(BlueprintCallable, Category="Online|Steam")
+	void UpdateSteamSessionPlayerCount(int32 NewPlayerCount);
+
 	/** Explicit process-wide legacy mode: -Ch4DirectIP -nosteam. Never an automatic fallback. */
 	bool IsDirectIPDebugEnabled() const { return bDirectIPDebugEnabled; }
 	void HandleSteamConnectionFailure(UWorld* FailedWorld, const FString& Message);

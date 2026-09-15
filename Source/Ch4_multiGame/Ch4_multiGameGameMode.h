@@ -32,6 +32,9 @@ public:
 	/** Constructor */
 	ACh4_multiGameGameMode();
 
+	virtual void PostLogin(APlayerController* NewPlayer) override;
+	virtual void Logout(AController* Exiting) override;
+
 	/** Deprecated Blueprint compatibility API that converts a lower absolute count into NotifyCargoLost. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Game Flow|Legacy",
 		meta=(DeprecatedFunction, DeprecationMessage="Use NotifyCargoLost for delta-based Cargo loss."))
