@@ -15,6 +15,10 @@ ACartBase::ACartBase()
     // 멀티: 서버가 물리를 돌리고 클라는 결과를 받는다.
     bReplicates = true;
     SetReplicateMovement(true);
+    
+    // 물리 물체라 위치가 자주 바뀐다. 복제 빈도를 올려 클라이언트 끊김을 줄인다.
+    NetUpdateFrequency = 60.0f;
+    MinNetUpdateFrequency = 30.0f;
 
     // ── 카트 본체 ──
     CartMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CartMesh"));
@@ -97,27 +101,34 @@ void ACartBase::BeginPlay()
     }
 
     InitializeStabilizationSettings();
-    CartMesh->SetSimulatePhysics(!bPreparationLocked);
-    CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
-    CartMesh->SetAngularDamping(FMath::Max(CartAngularDamping, 0.0f));
 
-    FBodyInstance* BodyInstance = CartMesh->GetBodyInstance();
-    if (BodyInstance)
+    if (HasAuthority())
     {
-        BodyInstance->InertiaTensorScale = FVector(
-            FMath::Max(CartInertiaTensorScale.X, UE_KINDA_SMALL_NUMBER),
-            FMath::Max(CartInertiaTensorScale.Y, UE_KINDA_SMALL_NUMBER),
-            FMath::Max(CartInertiaTensorScale.Z, UE_KINDA_SMALL_NUMBER));
-        BodyInstance->UpdateMassProperties();
+        CartMesh->SetSimulatePhysics(!bPreparationLocked);
+        CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
+        CartMesh->SetAngularDamping(FMath::Max(CartAngularDamping, 0.0f));
+
+        FBodyInstance* BodyInstance = CartMesh->GetBodyInstance();
+        if (BodyInstance)
+        {
+            BodyInstance->InertiaTensorScale = FVector(
+                FMath::Max(CartInertiaTensorScale.X, UE_KINDA_SMALL_NUMBER),
+                FMath::Max(CartInertiaTensorScale.Y, UE_KINDA_SMALL_NUMBER),
+                FMath::Max(CartInertiaTensorScale.Z, UE_KINDA_SMALL_NUMBER));
+            BodyInstance->UpdateMassProperties();
+        }
+
+        CartMesh->SetCenterOfMass(CartCenterOfMassOffset);
+        CartMesh->SetPhysicsMaxAngularVelocityInDegrees(
+            FMath::Max(MaximumAngularVelocityDegrees, 0.0f), false, NAME_None);
+        ConfigureUprightSafetyConstraint();
     }
-
-    CartMesh->SetCenterOfMass(CartCenterOfMassOffset);
-    CartMesh->SetPhysicsMaxAngularVelocityInDegrees(
-        FMath::Max(MaximumAngularVelocityDegrees, 0.0f), false, NAME_None);
-    ConfigureUprightSafetyConstraint();
-
-    // 클라이언트는 서버가 복제한 위치를 그대로 따른다.
-    // CartMesh->SetSimulatePhysics(false);
+    else
+    {
+        // 클라이언트는 서버가 복제한 위치만 따른다. 자체 물리는 어긋남을 만든다.
+        CartMesh->SetSimulatePhysics(false);
+        CartMesh->SetEnableGravity(false);
+    }
 }
 
 void ACartBase::Tick(float DeltaTime)
