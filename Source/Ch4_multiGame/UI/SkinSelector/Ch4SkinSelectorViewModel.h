@@ -214,6 +214,8 @@ public:
 	virtual void BeginDestroy() override;
 
 private:
+	bool bHasRefreshedHatUnlockState = false;
+
 	UUserWidget* GetOwningUserWidget() const;
 	ACh4_multiGamePlayerController* GetOwningCh4PlayerController() const;
 	ACh4_multiGamePlayerState* GetOwningCh4PlayerState() const;

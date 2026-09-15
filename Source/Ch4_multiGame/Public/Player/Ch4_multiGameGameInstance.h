@@ -90,6 +90,10 @@ public:
 	/** Stores a new personal best from a replicated server result and saves only when either record improves. */
 	bool RecordGameResult(const FCh4GameResult& Result);
 
+	/** Prints the local runtime profile, disk SaveGame, requirements, and all four unlock decisions. */
+	UFUNCTION(BlueprintCallable, Category="Player|Progress|Debug")
+	void DumpHatUnlockState() const;
+
 	UFUNCTION(BlueprintPure, Category="Player|Progress")
 	int32 GetBestSingleGameScore() const;
 
