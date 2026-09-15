@@ -41,6 +41,10 @@ bool FCh4SteamSessionSettingsTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("No new lobby voice room"), Settings.bUseLobbiesVoiceChatIfAvailable);
 	TestEqual(TEXT("Engine build compatibility remains enabled"), Settings.BuildUniqueId, GetBuildUniqueId());
 	TestTrue(TEXT("Our settings satisfy the receive-side filter"), Ch4SteamSessions::IsCompatible(Settings));
+	FString MatchState;
+	TestTrue(TEXT("New rooms advertise the Lobby match state"),
+		Settings.Get(Ch4SteamSessions::MatchStateKey, MatchState)
+		&& MatchState == Ch4SteamSessions::LobbyMatchState);
 	const TSharedRef<FOnlineSessionSearch> Search = Ch4SteamSessions::MakeSearch();
 	TestFalse(TEXT("Internet search"), Search->bIsLanQuery);
 	TestEqual(TEXT("Bounded result count"), Search->MaxSearchResults, 100);
@@ -50,6 +54,21 @@ bool FCh4SteamSessionSettingsTest::RunTest(const FString& Parameters)
 	int32 Protocol = 0;
 	TestTrue(TEXT("Game ID is filtered before the Steam result cap"), Search->QuerySettings.Get(Ch4SteamSessions::GameIdKey, GameId) && GameId == Ch4SteamSessions::GameId);
 	TestTrue(TEXT("Protocol is filtered at the backend too"), Search->QuerySettings.Get(Ch4SteamSessions::ProtocolKey, Protocol) && Protocol == Ch4SteamSessions::ProtocolVersion);
+	MatchState.Reset();
+	TestTrue(TEXT("Backend search only requests Lobby rooms"),
+		Search->QuerySettings.Get(Ch4SteamSessions::MatchStateKey, MatchState)
+		&& MatchState == Ch4SteamSessions::LobbyMatchState);
+
+	FOnlineSessionSettings PlayingSettings = Settings;
+	Ch4SteamSessions::ApplyMatchState(PlayingSettings, ECh4SteamMatchState::Playing);
+	TestFalse(TEXT("Gameplay rooms are not advertised or joinable"),
+		PlayingSettings.bShouldAdvertise || PlayingSettings.bAllowJoinInProgress
+		|| PlayingSettings.bAllowInvites || PlayingSettings.bAllowJoinViaPresence);
+	TestFalse(TEXT("Gameplay rooms fail the receive-side Lobby filter"),
+		Ch4SteamSessions::IsCompatible(PlayingSettings));
+	Ch4SteamSessions::ApplyMatchState(PlayingSettings, ECh4SteamMatchState::Lobby);
+	TestTrue(TEXT("Returning to Lobby restores advertisement and join policy"),
+		Ch4SteamSessions::IsCompatible(PlayingSettings));
 	return true;
 }
 
@@ -76,6 +95,12 @@ bool FCh4SteamSessionFilterTest::RunTest(const FString& Parameters)
 	Settings = Ch4SteamSessions::BuildSettings();
 	Settings.bIsLANMatch = true;
 	TestFalse(TEXT("Legacy LAN room is not a Steam room"), Ch4SteamSessions::IsCompatible(Settings));
+	Settings = Ch4SteamSessions::BuildSettings();
+	Settings.Settings.Remove(Ch4SteamSessions::MatchStateKey);
+	TestFalse(TEXT("Rooms without an explicit match state are hidden"), Ch4SteamSessions::IsCompatible(Settings));
+	Settings = Ch4SteamSessions::BuildSettings(ECh4SteamMatchState::Playing);
+	TestFalse(TEXT("Playing rooms are hidden even if their other compatibility tags match"),
+		Ch4SteamSessions::IsCompatible(Settings));
 	return true;
 }
 
@@ -90,6 +115,14 @@ bool FCh4SteamSessionGuardsTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Missing world/interface rejects Find safely"), GI->FindSteamGames());
 	TestFalse(TEXT("Invalid room rejects Join safely"), GI->JoinSteamGame(nullptr));
 	TestFalse(TEXT("Validation failures do not leave the UI busy"), GI->IsSteamSessionBusy());
+	bool bDirectIPNoSessionCompletion = false;
+	TestTrue(TEXT("Direct-IP/no-session Gameplay availability is a successful no-op"),
+		GI->SetSteamSessionGameplayAvailability(
+			[&bDirectIPNoSessionCompletion](const bool bSucceeded)
+			{
+				bDirectIPNoSessionCompletion = bSucceeded;
+			}));
+	TestTrue(TEXT("Direct-IP/no-session completion is immediate"), bDirectIPNoSessionCompletion);
 	FOnlineSessionSearchResult RoomResult;
 	RoomResult.Session.OwningUserId = FUniqueNetIdString::Create(FString(TEXT("fixture-owner")), FName(TEXT("TEST")));
 	RoomResult.Session.SessionInfo = MakeShared<Ch4SteamTests::FSessionInfo>();
@@ -98,7 +131,12 @@ bool FCh4SteamSessionGuardsTest::RunTest(const FString& Parameters)
 	GI->SteamSearch = Ch4SteamSessions::MakeSearch();
 	FOnlineSessionSearchResult Unrelated = RoomResult;
 	Unrelated.Session.SessionSettings.Set(Ch4SteamSessions::GameIdKey, FString(TEXT("AnotherGame")), EOnlineDataAdvertisementType::ViaOnlineService);
-	GI->SteamSearch->SearchResults = {Unrelated, RoomResult, RoomResult};
+	FOnlineSessionSearchResult PlayingRoom = RoomResult;
+	Ch4SteamSessions::ApplyMatchState(PlayingRoom.Session.SessionSettings, ECh4SteamMatchState::Playing);
+	TestFalse(TEXT("A stale Playing result is rejected with no backend call"), GI->BeginSteamJoin(PlayingRoom));
+	TestTrue(TEXT("Stale Playing join reports that the game already started"),
+		GI->GetSteamSessionStatus().ToString().Contains(TEXT("Game already started")));
+	GI->SteamSearch->SearchResults = {Unrelated, RoomResult, PlayingRoom, RoomResult};
 	GI->SteamOperation = ECh4SteamSessionOperation::Finding;
 	GI->HandleSteamFindComplete(true);
 	TestEqual(TEXT("Only compatible rooms reach the existing UI"), GI->SteamRooms.Num(), 2);
