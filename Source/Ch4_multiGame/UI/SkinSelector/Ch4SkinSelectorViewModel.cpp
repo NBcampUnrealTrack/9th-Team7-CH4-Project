@@ -3,7 +3,9 @@
 #include "Blueprint/UserWidget.h"
 #include "Ch4_multiGamePlayerController.h"
 #include "Player/Ch4_multiGamePlayerState.h"
+#include "Player/Ch4_multiGameGameInstance.h"
 #include "Player/Ch4_PlayerCharacter.h"
+#include "UI/SkinSelector/Ch4HatUnlockConfigDataAsset.h"
 #include "UObject/UnrealType.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -39,6 +41,8 @@ UWorld* UCh4SkinSelectorViewModel::GetWorld() const
 
 void UCh4SkinSelectorViewModel::InitializeFromPlayerState()
 {
+	RefreshHatUnlockState();
+
 	bool bFoundType = false;
 	if (ACh4_multiGamePlayerState* PS = GetOwningCh4PlayerState())
 	{
@@ -81,6 +85,14 @@ void UCh4SkinSelectorViewModel::InitializeFromPlayerState()
 
 	// 현재 인게임 캐릭터가 착용 중인 모자 읽어오기
 	FName CurrentHat = GetEquippedHeadwearIDFromCharacter();
+	if (!IsHeadwearUnlocked(CurrentHat))
+	{
+		CurrentHat = NAME_None;
+		if (ACh4_multiGamePlayerController* PC = GetOwningCh4PlayerController())
+		{
+			PC->RequestHeadwear(NAME_None);
+		}
+	}
 	SetPendingHeadwearID(CurrentHat);
 
 	UpdateAnimalSelectionBooleans();
@@ -91,6 +103,61 @@ void UCh4SkinSelectorViewModel::InitializeFromPlayerState()
 		ActivePreviewStudio->SetPreviewCharacterType(PendingCharacterType);
 		ActivePreviewStudio->SetPreviewHeadwear(PendingHeadwearID);
 	}
+}
+
+ESlateVisibility UCh4SkinSelectorViewModel::GetLockVisibilityForUnlockedState(const bool bUnlocked)
+{
+	return bUnlocked ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible;
+}
+
+bool UCh4SkinSelectorViewModel::IsHeadwearUnlocked(const FName HeadwearID) const
+{
+	if (const ACh4_multiGamePlayerController* PC = GetOwningCh4PlayerController())
+	{
+		return PC->CanSelectHeadwear(HeadwearID);
+	}
+
+	// A detached ViewModel is a safe locked state for achievement hats while keeping
+	// None and unrelated/free hats available according to the same policy object.
+	return GetDefault<UCh4HatUnlockConfigDataAsset>()->IsHeadwearUnlocked(HeadwearID, 0, 0);
+}
+
+void UCh4SkinSelectorViewModel::RefreshHatUnlockState()
+{
+	const ACh4_multiGamePlayerController* PC = GetOwningCh4PlayerController();
+	const UCh4_multiGameGameInstance* GameInstance = PC
+		? PC->GetGameInstance<UCh4_multiGameGameInstance>() : nullptr;
+	const UCh4HatUnlockConfigDataAsset* Config = GameInstance
+		? GameInstance->GetHatUnlockConfig()
+		: GetDefault<UCh4HatUnlockConfigDataAsset>();
+	const int32 BestScore = GameInstance ? GameInstance->GetBestSingleGameScore() : 0;
+	const int32 BestCargo = GameInstance ? GameInstance->GetBestSingleGameDeliveredCargo() : 0;
+
+	bIsHatDrinkingUnlocked = Config->IsHeadwearUnlocked(Ch4Headwear::DrinkingHat, BestScore, BestCargo);
+	bIsHatHelmetUnlocked = Config->IsHeadwearUnlocked(Ch4Headwear::IronHelmet, BestScore, BestCargo);
+	bIsHatTrooperUnlocked = Config->IsHeadwearUnlocked(Ch4Headwear::TrooperHat, BestScore, BestCargo);
+	bIsHatSnapbackUnlocked = Config->IsHeadwearUnlocked(Ch4Headwear::Snapback, BestScore, BestCargo);
+	HatDrinkingLockVisibility = GetLockVisibilityForUnlockedState(bIsHatDrinkingUnlocked);
+	HatHelmetLockVisibility = GetLockVisibilityForUnlockedState(bIsHatHelmetUnlocked);
+	HatTrooperLockVisibility = GetLockVisibilityForUnlockedState(bIsHatTrooperUnlocked);
+	HatSnapbackLockVisibility = GetLockVisibilityForUnlockedState(bIsHatSnapbackUnlocked);
+	HatDrinkingRequirementText = Config->GetRequirementText(Ch4Headwear::DrinkingHat);
+	HatHelmetRequirementText = Config->GetRequirementText(Ch4Headwear::IronHelmet);
+	HatTrooperRequirementText = Config->GetRequirementText(Ch4Headwear::TrooperHat);
+	HatSnapbackRequirementText = Config->GetRequirementText(Ch4Headwear::Snapback);
+
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatDrinkingUnlocked);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatHelmetUnlocked);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatTrooperUnlocked);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatSnapbackUnlocked);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatDrinkingLockVisibility);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatHelmetLockVisibility);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatTrooperLockVisibility);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatSnapbackLockVisibility);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatDrinkingRequirementText);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatHelmetRequirementText);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatTrooperRequirementText);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatSnapbackRequirementText);
 }
 
 void UCh4SkinSelectorViewModel::SetPendingCharacterType(ECh4CharacterType NewType)
@@ -234,6 +301,10 @@ void UCh4SkinSelectorViewModel::SelectCharacterType(ECh4CharacterType NewType)
 
 void UCh4SkinSelectorViewModel::SelectHeadwear(FName HeadwearID)
 {
+	if (!IsHeadwearUnlocked(HeadwearID))
+	{
+		return;
+	}
 	SetPendingHeadwearID(HeadwearID);
 
 	// 인게임 캐릭터는 건드리지 않고 3D 프리뷰 스튜디오의 마네킹만 즉시 변경
@@ -245,6 +316,11 @@ void UCh4SkinSelectorViewModel::SelectHeadwear(FName HeadwearID)
 
 void UCh4SkinSelectorViewModel::SaveSelection()
 {
+	if (!IsHeadwearUnlocked(PendingHeadwearID))
+	{
+		SetPendingHeadwearID(NAME_None);
+	}
+
 	// 1. 서버 RPC 호출로 캐릭터 스킨 및 모자 영구 저장
 	if (ACh4_multiGamePlayerController* PC = GetOwningCh4PlayerController())
 	{
@@ -271,6 +347,10 @@ void UCh4SkinSelectorViewModel::ResetSelection()
 	}
 
 	FName OriginalHat = GetEquippedHeadwearIDFromCharacter();
+	if (!IsHeadwearUnlocked(OriginalHat))
+	{
+		OriginalHat = NAME_None;
+	}
 	SetPendingHeadwearID(OriginalHat);
 
 	if (ActivePreviewStudio)

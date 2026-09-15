@@ -65,6 +65,10 @@ public:
 	/** Saves the local headwear choice for travel and asks the server to update replicated PlayerState. */
 	UFUNCTION(BlueprintCallable, Category="Player|Character")
 	void RequestHeadwear(FName HeadwearID);
+
+	/** Uses the owning local profile and the shared Hat Unlock Config. */
+	UFUNCTION(BlueprintPure, Category="Player|Character")
+	bool CanSelectHeadwear(FName HeadwearID) const;
 	
 	// [추가] PauseMenu 관련 공개 함수들 선언
 	// Local menu only: ESC and the existing IA_Pause mappings toggle this widget.

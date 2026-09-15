@@ -8,10 +8,13 @@
 #include "Ch4_multiGameGameInstance.generated.h"
 
 class ACh4_PlayerCharacter;
+class UCh4HatUnlockConfigDataAsset;
 class UCh4LoadingScreenDataAsset;
+class UCh4PlayerProgressSaveGame;
 class UTexture2D;
 class UCh4RoomEntryData;
 class SWidget;
+struct FCh4GameResult;
 struct FWorldContext;
 
 /**
@@ -84,6 +87,25 @@ public:
 	bool TryGetLocalHeadwear(FName& OutHeadwearID) const;
 	bool HasPendingHeadwearRequest() const { return bHasPendingHeadwearRequest; }
 
+	/** Stores a new personal best from a replicated server result and saves only when either record improves. */
+	bool RecordGameResult(const FCh4GameResult& Result);
+
+	UFUNCTION(BlueprintPure, Category="Player|Progress")
+	int32 GetBestSingleGameScore() const;
+
+	UFUNCTION(BlueprintPure, Category="Player|Progress")
+	int32 GetBestSingleGameDeliveredCargo() const;
+
+	/** None and hats not listed by the achievement policy are always available. */
+	UFUNCTION(BlueprintPure, Category="Player|Progress|Hat Unlocks")
+	bool IsHeadwearUnlocked(FName HeadwearID) const;
+
+	UFUNCTION(BlueprintPure, Category="Player|Progress|Hat Unlocks")
+	FText GetHeadwearRequirementText(FName HeadwearID) const;
+
+	UFUNCTION(BlueprintPure, Category="Player|Progress|Hat Unlocks")
+	UCh4HatUnlockConfigDataAsset* GetHatUnlockConfig() const;
+
 	UFUNCTION(BlueprintPure, Category="Player|Character")
 	TSubclassOf<ACh4_PlayerCharacter> LoadCharacterClass(ECh4CharacterType CharacterType) const;
 
@@ -133,6 +155,9 @@ private:
 #endif
 
 	void CacheLoadingScreenAssets();
+	void CacheHatUnlockConfig();
+	void LoadPlayerProgress();
+	bool SavePlayerProgress() const;
 	void HandlePreLoadMap(const FWorldContext& LoadContext, const FString& MapName);
 	void HandleSeamlessTravelStart(UWorld* World, const FString& MapName);
 	void HandleSeamlessTravelTransition(UWorld* World);
@@ -150,6 +175,12 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> CachedLoadingScreenImage;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCh4HatUnlockConfigDataAsset> CachedHatUnlockConfig;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCh4PlayerProgressSaveGame> PlayerProgress;
 
 	bool bLoadingScreenPrepared = false;
 	bool bSeamlessLoadingScreen = false;

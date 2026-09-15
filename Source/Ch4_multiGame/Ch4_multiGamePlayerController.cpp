@@ -331,6 +331,13 @@ void ACh4_multiGamePlayerController::HandleGameResultChanged(const FCh4GameResul
 {
 	if (NewResult.bResultAvailable)
 	{
+		// This callback only binds on the owning local controller. Every participant
+		// consumes the same replicated server snapshot into their own local SaveGame.
+		if (UCh4_multiGameGameInstance* GameInstance =
+			GetGameInstance<UCh4_multiGameGameInstance>())
+		{
+			GameInstance->RecordGameResult(NewResult);
+		}
 		ShowGameResult(NewResult);
 	}
 }
@@ -465,10 +472,14 @@ void ACh4_multiGamePlayerController::RequestHeadwear(const FName HeadwearID)
 		return;
 	}
 
-	if (UCh4_multiGameGameInstance* GameInstance =
-		GetGameInstance<UCh4_multiGameGameInstance>())
+	UCh4_multiGameGameInstance* GameInstance =
+		GetGameInstance<UCh4_multiGameGameInstance>();
+	if (!GameInstance || !GameInstance->StoreLocalHeadwearRequest(HeadwearID))
 	{
-		GameInstance->StoreLocalHeadwearRequest(HeadwearID);
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[HatUnlock] Selection request was not sent because the local profile rejects %s"),
+			*HeadwearID.ToString());
+		return;
 	}
 
 	if (HasAuthority())
@@ -481,6 +492,13 @@ void ACh4_multiGamePlayerController::RequestHeadwear(const FName HeadwearID)
 	}
 }
 
+bool ACh4_multiGamePlayerController::CanSelectHeadwear(const FName HeadwearID) const
+{
+	const UCh4_multiGameGameInstance* GameInstance =
+		GetGameInstance<UCh4_multiGameGameInstance>();
+	return GameInstance && GameInstance->IsHeadwearUnlocked(HeadwearID);
+}
+
 void ACh4_multiGamePlayerController::ServerRequestHeadwear_Implementation(const FName HeadwearID)
 {
 	ApplyServerHeadwear(HeadwearID);
@@ -490,6 +508,13 @@ void ACh4_multiGamePlayerController::ApplyServerHeadwear(const FName HeadwearID)
 {
 	if (!HasAuthority())
 	{
+		return;
+	}
+	if (IsLocalPlayerController() && !CanSelectHeadwear(HeadwearID))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[HatUnlock] Listen-server local profile rejected locked headwear %s"),
+			*HeadwearID.ToString());
 		return;
 	}
 
@@ -513,7 +538,12 @@ void ACh4_multiGamePlayerController::SynchronizeCharacterSelectionForCurrentWorl
 		{
 			GameInstance->CacheAuthoritativeCharacterType(LobbyCharacterType);
 		}
-		GameInstance->CacheAuthoritativeHeadwear(CharacterPlayerState->GetEquippedHeadwearID());
+		const FName EquippedHeadwearID = CharacterPlayerState->GetEquippedHeadwearID();
+		if (!GameInstance->CacheAuthoritativeHeadwear(EquippedHeadwearID)
+			&& !GameInstance->IsHeadwearUnlocked(EquippedHeadwearID))
+		{
+			RequestHeadwear(NAME_None);
+		}
 		return;
 	}
 
