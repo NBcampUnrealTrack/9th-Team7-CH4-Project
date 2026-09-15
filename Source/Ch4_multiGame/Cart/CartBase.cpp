@@ -17,8 +17,8 @@ ACartBase::ACartBase()
     SetReplicateMovement(true);
 
     // 물리 물체라 위치가 자주 바뀐다. 복제 빈도를 올려 보간 품질을 높인다.
-    NetUpdateFrequency = 60.0f;
-    MinNetUpdateFrequency = 30.0f;
+    SetNetUpdateFrequency(60.0f);
+    SetMinNetUpdateFrequency(30.0f);
 
     // ── 카트 본체 ──
     CartRoot = CreateDefaultSubobject<USceneComponent>(TEXT("CartRoot"));
@@ -118,33 +118,39 @@ void ACartBase::BeginPlay()
     }
     
     InitializeStabilizationSettings();
-    CartMesh->SetSimulatePhysics(!bPreparationLocked);
-    CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
-    CartMesh->SetAngularDamping(FMath::Max(CartAngularDamping, 0.0f));
-
-    FBodyInstance* BodyInstance = CartMesh->GetBodyInstance();
-    if (BodyInstance)
+    if (HasAuthority())
     {
-        BodyInstance->InertiaTensorScale = FVector(
-            FMath::Max(CartInertiaTensorScale.X, UE_KINDA_SMALL_NUMBER),
-            FMath::Max(CartInertiaTensorScale.Y, UE_KINDA_SMALL_NUMBER),
-            FMath::Max(CartInertiaTensorScale.Z, UE_KINDA_SMALL_NUMBER));
-        BodyInstance->UpdateMassProperties();
+        CartMesh->SetEnableGravity(true);
+        CartMesh->SetSimulatePhysics(!bPreparationLocked);
+        CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
+        CartMesh->SetAngularDamping(FMath::Max(CartAngularDamping, 0.0f));
+
+        FBodyInstance* BodyInstance = CartMesh->GetBodyInstance();
+        if (BodyInstance)
+        {
+            BodyInstance->InertiaTensorScale = FVector(
+                FMath::Max(CartInertiaTensorScale.X, UE_KINDA_SMALL_NUMBER),
+                FMath::Max(CartInertiaTensorScale.Y, UE_KINDA_SMALL_NUMBER),
+                FMath::Max(CartInertiaTensorScale.Z, UE_KINDA_SMALL_NUMBER));
+            BodyInstance->UpdateMassProperties();
+        }
+
+        CartMesh->SetCenterOfMass(CartCenterOfMassOffset);
+        CartMesh->SetPhysicsMaxAngularVelocityInDegrees(
+            FMath::Max(MaximumAngularVelocityDegrees, 0.0f), false, NAME_None);
+        ConfigureUprightSafetyConstraint();
+    }
+    else
+    {
+        DisableClientPhysics();
     }
 
-    CartMesh->SetCenterOfMass(CartCenterOfMassOffset);
-    CartMesh->SetPhysicsMaxAngularVelocityInDegrees(
-        FMath::Max(MaximumAngularVelocityDegrees, 0.0f), false, NAME_None);
-    ConfigureUprightSafetyConstraint();
-
-    // 클라이언트는 서버가 복제한 위치를 그대로 따른다.
-    // CartMesh->SetSimulatePhysics(false);
-    
-    if (!HasAuthority())
-    {
-        CartMesh->SetSimulatePhysics(false);
-        CartMesh->SetEnableGravity(false);
-    }
+    UE_LOG(LogCh4_multiGame, Log,
+        TEXT("[CartNetwork] Initialized Cart=%s Role=%s PreparationLocked=%d Physics=%d Root=%s Mesh=%s ComponentReplicated=%d"),
+        *GetName(), HasAuthority() ? TEXT("Server") : TEXT("RemoteClient"), bPreparationLocked ? 1 : 0,
+        CartMesh->IsSimulatingPhysics() ? 1 : 0,
+        *CartRoot->GetComponentLocation().ToString(), *CartMesh->GetComponentLocation().ToString(),
+        CartMesh->GetIsReplicated() ? 1 : 0);
 }
 
 void ACartBase::Tick(float DeltaTime)
@@ -179,9 +185,13 @@ void ACartBase::Tick(float DeltaTime)
 
 void ACartBase::OnRep_PreparationLocked()
 {
-    if (CartMesh)
+    if (!HasAuthority())
     {
-        CartMesh->SetSimulatePhysics(!bPreparationLocked);
+        DisableClientPhysics();
+        UE_LOG(LogCh4_multiGame, Log,
+            TEXT("[CartNetwork] Client preparation state Cart=%s Locked=%d Physics=%d"),
+            *GetName(), bPreparationLocked ? 1 : 0,
+            CartMesh && CartMesh->IsSimulatingPhysics() ? 1 : 0);
     }
 }
 
@@ -539,7 +549,8 @@ void ACartBase::ApplyPlayerForces(float DeltaTime)
 
 void ACartBase::SyncRootToPhysics()
 {
-    if (!CartRoot || !CartMesh)
+    if (!HasAuthority() || bPreparationLocked || bCartTeleportInProgress
+        || !CartRoot || !CartMesh || !CartMesh->IsSimulatingPhysics())
     {
         return;
     }
@@ -552,21 +563,120 @@ void ACartBase::SyncRootToPhysics()
 
 void ACartBase::InterpolateClientTransform(float DeltaTime)
 {
-    if (!CartRoot || !CartMesh)
+    if (HasAuthority() || !CartRoot || !CartMesh)
     {
         return;
     }
 
+    DisableClientPhysics();
+
     // 루트는 복제로 툭툭 점프한다. 메시가 그 자리를 부드럽게 따라간다.
     const FVector TargetLocation = CartRoot->GetComponentLocation();
-    const FRotator TargetRotation = CartRoot->GetComponentRotation();
+    const FQuat TargetRotation = CartRoot->GetComponentQuat();
+    const FVector CurrentLocation = CartMesh->GetComponentLocation();
+    const FQuat CurrentRotation = CartMesh->GetComponentQuat();
+    const float PositionError = FVector::Distance(CurrentLocation, TargetLocation);
+    const float RotationErrorDegrees = FMath::RadiansToDegrees(CurrentRotation.AngularDistance(TargetRotation));
+
+    if (PositionError > FMath::Max(ClientSmoothingSnapDistance, 0.0f)
+        || RotationErrorDegrees > FMath::Clamp(ClientSmoothingSnapAngleDegrees, 0.0f, 180.0f))
+    {
+        CartMesh->SetWorldLocationAndRotation(TargetLocation, TargetRotation, false, nullptr, ETeleportType::TeleportPhysics);
+        return;
+    }
 
     const FVector NewLocation = FMath::VInterpTo(
-        CartMesh->GetComponentLocation(), TargetLocation, DeltaTime, ClientInterpSpeed);
-    const FRotator NewRotation = FMath::RInterpTo(
-        CartMesh->GetComponentRotation(), TargetRotation, DeltaTime, ClientInterpSpeed);
+        CurrentLocation, TargetLocation, DeltaTime, FMath::Max(ClientPositionInterpSpeed, 0.0f));
+    const FQuat NewRotation = FMath::QInterpTo(
+        CurrentRotation, TargetRotation, DeltaTime, FMath::Max(ClientRotationInterpSpeed, 0.0f));
 
     CartMesh->SetWorldLocationAndRotation(NewLocation, NewRotation);
+}
+
+void ACartBase::DisableClientPhysics()
+{
+    if (HasAuthority() || !CartMesh)
+    {
+        return;
+    }
+
+    if (CartMesh->IsSimulatingPhysics())
+    {
+        CartMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        CartMesh->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+    }
+
+    // Clear the BodyInstance flag even when the client body is not initialized yet.
+    // Otherwise a deferred body could begin simulating after this replication callback.
+    CartMesh->SetSimulatePhysics(false);
+    CartMesh->SetEnableGravity(false);
+}
+
+bool ACartBase::TeleportCartToTransform(const FTransform& Destination)
+{
+    if (!HasAuthority() || bCartTeleportInProgress || !CartRoot || !CartMesh
+        || Destination.ContainsNaN()
+        || CartRoot->Mobility != EComponentMobility::Movable
+        || CartMesh->Mobility != EComponentMobility::Movable)
+    {
+        return false;
+    }
+
+    TGuardValue<bool> TeleportGuard(bCartTeleportInProgress, true);
+    const FTransform OriginalRootTransform = CartRoot->GetComponentTransform();
+    const FTransform OriginalMeshTransform = CartMesh->GetComponentTransform();
+    const bool bWasSimulating = CartMesh->IsSimulatingPhysics();
+
+    if (bWasSimulating)
+    {
+        CartMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        CartMesh->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+        CartMesh->SetSimulatePhysics(false);
+    }
+
+    SetActorTransform(Destination, false, nullptr, ETeleportType::TeleportPhysics);
+    CartMesh->SetWorldLocationAndRotation(
+        Destination.GetLocation(), Destination.GetRotation(), false, nullptr, ETeleportType::TeleportPhysics);
+
+    const bool bTransformsAligned = CartRoot->GetComponentLocation().Equals(Destination.GetLocation(), 0.1f)
+        && CartRoot->GetComponentQuat().Equals(Destination.GetRotation(), 0.001f)
+        && CartMesh->GetComponentLocation().Equals(Destination.GetLocation(), 0.1f)
+        && CartMesh->GetComponentQuat().Equals(Destination.GetRotation(), 0.001f);
+
+    if (!bTransformsAligned)
+    {
+        CartRoot->SetWorldTransform(OriginalRootTransform, false, nullptr, ETeleportType::TeleportPhysics);
+        CartMesh->SetWorldTransform(OriginalMeshTransform, false, nullptr, ETeleportType::TeleportPhysics);
+    }
+
+    if (bWasSimulating)
+    {
+        CartMesh->SetSimulatePhysics(true);
+        CartMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        CartMesh->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+        ConfigureUprightSafetyConstraint();
+    }
+
+    if (bTransformsAligned)
+    {
+        ForceNetUpdate();
+    }
+
+    if (bTransformsAligned)
+    {
+        UE_LOG(LogCh4_multiGame, Log,
+            TEXT("[CartNetwork] Teleport Cart=%s Accepted=1 PhysicsBefore=%d PhysicsAfter=%d Root=%s Mesh=%s"),
+            *GetName(), bWasSimulating ? 1 : 0, CartMesh->IsSimulatingPhysics() ? 1 : 0,
+            *CartRoot->GetComponentLocation().ToString(), *CartMesh->GetComponentLocation().ToString());
+    }
+    else
+    {
+        UE_LOG(LogCh4_multiGame, Warning,
+            TEXT("[CartNetwork] Teleport Cart=%s Accepted=0 PhysicsBefore=%d PhysicsAfter=%d Root=%s Mesh=%s"),
+            *GetName(), bWasSimulating ? 1 : 0, CartMesh->IsSimulatingPhysics() ? 1 : 0,
+            *CartRoot->GetComponentLocation().ToString(), *CartMesh->GetComponentLocation().ToString());
+    }
+    return bTransformsAligned;
 }
 
 

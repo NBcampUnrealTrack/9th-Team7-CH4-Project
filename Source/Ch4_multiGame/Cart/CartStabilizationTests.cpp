@@ -214,13 +214,20 @@ bool FCh4CartStabilizationConfigurationTest::RunTest(const FString& Parameters)
 		Cart->DispatchBeginPlay();
 	}
 
-	UStaticMeshComponent* CartMesh = Cast<UStaticMeshComponent>(Cart->GetRootComponent());
+	USceneComponent* CartRoot = Cart->GetRootComponent();
+	UStaticMeshComponent* CartMesh = Cast<UStaticMeshComponent>(
+		Cart->GetDefaultSubobjectByName(TEXT("CartMesh")));
 	UPhysicsConstraintComponent* Constraint = Cart->FindComponentByClass<UPhysicsConstraintComponent>();
-	if (!TestNotNull(TEXT("CartMesh remains the physics root"), CartMesh)
+	if (!TestNotNull(TEXT("CartRoot is the replicated Actor root"), CartRoot)
+		|| !TestNotNull(TEXT("CartMesh remains the server physics body"), CartMesh)
 		|| !TestNotNull(TEXT("The upright safety constraint exists"), Constraint))
 	{
 		return false;
 	}
+	TestTrue(TEXT("The replicated root and server physics body are distinct"), CartRoot != CartMesh);
+	TestTrue(TEXT("The physics body owns an absolute world location"), CartMesh->IsUsingAbsoluteLocation());
+	TestTrue(TEXT("The physics body owns an absolute world rotation"), CartMesh->IsUsingAbsoluteRotation());
+	TestFalse(TEXT("CartMesh has no independent component replication source"), CartMesh->GetIsReplicated());
 
 	FBodyInstance* BodyInstance = CartMesh->GetBodyInstance();
 	if (!TestNotNull(TEXT("CartMesh has a BodyInstance"), BodyInstance))
@@ -282,9 +289,24 @@ bool FCh4CartStabilizationConfigurationTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Preparation lock makes the Cart kinematic"), BodyInstance->bSimulatePhysics);
 	TestEqual(TEXT("Preparation lock preserves Cart collision for Cargo"), CartMesh->GetCollisionEnabled(), CartCollision);
 	TestFalse(TEXT("Preparation lock rejects Cart grab"), Cart->TryGrabPlayer(LockedPlayer));
+	const FTransform MainDestination(
+		FRotator(0.0f, 90.0f, 0.0f), FVector(5000.0f, 3000.0f, 800.0f), Cart->GetActorScale3D());
+	TestTrue(TEXT("Locked Cart uses its atomic authoritative teleport"), Cart->TeleportCartToTransform(MainDestination));
+	TestTrue(TEXT("Atomic teleport moves the replicated root"),
+		CartRoot->GetComponentTransform().Equals(MainDestination, 0.1f));
+	TestTrue(TEXT("Atomic teleport also moves the non-simulating absolute physics body"),
+		CartMesh->GetComponentLocation().Equals(MainDestination.GetLocation(), 0.1f)
+		&& CartMesh->GetComponentQuat().Equals(MainDestination.GetRotation(), 0.001f));
+	Cart->SyncRootToPhysics();
+	TestTrue(TEXT("Locked stale-physics sync cannot undo the teleport"),
+		CartRoot->GetComponentTransform().Equals(MainDestination, 0.1f));
 	TestTrue(TEXT("Preparation explicitly unlocks the Cart"), Cart->SetPreparationLocked(false));
 	TestFalse(TEXT("Preparation lock state clears"), Cart->IsPreparationLocked());
 	TestTrue(TEXT("Unlock restores authoritative Cart simulation"), BodyInstance->bSimulatePhysics);
+	Cart->SyncRootToPhysics();
+	TestTrue(TEXT("First authoritative sync after unlock remains at the destination"),
+		CartRoot->GetComponentLocation().Equals(MainDestination.GetLocation(), 0.1f)
+		&& CartMesh->GetComponentLocation().Equals(MainDestination.GetLocation(), 0.1f));
 
 	TArray<ACh4_PlayerCharacter*> Grabbers;
 	for (int32 Index = 0; Index < 4; ++Index)
