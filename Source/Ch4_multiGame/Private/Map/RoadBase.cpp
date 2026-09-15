@@ -175,7 +175,11 @@ void ARoadBase::GenerateObstacles(int32 InRandomSeed)
 	if (UPCGComponent* PCGComp = FindComponentByClass<UPCGComponent>())
 	{
 		PCGComp->Seed = InRandomSeed;
+		// UE 5.8 exposes DirtyGenerated only in WITH_EDITOR builds. Forced runtime
+		// generation below already rebuilds generated resources from the current actor.
+#if WITH_EDITOR
 		PCGComp->DirtyGenerated(); // 이동된 도로 위치/바운드 강제 갱신
+#endif
 		PCGComp->Generate(true);   // 런타임 스폰 강제 실행
 	}
 }
