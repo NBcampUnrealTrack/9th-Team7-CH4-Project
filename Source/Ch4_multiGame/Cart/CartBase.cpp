@@ -603,6 +603,7 @@ bool ACartBase::TryGrabPlayer(ACh4_PlayerCharacter* Player)
     // 서버가 위치를 옮기면 이동이 클라이언트로 복제된다.
     Player->SetActorLocation(Anchors[Index]->GetComponentLocation());
     Player->SetActorRotation(Anchors[Index]->GetComponentRotation());
+    Player->SetRagdollEnabled(false);
     Player->AttachToComponent(CartMesh,
         FAttachmentTransformRules::KeepWorldTransform);
     Player->GrabbedCart = this;
@@ -629,6 +630,7 @@ bool ACartBase::ReleasePlayer(ACh4_PlayerCharacter* Player)
         Player->bIsBraking = false;
         Player->GrabbedCart = nullptr;
         Player->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+        Player->SetRagdollEnabled(true);
         Player->ForceNetUpdate();
     }
     ForceNetUpdate();
