@@ -84,10 +84,15 @@ protected:
 private:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+    
+    
     UFUNCTION()
     void OnRep_MiddleZoneOrder();
 
     void MoveTaggedActorsWithRoad(ARoadBase* Road, const FTransform& OriginalRoadTransform, const FTransform& FinalRoadTransform);
 
     bool IsLevelManagerManagedActor(const AActor* Actor) const;
+    
+    // 지연 후 PCG를 안전하게 실행하기 위한 타이머 핸들
+    FTimerHandle PCGGenerateTimerHandle;
 };

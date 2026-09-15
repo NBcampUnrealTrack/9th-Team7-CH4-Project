@@ -23,14 +23,6 @@ ALevelFloorBase::ALevelFloorBase()
 	CollisionBox = CreateDefaultSubobject<UBoxComponent>(TEXT("CollisionBox"));
 	CollisionBox->SetupAttachment(RootComponent);
 	CollisionBox->SetCollisionObjectType(ECC_WorldStatic);
-
-	// 배경 배치 영역 가이드(지울예정)
-	BackgroundBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("BackgroundBounds"));
-	BackgroundBounds->SetupAttachment(RootComponent);
-	BackgroundBounds->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-	// 모든 환경에서 사용할 기본 배경 영역(지울예정)
-	BackgroundBounds->SetBoxExtent(FVector(20000.0f, 20000.0f, 48000.0f));
 }
 
 void ALevelFloorBase::BeginPlay()
@@ -45,8 +37,6 @@ void ALevelFloorBase::BeginPlay()
 	   this,
 	   &ALevelFloorBase::OnCollisionBoxEndOverlap);
 	
-	//(지울예정)
-	DrawBackgroundGuides();
 }
 
 void ALevelFloorBase::OnCollisionBoxBeginOverlap(
@@ -301,38 +291,4 @@ void ALevelFloorBase::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 	
-	//(지울예정)
-	DrawBackgroundGuides();
-}
-
-//(지울예정)
-void ALevelFloorBase::DrawBackgroundGuides()
-{
-	if (!BackgroundBounds || DivisionCount <= 1)
-	{
-		return;
-	}
-
-	FlushPersistentDebugLines(GetWorld());
-
-	const FVector BoundsCenter = BackgroundBounds->GetComponentLocation();
-	const FVector BoundsExtent = BackgroundBounds->GetScaledBoxExtent();
-
-	const float MinZ = BoundsCenter.Z - BoundsExtent.Z;
-	const float MaxZ = BoundsCenter.Z + BoundsExtent.Z;
-	const float HalfWidth = BoundsExtent.X;
-
-	// 전체 높이를 DivisionCount만큼 정확하게 나눔
-	const float DivisionHeight = (MaxZ - MinZ) / DivisionCount;
-
-	// 양 끝 경계선은 그리지 않고 내부 구분선만 그림
-	for (int32 Index = 1; Index < DivisionCount; ++Index)
-	{
-		const float Z = MinZ + DivisionHeight * Index;
-
-		const FVector LineStart(BoundsCenter.X - HalfWidth, BoundsCenter.Y, Z);
-		const FVector LineEnd(BoundsCenter.X + HalfWidth, BoundsCenter.Y, Z);
-
-		DrawDebugLine(GetWorld(), LineStart, LineEnd, FColor::Red, true, -1.0f, 0, 10.0f);
-	}
 }

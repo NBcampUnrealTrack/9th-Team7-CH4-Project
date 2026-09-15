@@ -19,6 +19,7 @@ void UBounceComponent::BeginPlay()
 		ParentCollision->OnComponentBeginOverlap.AddDynamic(this, &UBounceComponent::OnParentBeginOverlap);
 		ParentCollision->OnComponentHit.AddDynamic(this, &UBounceComponent::OnParentHit);
 	}
+	
 }
 
 void UBounceComponent::OnParentBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
