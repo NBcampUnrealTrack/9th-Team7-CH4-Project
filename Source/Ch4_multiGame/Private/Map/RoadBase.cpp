@@ -184,16 +184,12 @@ void ARoadBase::OnConstruction(const FTransform& Transform)
 
 void ARoadBase::GenerateObstacles(int32 InRandomSeed)
 {
-	if (!PCGComponent || !PCGComponent->GetGraph())
+	if (UPCGComponent* PCGComp = FindComponentByClass<UPCGComponent>())
 	{
-		return;
+		PCGComp->Seed = InRandomSeed;
+		PCGComp->DirtyGenerated(); // 이동된 도로 위치/바운드 강제 갱신
+		PCGComp->Generate(true);   // 런타임 스폰 강제 실행
 	}
-
-	RandomSeed = InRandomSeed;
-
-	// 기존 장애물 정리 후 재배치
-	PCGComponent->CleanupLocal(true);
-	PCGComponent->GenerateLocal(true);
 }
 
 

@@ -6,6 +6,7 @@
 #include "Public/Map/ZonePostProcessVolume.h"
 #include "GameFlow/FinalDeliveryZone.h"
 #include "Kismet/GameplayStatics.h"
+#include "PCGComponent.h"
 
 ALevelManager::ALevelManager()
 {
@@ -44,10 +45,11 @@ void ALevelManager::BeginPlay()
             }
         }
 
+        // 도로 및 배경 재배치
         ArrangePlacedZones();
         
-        //도로 재배치 완료 후 PCG 장애물 스폰 실행
-        TriggerPCGGeneration();
+        // 이동된 도로 및 스태틱 메쉬의 콜리전/트랜스폼이 월드에 동기화 완료된 후 PCG 생성 (0.05초 지연)
+        GetWorldTimerManager().SetTimer(PCGGenerateTimerHandle, this, &ALevelManager::TriggerPCGGeneration, 0.1f, false);
     }
 }
 
@@ -60,25 +62,41 @@ void ALevelManager::OnRep_MiddleZoneOrder()
 
     ArrangePlacedZones();
     
+    //만약 PCGSeed가 이미도착해 있는 상태라면 PCG 생성 타이머 가동
+    if (PCGSeed != 0 && GetWorld())
+    {
+        GetWorldTimerManager().SetTimer(PCGGenerateTimerHandle, this, &ALevelManager::TriggerPCGGeneration, 0.05f, false);
+    }
 }
 
 void ALevelManager::OnRep_PCGSeed()
 {
-
+    // MiddleZoneOrder가 아직 도착 안 해서 도로 배치가 안 되었다면 생성 대기
+    // 도로 배치가 이미 끝난 상태(MiddleZoneOrder가 채워짐)일 때만 PCG 생성 실행
+    if (MiddleZoneOrder.Num() > 0 || !bShuffleMiddleZones)
+    {
+        if (GetWorld())
+        {
+            GetWorldTimerManager().SetTimer(PCGGenerateTimerHandle, this, &ALevelManager::TriggerPCGGeneration, 0.05f, false);
+        }
+    }
 }
 
 void ALevelManager::TriggerPCGGeneration()
 {
-    if (!HasAuthority() || PCGSeed == 0)
+    UE_LOG(LogTemp, Warning, TEXT("========== TriggerPCGGeneration =========="));
+
+    if (PCGSeed == 0)
     {
+        UE_LOG(LogTemp, Error, TEXT("PCGSeed is 0"));
         return;
     }
 
-    // 도로마다 약간씩 다른 시드를 부여하여 패턴이 겹치지 않게 처리 (+Index)
     int32 CurrentIndex = 0;
 
     if (StartRoadActor)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Generate StartRoad: %s"), *StartRoadActor->GetName());
         StartRoadActor->GenerateObstacles(PCGSeed + CurrentIndex++);
     }
 
@@ -86,12 +104,14 @@ void ALevelManager::TriggerPCGGeneration()
     {
         if (Road)
         {
+            UE_LOG(LogTemp, Warning, TEXT("Generate MiddleRoad: %s"), *Road->GetName());
             Road->GenerateObstacles(PCGSeed + CurrentIndex++);
         }
     }
 
     if (EndRoadActor)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Generate EndRoad: %s"), *EndRoadActor->GetName());
         EndRoadActor->GenerateObstacles(PCGSeed + CurrentIndex++);
     }
 }
@@ -471,6 +491,7 @@ void ALevelManager::ArrangePlacedZones()
             return;
         }
 
+        // 도로 액터의 RootComponent는 원래대로 Static 전환
         if (USceneComponent* RootComponent = Road->GetRootComponent())
         {
             RootComponent->SetMobility(EComponentMobility::Static);
@@ -483,19 +504,25 @@ void ALevelManager::ArrangePlacedZones()
         {
             if (Component)
             {
+                // PCGComponent만 Mobility 변경 대상에서 제외
+                if (Component->IsA(UPCGComponent::StaticClass()))
+                {
+                    continue;
+                }
+
                 Component->SetMobility(EComponentMobility::Static);
             }
         }
     };
-
+    
     SetRoadComponentsStatic(StartRoadActor);
     SetRoadComponentsStatic(EndRoadActor);
-
+    
     for (ARoadBase* Road : MiddleRoadActors)
     {
         SetRoadComponentsStatic(Road);
     }
-
+    
     UE_LOG(LogTemp, Warning, TEXT("LevelManager: Auto arrangement complete."));
 }
 
