@@ -85,7 +85,7 @@ void ACh4_multiGameGameMode::BuildPlayerRecoveryCandidates(
 	const float LateralOffset,
 	TArray<FVector>& OutCandidates)
 {
-	OutCandidates.Reset(4);
+	OutCandidates.Reset(6);
 	const float CartYaw = FMath::IsFinite(CartRotation.Yaw) ? CartRotation.Yaw : 0.0f;
 	const FRotationMatrix YawRotation(FRotator(0.0f, CartYaw, 0.0f));
 	const FVector Forward = YawRotation.GetUnitAxis(EAxis::X);
@@ -95,11 +95,15 @@ void ACh4_multiGameGameMode::BuildPlayerRecoveryCandidates(
 	const float SafeLateralOffset = FMath::Max(LateralOffset, 0.0f);
 	const FVector ElevatedCartLocation = CartLocation + FVector::UpVector * SafeHeightOffset;
 	const FVector Behind = ElevatedCartLocation - Forward * SafeBehindDistance;
+	const FVector FarBehind = ElevatedCartLocation
+		- Forward * (SafeBehindDistance + SafeLateralOffset);
 
 	OutCandidates.Add(Behind);
-	OutCandidates.Add(Behind + Right * SafeLateralOffset);
 	OutCandidates.Add(Behind - Right * SafeLateralOffset);
-	OutCandidates.Add(ElevatedCartLocation - Forward * (SafeBehindDistance + SafeLateralOffset));
+	OutCandidates.Add(Behind + Right * SafeLateralOffset);
+	OutCandidates.Add(FarBehind);
+	OutCandidates.Add(FarBehind - Right * SafeLateralOffset);
+	OutCandidates.Add(FarBehind + Right * SafeLateralOffset);
 }
 
 #if WITH_DEV_AUTOMATION_TESTS

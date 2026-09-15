@@ -25,6 +25,7 @@
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UnrealType.h"
 #include "Player/Ch4_multiGamePlayerState.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -272,6 +273,10 @@ void ACh4_multiGamePlayerController::OnPossess(APawn* InPawn)
 
 void ACh4_multiGamePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (GetWorld())
+	{
+		GetWorldTimerManager().ClearTimer(GameResultBindRetryTimer);
+	}
 	RemoveGameResultUI();
 	if (bPauseInputCaptured) HidePauseMenu();
 	if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
@@ -297,6 +302,13 @@ void ACh4_multiGamePlayerController::AcknowledgePossession(APawn* InPawn)
 	BindGameResultState();
 }
 
+void ACh4_multiGamePlayerController::PostSeamlessTravel()
+{
+	Super::PostSeamlessTravel();
+	SynchronizeCharacterSelectionForCurrentWorld();
+	BindGameResultState();
+}
+
 void ACh4_multiGamePlayerController::BindGameResultState()
 {
 	if (!IsLocalPlayerController())
@@ -316,8 +328,18 @@ void ACh4_multiGamePlayerController::BindGameResultState()
 	if (!CurrentGameState)
 	{
 		RemoveGameResultUI();
+		if (GetWorld() && !GetWorldTimerManager().IsTimerActive(GameResultBindRetryTimer))
+		{
+			GetWorldTimerManager().SetTimer(
+				GameResultBindRetryTimer,
+				this,
+				&ThisClass::BindGameResultState,
+				0.1f,
+				true);
+		}
 		return;
 	}
+	GetWorldTimerManager().ClearTimer(GameResultBindRetryTimer);
 
 	CurrentGameState->OnGameResultChanged.AddDynamic(
 		this, &ACh4_multiGamePlayerController::HandleGameResultChanged);

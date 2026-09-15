@@ -138,6 +138,21 @@ bool FCh4HatUnlockProgressTest::RunTest(const FString& Parameters)
 				LoadedProgress->BestSingleGameDeliveredCargo));
 	}
 
+	const FString TestSlot = FString::Printf(TEXT("Ch4HatUnlockAutomation_%s"), *FGuid::NewGuid().ToString());
+	constexpr int32 TestUserIndex = 0;
+	TestTrue(TEXT("Progress writes through the platform SaveGame system"),
+		UGameplayStatics::SaveGameToSlot(Progress, TestSlot, TestUserIndex));
+	UCh4PlayerProgressSaveGame* DiskLoadedProgress = Cast<UCh4PlayerProgressSaveGame>(
+		UGameplayStatics::LoadGameFromSlot(TestSlot, TestUserIndex));
+	TestNotNull(TEXT("Progress reloads from the platform SaveGame system"), DiskLoadedProgress);
+	if (DiskLoadedProgress)
+	{
+		TestEqual(TEXT("Disk-loaded best score persists"), DiskLoadedProgress->BestSingleGameScore, 2100);
+		TestEqual(TEXT("Disk-loaded best cargo persists"), DiskLoadedProgress->BestSingleGameDeliveredCargo, 21);
+	}
+	TestTrue(TEXT("Automation progress slot is removed after verification"),
+		UGameplayStatics::DeleteGameInSlot(TestSlot, TestUserIndex));
+
 	TestEqual(TEXT("Locked UI state shows a hit-test-invisible lock"),
 		UCh4SkinSelectorViewModel::GetLockVisibilityForUnlockedState(false),
 		ESlateVisibility::HitTestInvisible);

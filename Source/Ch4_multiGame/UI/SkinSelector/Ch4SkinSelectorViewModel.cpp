@@ -1,5 +1,6 @@
 #include "UI/SkinSelector/Ch4SkinSelectorViewModel.h"
 #include "UI/SkinSelector/Ch4_CharacterPreviewStudio.h"
+#include "Ch4_multiGame.h"
 #include "Blueprint/UserWidget.h"
 #include "Ch4_multiGamePlayerController.h"
 #include "Player/Ch4_multiGamePlayerState.h"
@@ -145,6 +146,20 @@ void UCh4SkinSelectorViewModel::RefreshHatUnlockState()
 	HatHelmetRequirementText = Config->GetRequirementText(Ch4Headwear::IronHelmet);
 	HatTrooperRequirementText = Config->GetRequirementText(Ch4Headwear::TrooperHat);
 	HatSnapbackRequirementText = Config->GetRequirementText(Ch4Headwear::Snapback);
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatUnlock] Refresh Controller=%s BestScore=%d BestCargo=%d Requirements={Knight:%d Drink:%d Snapback:%d Trooper:%d} Unlocked={Knight:%s Drink:%s Snapback:%s Trooper:%s}"),
+		*GetNameSafe(PC),
+		BestScore,
+		BestCargo,
+		Config->KnightScoreRequirement,
+		Config->DrinkHelmetScoreRequirement,
+		Config->SnapbackCargoRequirement,
+		Config->TrooperCargoRequirement,
+		bIsHatHelmetUnlocked ? TEXT("true") : TEXT("false"),
+		bIsHatDrinkingUnlocked ? TEXT("true") : TEXT("false"),
+		bIsHatSnapbackUnlocked ? TEXT("true") : TEXT("false"),
+		bIsHatTrooperUnlocked ? TEXT("true") : TEXT("false"));
 
 	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatDrinkingUnlocked);
 	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatHelmetUnlocked);

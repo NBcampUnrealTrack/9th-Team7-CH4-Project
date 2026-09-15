@@ -391,24 +391,37 @@ bool UCh4_multiGameGameInstance::RecordGameResult(const FCh4GameResult& Result)
 	{
 		LoadPlayerProgress();
 	}
-	if (!IsValid(PlayerProgress) || !PlayerProgress->ApplyGameResult(Result))
+	if (!IsValid(PlayerProgress))
 	{
 		return false;
 	}
 
-	if (!SavePlayerProgress())
+	const int32 OldBestScore = PlayerProgress->BestSingleGameScore;
+	const int32 OldBestCargo = PlayerProgress->BestSingleGameDeliveredCargo;
+	const bool bImproved = PlayerProgress->ApplyGameResult(Result);
+	bool bSaved = false;
+	if (bImproved)
 	{
-		UE_LOG(LogCh4_multiGame, Warning,
-			TEXT("[HatUnlock] Personal best improved in memory but SaveGameToSlot failed"));
+		bSaved = SavePlayerProgress();
+		if (!bSaved)
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[HatProgress] Personal best improved in memory but SaveGameToSlot failed"));
+		}
 	}
-	else
-	{
-		UE_LOG(LogCh4_multiGame, Log,
-			TEXT("[HatUnlock] Personal best saved BestScore=%d BestDeliveredCargo=%d"),
-			PlayerProgress->BestSingleGameScore,
-			PlayerProgress->BestSingleGameDeliveredCargo);
-	}
-	return true;
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatProgress] Result Score=%d Cargo=%d OldBestScore=%d NewBestScore=%d OldBestCargo=%d NewBestCargo=%d Improved=%s SaveAttempted=%s Saved=%s"),
+		FMath::Max(Result.FinalCargoScore, 0),
+		FMath::Max(Result.DeliveredCargoCount, 0),
+		OldBestScore,
+		PlayerProgress->BestSingleGameScore,
+		OldBestCargo,
+		PlayerProgress->BestSingleGameDeliveredCargo,
+		bImproved ? TEXT("true") : TEXT("false"),
+		bImproved ? TEXT("true") : TEXT("false"),
+		bSaved ? TEXT("true") : TEXT("false"));
+	return bImproved;
 }
 
 int32 UCh4_multiGameGameInstance::GetBestSingleGameScore() const

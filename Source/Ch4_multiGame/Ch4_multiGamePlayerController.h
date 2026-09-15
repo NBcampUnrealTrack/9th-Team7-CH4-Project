@@ -178,6 +178,7 @@ protected:
 	virtual void OnPossess(APawn* InPawn) override;
 	virtual void OnRep_PlayerState() override;
 	virtual void AcknowledgePossession(APawn* InPawn) override;
+	virtual void PostSeamlessTravel() override;
 
 	/** Input mapping context setup */
 	virtual void SetupInputComponent() override;
@@ -215,6 +216,7 @@ private:
 	bool bSubmittedPersistedCharacterType = false;
 	bool bSubmittedPersistedHeadwear = false;
 	TWeakObjectPtr<class ACh4_multiGameGameState> BoundResultGameState;
+	FTimerHandle GameResultBindRetryTimer;
 
 	UPROPERTY(Transient)
 	float CachedMouseSensitivity = 1.0f;
