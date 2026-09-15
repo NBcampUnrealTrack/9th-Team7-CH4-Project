@@ -107,7 +107,7 @@ public:
 	void EndGrabDetection();
 	void OnGrabReleaseNotify();
 	
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing = OnRep_GrabbedCart)
 	TObjectPtr<class ACartBase> GrabbedCart;
 	
 	UPROPERTY(Replicated)
@@ -162,6 +162,12 @@ public:
 
 	/** Server-only recovery hook that releases existing Cart/Cargo grab state before teleporting this Pawn. */
 	bool ReleaseGrabsForRecovery();
+
+	/** Stops CharacterMovement from competing with the replicated physics Cart attachment. */
+	void SetCartGrabMovementLocked(bool bLocked);
+
+	/** Temporarily disables existing mesh physics and restores it only when it was active before the Cart grab. */
+	void SetCartGrabRagdollSuppressed(bool bSuppressed);
 	
 protected:
 	// 각 동물 BP의 Class Defaults에서 설정한다.
@@ -326,6 +332,14 @@ protected:
 	
 	UFUNCTION()
 	void OnRep_GrabbedComponent();
+
+	UFUNCTION()
+	void OnRep_GrabbedCart();
+
+	TEnumAsByte<EMovementMode> MovementModeBeforeCartGrab = MOVE_Walking;
+	uint8 CustomMovementModeBeforeCartGrab = 0;
+	bool bCartGrabMovementLocked = false;
+	bool bRestoreRagdollAfterCartGrab = false;
 	
 	UFUNCTION()
 	void OnGrabBoxBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,

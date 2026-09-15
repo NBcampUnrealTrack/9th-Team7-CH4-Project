@@ -1740,6 +1740,8 @@ bool ACh4_PlayerCharacter::ReleaseGrabsForRecovery()
 		if (!IsValid(GrabbedCart))
 		{
 			GrabbedCart = nullptr;
+			SetCartGrabMovementLocked(false);
+			SetCartGrabRagdollSuppressed(false);
 			CartMoveInput = FVector2D::ZeroVector;
 			bIsBraking = false;
 			DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
@@ -1755,6 +1757,66 @@ bool ACh4_PlayerCharacter::ReleaseGrabsForRecovery()
 		return false;
 	}
 	return GrabbedCart == nullptr && GrabbedComponent == nullptr;
+}
+
+void ACh4_PlayerCharacter::SetCartGrabMovementLocked(const bool bLocked)
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!Movement || bCartGrabMovementLocked == bLocked)
+	{
+		return;
+	}
+
+	if (bLocked)
+	{
+		MovementModeBeforeCartGrab = Movement->MovementMode;
+		CustomMovementModeBeforeCartGrab = Movement->CustomMovementMode;
+		Movement->StopMovementImmediately();
+		Movement->ClearAccumulatedForces();
+		ConsumeMovementInputVector();
+		Movement->DisableMovement();
+		bCartGrabMovementLocked = true;
+	}
+	else
+	{
+		bCartGrabMovementLocked = false;
+		Movement->SetMovementMode(MovementModeBeforeCartGrab, CustomMovementModeBeforeCartGrab);
+	}
+
+	UE_LOG(LogCh4_multiGame, Verbose,
+		TEXT("[CartGrab] CharacterMovement %s: Character=%s Role=%s Local=%s Mode=%s"),
+		bLocked ? TEXT("locked") : TEXT("restored"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		IsLocallyControlled() ? TEXT("true") : TEXT("false"),
+		*UEnum::GetValueAsString(Movement->MovementMode));
+}
+
+void ACh4_PlayerCharacter::OnRep_GrabbedCart()
+{
+	SetCartGrabMovementLocked(GrabbedCart != nullptr);
+}
+
+void ACh4_PlayerCharacter::SetCartGrabRagdollSuppressed(const bool bSuppressed)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (bSuppressed)
+	{
+		bRestoreRagdollAfterCartGrab = GetMesh() && GetMesh()->IsAnySimulatingPhysics();
+		SetRagdollEnabled(false);
+		return;
+	}
+
+	const bool bShouldRestore = bRestoreRagdollAfterCartGrab;
+	bRestoreRagdollAfterCartGrab = false;
+	if (bShouldRestore)
+	{
+		SetRagdollEnabled(true);
+	}
 }
 
 void ACh4_PlayerCharacter::SetRagdollEnabled(bool bEnabled)

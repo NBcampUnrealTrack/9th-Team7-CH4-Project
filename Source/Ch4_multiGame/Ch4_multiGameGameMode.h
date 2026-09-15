@@ -97,7 +97,7 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Player Recovery",
 		meta=(ClampMin="1.0", Units="cm"))
-	float MaximumPlayerCartDistance = 4000.0f;
+	float MaximumPlayerCartDistance = 12000.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Player Recovery",
 		meta=(ClampMin="1.0", Units="cm"))
