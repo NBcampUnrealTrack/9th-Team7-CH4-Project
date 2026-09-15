@@ -8,6 +8,17 @@
 #include "GameFramework/GameModeBase.h"
 #include "Ch4_multiGameGameMode.generated.h"
 
+class ACartBase;
+class ACh4_PlayerCharacter;
+
+enum class ECh4PlayerRecoveryReason : uint8
+{
+	None,
+	DistanceExceeded,
+	BelowCart,
+	InvalidLocation
+};
+
 /**
  * Authoritative rules owner for the shared game flow.
  */
@@ -47,6 +58,26 @@ public:
 	/** Immediate Waiting-phase return used only when preparation expires with an empty tracked Cart. */
 	bool ReturnToLobbyFromPreparation();
 
+	/** Registers the one authoritative ForestLevel Cart supplied by the preparation transition actor. */
+	bool RegisterGameplayCart(ACartBase* Cart);
+
+	/** Pure recovery policy shared by runtime checks and automation. */
+	static ECh4PlayerRecoveryReason EvaluatePlayerRecovery(
+		ECh4GamePhase GamePhase,
+		const FVector& PlayerLocation,
+		const FVector& CartLocation,
+		float MaximumDistance,
+		float MaximumDistanceBelowCart);
+
+	/** Builds ordered recovery candidates from Cart yaw only: back, back-right, back-left, farther back. */
+	static void BuildPlayerRecoveryCandidates(
+		const FVector& CartLocation,
+		const FRotator& CartRotation,
+		float BehindDistance,
+		float HeightOffset,
+		float LateralOffset,
+		TArray<FVector>& OutCandidates);
+
 	UFUNCTION(BlueprintPure, Category="Game Flow|Lobby Return")
 	bool IsReturnToLobbyScheduled() const { return bReturnToLobbyScheduled; }
 
@@ -56,6 +87,37 @@ public:
 	/** Shared time that success and empty-Goal results remain visible before Lobby travel. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Result", meta=(ClampMin="0.0", Units="s"))
 	float ResultDisplayDurationSeconds = 10.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Player Recovery")
+	bool bEnablePlayerCartRecovery = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Player Recovery",
+		meta=(ClampMin="0.1", Units="s"))
+	float PlayerRecoveryCheckIntervalSeconds = 0.5f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Player Recovery",
+		meta=(ClampMin="1.0", Units="cm"))
+	float MaximumPlayerCartDistance = 4000.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Player Recovery",
+		meta=(ClampMin="1.0", Units="cm"))
+	float MaximumVerticalDistanceBelowCart = 1500.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Player Recovery",
+		meta=(ClampMin="0.0", Units="cm"))
+	float RecoveryBehindCartDistance = 300.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Player Recovery",
+		meta=(ClampMin="0.0", Units="cm"))
+	float RecoveryHeightOffset = 100.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Player Recovery",
+		meta=(ClampMin="0.0", Units="cm"))
+	float RecoveryGroundTraceHeight = 500.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Game Flow|Player Recovery",
+		meta=(ClampMin="1.0", Units="cm"))
+	float RecoveryGroundTraceDepth = 1500.0f;
 
 	/** Returns the active rule policy. Runtime cargo values live in GameState instead. */
 	UFUNCTION(BlueprintPure, Category="Game Flow|Rules")
@@ -122,8 +184,17 @@ private:
 	bool GetLobbyTravelURL(FString& OutURL) const;
 	bool StartLobbyTravel();
 	void OnReturnToLobbyTimer();
+	void StartPlayerRecoveryChecks();
+	void StopPlayerRecoveryChecks();
+	void CheckPlayersForRecovery();
+	bool FindSafePlayerRecoveryLocation(const ACh4_PlayerCharacter& Player, FVector& OutLocation) const;
+	bool RecoverPlayer(ACh4_PlayerCharacter& Player, ECh4PlayerRecoveryReason Reason);
+	static const TCHAR* GetPlayerRecoveryReasonName(ECh4PlayerRecoveryReason Reason);
 	FTimerHandle ReturnToLobbyTimer;
 	FTimerHandle EmptyCartFailureTimer;
+	FTimerHandle PlayerRecoveryTimer;
+	TWeakObjectPtr<ACartBase> GameplayCart;
+	TSet<TWeakObjectPtr<ACh4_PlayerCharacter>> RecoveryLocationFailureWarnings;
 	bool bReturnToLobbyScheduled = false;
 	bool bLobbyTravelStarted = false;
 	bool bEmptyCartFailurePending = false;

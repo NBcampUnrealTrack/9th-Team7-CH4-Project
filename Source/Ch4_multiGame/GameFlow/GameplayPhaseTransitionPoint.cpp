@@ -32,9 +32,16 @@ void AGameplayPhaseTransitionPoint::BeginPlay()
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Preparation] BeginPlay: Actor=%s Authority=%d AutoStart=%d Duration=%.2f Cart=%s CartDestination=%s PlayerDestinations=%d"),
 		*GetName(), HasAuthority(), bStartPreparationOnBeginPlay, PreparationDurationSeconds,
 		*GetNameSafe(CartActor), *GetNameSafe(CartDestination), PlayerDestinationPoints.Num());
-	if (HasAuthority() && bStartPreparationOnBeginPlay)
+	if (HasAuthority())
 	{
-		StartPreparationTimer();
+		if (ACh4_multiGameGameMode* Rule = GetGameRule())
+		{
+			Rule->RegisterGameplayCart(Cast<ACartBase>(CartActor));
+		}
+		if (bStartPreparationOnBeginPlay)
+		{
+			StartPreparationTimer();
+		}
 	}
 }
 

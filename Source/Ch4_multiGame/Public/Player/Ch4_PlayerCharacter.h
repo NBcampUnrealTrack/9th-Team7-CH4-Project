@@ -159,6 +159,9 @@ public:
 	float NameplateMaxDrawDistance = 2500.0f;
 	
 	void SetRagdollEnabled(bool bEnabled);
+
+	/** Server-only recovery hook that releases existing Cart/Cargo grab state before teleporting this Pawn. */
+	bool ReleaseGrabsForRecovery();
 	
 protected:
 	// 각 동물 BP의 Class Defaults에서 설정한다.
@@ -335,6 +338,8 @@ protected:
 
 	UFUNCTION(Server, Reliable)
 	void ServerRPC_ReleaseGrab();
+
+	bool ReleaseGrabbedComponentOnServer();
 
 	/** Cart requests must originate from this client-owned Character, never from the shared Cart Actor. */
 	UFUNCTION(Server, Reliable)

@@ -1405,13 +1405,27 @@ void ACh4_PlayerCharacter::MulticastRPC_AttachGrab_Implementation(UPrimitiveComp
 
 void ACh4_PlayerCharacter::ServerRPC_ReleaseGrab_Implementation()
 {
-	if (GrabbedComponent == nullptr)
+	ReleaseGrabbedComponentOnServer();
+}
+
+bool ACh4_PlayerCharacter::ReleaseGrabbedComponentOnServer()
+{
+	if (!HasAuthority())
 	{
-		return;
+		return false;
 	}
-	
-	MulticastRPC_ReleaseGrab(GrabbedComponent);
+	if (!IsValid(GrabbedComponent))
+	{
+		GrabbedComponent = nullptr;
+		ForceNetUpdate();
+		return true;
+	}
+
+	UPrimitiveComponent* ComponentToRelease = GrabbedComponent;
+	MulticastRPC_ReleaseGrab(ComponentToRelease);
 	GrabbedComponent = nullptr;
+	ForceNetUpdate();
+	return true;
 }
 
 void ACh4_PlayerCharacter::MulticastRPC_ReleaseGrab_Implementation(UPrimitiveComponent* TargetComponent)
@@ -1709,6 +1723,37 @@ void ACh4_PlayerCharacter::ClearCargoInteractionFocus()
 		CargoPromptComponent->SetVisibility(false);
 		CargoPromptComponent->SetHiddenInGame(true);
 	}
+}
+
+bool ACh4_PlayerCharacter::ReleaseGrabsForRecovery()
+{
+	if (!HasAuthority())
+	{
+		return false;
+	}
+
+	EndGrabDetection();
+	ClearCargoInteractionFocus();
+	if (GrabbedCart)
+	{
+		if (!IsValid(GrabbedCart))
+		{
+			GrabbedCart = nullptr;
+			CartMoveInput = FVector2D::ZeroVector;
+			bIsBraking = false;
+			DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+			ForceNetUpdate();
+		}
+		else if (!GrabbedCart->ReleasePlayer(this))
+		{
+			return false;
+		}
+	}
+	if (!ReleaseGrabbedComponentOnServer())
+	{
+		return false;
+	}
+	return GrabbedCart == nullptr && GrabbedComponent == nullptr;
 }
 
 void ACh4_PlayerCharacter::SetRagdollEnabled(bool bEnabled)

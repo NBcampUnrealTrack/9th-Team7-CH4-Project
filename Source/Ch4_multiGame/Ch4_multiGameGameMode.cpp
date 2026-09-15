@@ -5,13 +5,19 @@
 #include "Ch4_multiGame.h"
 #include "AssetRegistry/AssetData.h"
 #include "Cargo/CargoActor.h"
+#include "Cart/CartBase.h"
 #include "Cart/CartCargoTrackerComponent.h"
+#include "CollisionQueryParams.h"
+#include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "Misc/PackageName.h"
 #include "Misc/AssetRegistryInterface.h"
 #include "TimerManager.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
 #include "GameFlow/GameFlowTargetInterface.h"
+#include "Player/Ch4_PlayerCharacter.h"
 #include "Player/Ch4_multiGamePlayerState.h"
 #include "Player/Ch4_multiGameGameInstance.h"
 
@@ -21,6 +27,79 @@ ACh4_multiGameGameMode::ACh4_multiGameGameMode()
 	GameStateClass = ACh4_multiGameGameState::StaticClass();
 	PlayerStateClass = ACh4_multiGamePlayerState::StaticClass();
 	LobbyMap = TSoftObjectPtr<UWorld>(FSoftObjectPath(TEXT("/Game/Lobby/L_Lobby.L_Lobby")));
+}
+
+bool ACh4_multiGameGameMode::RegisterGameplayCart(ACartBase* Cart)
+{
+	if (!HasAuthority() || !IsValid(Cart) || Cart->IsActorBeingDestroyed()
+		|| Cart->GetWorld() != GetWorld())
+	{
+		return false;
+	}
+	if (GameplayCart.IsValid() && GameplayCart.Get() != Cart)
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[PlayerRecovery] Cart registration rejected: existing=%s new=%s"),
+			*GetNameSafe(GameplayCart.Get()), *GetNameSafe(Cart));
+		return false;
+	}
+
+	GameplayCart = Cart;
+	StartPlayerRecoveryChecks();
+	return true;
+}
+
+ECh4PlayerRecoveryReason ACh4_multiGameGameMode::EvaluatePlayerRecovery(
+	const ECh4GamePhase GamePhase,
+	const FVector& PlayerLocation,
+	const FVector& CartLocation,
+	const float MaximumDistance,
+	const float MaximumDistanceBelowCart)
+{
+	if (GamePhase != ECh4GamePhase::Playing)
+	{
+		return ECh4PlayerRecoveryReason::None;
+	}
+	if (PlayerLocation.ContainsNaN() || CartLocation.ContainsNaN())
+	{
+		return ECh4PlayerRecoveryReason::InvalidLocation;
+	}
+	if (FMath::IsFinite(MaximumDistanceBelowCart) && MaximumDistanceBelowCart > 0.0f
+		&& PlayerLocation.Z < CartLocation.Z - MaximumDistanceBelowCart)
+	{
+		return ECh4PlayerRecoveryReason::BelowCart;
+	}
+	if (FMath::IsFinite(MaximumDistance) && MaximumDistance > 0.0f
+		&& FVector::DistSquared(PlayerLocation, CartLocation) > FMath::Square(MaximumDistance))
+	{
+		return ECh4PlayerRecoveryReason::DistanceExceeded;
+	}
+	return ECh4PlayerRecoveryReason::None;
+}
+
+void ACh4_multiGameGameMode::BuildPlayerRecoveryCandidates(
+	const FVector& CartLocation,
+	const FRotator& CartRotation,
+	const float BehindDistance,
+	const float HeightOffset,
+	const float LateralOffset,
+	TArray<FVector>& OutCandidates)
+{
+	OutCandidates.Reset(4);
+	const float CartYaw = FMath::IsFinite(CartRotation.Yaw) ? CartRotation.Yaw : 0.0f;
+	const FRotationMatrix YawRotation(FRotator(0.0f, CartYaw, 0.0f));
+	const FVector Forward = YawRotation.GetUnitAxis(EAxis::X);
+	const FVector Right = YawRotation.GetUnitAxis(EAxis::Y);
+	const float SafeBehindDistance = FMath::Max(BehindDistance, 0.0f);
+	const float SafeHeightOffset = FMath::Max(HeightOffset, 0.0f);
+	const float SafeLateralOffset = FMath::Max(LateralOffset, 0.0f);
+	const FVector ElevatedCartLocation = CartLocation + FVector::UpVector * SafeHeightOffset;
+	const FVector Behind = ElevatedCartLocation - Forward * SafeBehindDistance;
+
+	OutCandidates.Add(Behind);
+	OutCandidates.Add(Behind + Right * SafeLateralOffset);
+	OutCandidates.Add(Behind - Right * SafeLateralOffset);
+	OutCandidates.Add(ElevatedCartLocation - Forward * (SafeBehindDistance + SafeLateralOffset));
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -144,6 +223,7 @@ bool ACh4_multiGameGameMode::RequestGameStart()
 		GameplayStartServerTimeSeconds);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[GameFlow] Remaining Cargo: %d / %d"),
 		GameFlowState->GetRemainingCargoCount(), GameFlowState->GetInitialCargoCount());
+	StartPlayerRecoveryChecks();
 	return true;
 }
 
@@ -576,6 +656,7 @@ bool ACh4_multiGameGameMode::TryTransitionGamePhase(
 	const bool bTransitioned = GameFlowState->SetGamePhaseState(NewPhase, EndReason, FinalCargoScore);
 	if (bTransitioned && (NewPhase == ECh4GamePhase::Cleared || NewPhase == ECh4GamePhase::GameOver))
 	{
+		StopPlayerRecoveryChecks();
 		ClearEmptyCartFailure();
 	}
 	return bTransitioned;
@@ -884,8 +965,245 @@ bool ACh4_multiGameGameMode::StartLobbyTravel()
 	return true;
 }
 
+void ACh4_multiGameGameMode::StartPlayerRecoveryChecks()
+{
+	const ACh4_multiGameGameState* State = GetGameFlowGameState();
+	if (!bEnablePlayerCartRecovery || !HasAuthority() || !GetWorld() || !GameplayCart.IsValid()
+		|| !State || State->GetCurrentGamePhase() != ECh4GamePhase::Playing
+		|| GetWorldTimerManager().IsTimerActive(PlayerRecoveryTimer))
+	{
+		return;
+	}
+	if (!FMath::IsFinite(PlayerRecoveryCheckIntervalSeconds) || PlayerRecoveryCheckIntervalSeconds < 0.1f
+		|| !FMath::IsFinite(MaximumPlayerCartDistance) || MaximumPlayerCartDistance <= 0.0f
+		|| !FMath::IsFinite(MaximumVerticalDistanceBelowCart) || MaximumVerticalDistanceBelowCart <= 0.0f)
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[PlayerRecovery] Disabled by invalid interval or distance settings on %s"), *GetName());
+		return;
+	}
+
+	GetWorldTimerManager().SetTimer(
+		PlayerRecoveryTimer,
+		this,
+		&ACh4_multiGameGameMode::CheckPlayersForRecovery,
+		PlayerRecoveryCheckIntervalSeconds,
+		true,
+		PlayerRecoveryCheckIntervalSeconds);
+}
+
+void ACh4_multiGameGameMode::StopPlayerRecoveryChecks()
+{
+	if (GetWorld())
+	{
+		GetWorldTimerManager().ClearTimer(PlayerRecoveryTimer);
+	}
+	RecoveryLocationFailureWarnings.Reset();
+}
+
+const TCHAR* ACh4_multiGameGameMode::GetPlayerRecoveryReasonName(const ECh4PlayerRecoveryReason Reason)
+{
+	switch (Reason)
+	{
+	case ECh4PlayerRecoveryReason::DistanceExceeded:
+		return TEXT("DistanceExceeded");
+	case ECh4PlayerRecoveryReason::BelowCart:
+		return TEXT("BelowCart");
+	case ECh4PlayerRecoveryReason::InvalidLocation:
+		return TEXT("InvalidLocation");
+	default:
+		return TEXT("None");
+	}
+}
+
+bool ACh4_multiGameGameMode::FindSafePlayerRecoveryLocation(
+	const ACh4_PlayerCharacter& Player,
+	FVector& OutLocation) const
+{
+	const ACartBase* Cart = GameplayCart.Get();
+	const UCapsuleComponent* Capsule = Player.GetCapsuleComponent();
+	const UCharacterMovementComponent* Movement = Player.GetCharacterMovement();
+	UWorld* World = GetWorld();
+	if (!World || !IsValid(Cart) || !Capsule || !Movement
+		|| !FMath::IsFinite(RecoveryBehindCartDistance) || !FMath::IsFinite(RecoveryHeightOffset)
+		|| !FMath::IsFinite(RecoveryGroundTraceHeight) || !FMath::IsFinite(RecoveryGroundTraceDepth))
+	{
+		return false;
+	}
+
+	float CapsuleRadius = 0.0f;
+	float CapsuleHalfHeight = 0.0f;
+	Capsule->GetScaledCapsuleSize(CapsuleRadius, CapsuleHalfHeight);
+	const float LateralOffset = FMath::Max(CapsuleRadius * 2.0f + 50.0f, 150.0f);
+	TArray<FVector> Candidates;
+	BuildPlayerRecoveryCandidates(
+		Cart->GetActorLocation(),
+		Cart->GetActorRotation(),
+		RecoveryBehindCartDistance,
+		RecoveryHeightOffset,
+		LateralOffset,
+		Candidates);
+
+	FCollisionQueryParams GroundParams(SCENE_QUERY_STAT(PlayerRecoveryGroundTrace), false, &Player);
+	GroundParams.AddIgnoredActor(Cart);
+	FCollisionQueryParams SpaceParams(SCENE_QUERY_STAT(PlayerRecoveryCapsuleSpace), false, &Player);
+	const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(CapsuleRadius, CapsuleHalfHeight);
+	const float MinimumGroundNormalZ = Movement->GetWalkableFloorZ();
+	constexpr float CapsuleGroundSafetyOffset = 5.0f;
+
+	for (const FVector& Candidate : Candidates)
+	{
+		if (Candidate.ContainsNaN())
+		{
+			continue;
+		}
+		FHitResult GroundHit;
+		const FVector TraceStart = Candidate + FVector::UpVector * FMath::Max(RecoveryGroundTraceHeight, 0.0f);
+		const FVector TraceEnd = Candidate - FVector::UpVector * FMath::Max(RecoveryGroundTraceDepth, 1.0f);
+		if (!World->LineTraceSingleByChannel(
+			GroundHit, TraceStart, TraceEnd, ECC_Visibility, GroundParams)
+			|| !GroundHit.bBlockingHit || GroundHit.ImpactNormal.Z < MinimumGroundNormalZ
+			|| !IsValid(GroundHit.GetComponent()) || GroundHit.GetComponent()->IsSimulatingPhysics())
+		{
+			continue;
+		}
+
+		const FVector CapsuleLocation = GroundHit.ImpactPoint
+			+ FVector::UpVector * (CapsuleHalfHeight + CapsuleGroundSafetyOffset);
+		if (CapsuleLocation.ContainsNaN()
+			|| World->OverlapBlockingTestByChannel(
+				CapsuleLocation,
+				FQuat::Identity,
+				Capsule->GetCollisionObjectType(),
+				CapsuleShape,
+				SpaceParams))
+		{
+			continue;
+		}
+
+		OutLocation = CapsuleLocation;
+		return true;
+	}
+	return false;
+}
+
+bool ACh4_multiGameGameMode::RecoverPlayer(
+	ACh4_PlayerCharacter& Player,
+	const ECh4PlayerRecoveryReason Reason)
+{
+	ACartBase* Cart = GameplayCart.Get();
+	if (!HasAuthority() || !IsValid(Cart))
+	{
+		return false;
+	}
+	const TWeakObjectPtr<ACh4_PlayerCharacter> PlayerKey(&Player);
+	const FVector OriginalPlayerLocation = Player.GetActorLocation();
+	const FVector CartLocation = Cart->GetActorLocation();
+	const double OriginalDistance = OriginalPlayerLocation.ContainsNaN() || CartLocation.ContainsNaN()
+		? -1.0
+		: FVector::Distance(OriginalPlayerLocation, CartLocation);
+
+	FVector Destination;
+	if (!FindSafePlayerRecoveryLocation(Player, Destination))
+	{
+		if (!RecoveryLocationFailureWarnings.Contains(PlayerKey))
+		{
+			RecoveryLocationFailureWarnings.Add(PlayerKey);
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[PlayerRecovery] No safe ground/capsule candidate: Player=%s Reason=%s"),
+				*GetNameSafe(&Player), GetPlayerRecoveryReasonName(Reason));
+		}
+		return false;
+	}
+	if (!Player.ReleaseGrabsForRecovery())
+	{
+		if (!RecoveryLocationFailureWarnings.Contains(PlayerKey))
+		{
+			RecoveryLocationFailureWarnings.Add(PlayerKey);
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[PlayerRecovery] Grab release failed; teleport deferred: Player=%s"),
+				*GetNameSafe(&Player));
+		}
+		return false;
+	}
+
+	if (UCharacterMovementComponent* Movement = Player.GetCharacterMovement())
+	{
+		Movement->StopMovementImmediately();
+		Movement->ClearAccumulatedForces();
+	}
+	Player.ConsumeMovementInputVector();
+	const FRotator DestinationRotation(0.0f, Cart->GetActorRotation().Yaw, 0.0f);
+	if (!Player.TeleportTo(Destination, DestinationRotation, false, true))
+	{
+		if (!RecoveryLocationFailureWarnings.Contains(PlayerKey))
+		{
+			RecoveryLocationFailureWarnings.Add(PlayerKey);
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[PlayerRecovery] Teleport failed: Player=%s Destination=%s"),
+				*GetNameSafe(&Player), *Destination.ToString());
+		}
+		return false;
+	}
+	if (APlayerController* PlayerController = Cast<APlayerController>(Player.GetController()))
+	{
+		PlayerController->SetControlRotation(DestinationRotation);
+		PlayerController->ClientSetRotation(DestinationRotation, true);
+	}
+	Player.ForceNetUpdate();
+	RecoveryLocationFailureWarnings.Remove(PlayerKey);
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[PlayerRecovery] Player=%s Distance=%.1f Reason=%s Destination=%s"),
+		*GetNameSafe(&Player), OriginalDistance, GetPlayerRecoveryReasonName(Reason), *Destination.ToString());
+	return true;
+}
+
+void ACh4_multiGameGameMode::CheckPlayersForRecovery()
+{
+	ACartBase* Cart = GameplayCart.Get();
+	const ACh4_multiGameGameState* State = GetGameFlowGameState();
+	if (!bEnablePlayerCartRecovery || !HasAuthority() || !IsValid(Cart) || !State
+		|| State->GetCurrentGamePhase() != ECh4GamePhase::Playing)
+	{
+		return;
+	}
+
+	for (auto It = RecoveryLocationFailureWarnings.CreateIterator(); It; ++It)
+	{
+		if (!It->IsValid())
+		{
+			It.RemoveCurrent();
+		}
+	}
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PlayerController = It->Get();
+		ACh4_PlayerCharacter* Player = IsValid(PlayerController)
+			? Cast<ACh4_PlayerCharacter>(PlayerController->GetPawn())
+			: nullptr;
+		if (!IsValid(Player) || Player->IsActorBeingDestroyed())
+		{
+			continue;
+		}
+
+		const ECh4PlayerRecoveryReason Reason = EvaluatePlayerRecovery(
+			State->GetCurrentGamePhase(),
+			Player->GetActorLocation(),
+			Cart->GetActorLocation(),
+			MaximumPlayerCartDistance,
+			MaximumVerticalDistanceBelowCart);
+		if (Reason == ECh4PlayerRecoveryReason::None)
+		{
+			RecoveryLocationFailureWarnings.Remove(TWeakObjectPtr<ACh4_PlayerCharacter>(Player));
+			continue;
+		}
+		RecoverPlayer(*Player, Reason);
+	}
+}
+
 void ACh4_multiGameGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	StopPlayerRecoveryChecks();
 	GetWorldTimerManager().ClearTimer(ReturnToLobbyTimer);
 	ClearEmptyCartFailure();
 	bReturnToLobbyScheduled = false;
