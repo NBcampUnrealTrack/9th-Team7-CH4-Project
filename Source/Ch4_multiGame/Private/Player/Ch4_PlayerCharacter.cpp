@@ -370,6 +370,7 @@ void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProp
 	DOREPLIFETIME(ThisClass, GrabbedCart);
 	DOREPLIFETIME(ThisClass, CartMoveInput);
 	DOREPLIFETIME(ThisClass, bIsBraking);
+	DOREPLIFETIME(ThisClass, bRagdollEnabled);
 }
 
 void ACh4_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -1739,6 +1740,8 @@ bool ACh4_PlayerCharacter::ReleaseGrabsForRecovery()
 		if (!IsValid(GrabbedCart))
 		{
 			GrabbedCart = nullptr;
+			SetCartGrabMovementLocked(false);
+			SetCartGrabRagdollSuppressed(false);
 			CartMoveInput = FVector2D::ZeroVector;
 			bIsBraking = false;
 			DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
@@ -1756,6 +1759,66 @@ bool ACh4_PlayerCharacter::ReleaseGrabsForRecovery()
 	return GrabbedCart == nullptr && GrabbedComponent == nullptr;
 }
 
+void ACh4_PlayerCharacter::SetCartGrabMovementLocked(const bool bLocked)
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!Movement || bCartGrabMovementLocked == bLocked)
+	{
+		return;
+	}
+
+	if (bLocked)
+	{
+		MovementModeBeforeCartGrab = Movement->MovementMode;
+		CustomMovementModeBeforeCartGrab = Movement->CustomMovementMode;
+		Movement->StopMovementImmediately();
+		Movement->ClearAccumulatedForces();
+		ConsumeMovementInputVector();
+		Movement->DisableMovement();
+		bCartGrabMovementLocked = true;
+	}
+	else
+	{
+		bCartGrabMovementLocked = false;
+		Movement->SetMovementMode(MovementModeBeforeCartGrab, CustomMovementModeBeforeCartGrab);
+	}
+
+	UE_LOG(LogCh4_multiGame, Verbose,
+		TEXT("[CartGrab] CharacterMovement %s: Character=%s Role=%s Local=%s Mode=%s"),
+		bLocked ? TEXT("locked") : TEXT("restored"),
+		*GetName(),
+		*UEnum::GetValueAsString(GetLocalRole()),
+		IsLocallyControlled() ? TEXT("true") : TEXT("false"),
+		*UEnum::GetValueAsString(Movement->MovementMode));
+}
+
+void ACh4_PlayerCharacter::OnRep_GrabbedCart()
+{
+	SetCartGrabMovementLocked(GrabbedCart != nullptr);
+}
+
+void ACh4_PlayerCharacter::SetCartGrabRagdollSuppressed(const bool bSuppressed)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (bSuppressed)
+	{
+		bRestoreRagdollAfterCartGrab = GetMesh() && GetMesh()->IsAnySimulatingPhysics();
+		SetRagdollEnabled(false);
+		return;
+	}
+
+	const bool bShouldRestore = bRestoreRagdollAfterCartGrab;
+	bRestoreRagdollAfterCartGrab = false;
+	if (bShouldRestore)
+	{
+		SetRagdollEnabled(true);
+	}
+}
+
 void ACh4_PlayerCharacter::SetRagdollEnabled(bool bEnabled)
 {
 	if (HasAuthority() == false)
@@ -1763,27 +1826,23 @@ void ACh4_PlayerCharacter::SetRagdollEnabled(bool bEnabled)
 		return;
 	}
 
-	MulticastRPC_SetRagdollEnabled(bEnabled);
+	bRagdollEnabled = bEnabled;
+	OnRep_RagdollEnabled();   // 서버 자신은 OnRep이 자동 호출되지 않으므로 직접 호출
 }
 
-void ACh4_PlayerCharacter::MulticastRPC_SetRagdollEnabled_Implementation(bool bEnabled)
+void ACh4_PlayerCharacter::OnRep_RagdollEnabled()
 {
 	if (GetMesh() == nullptr)
 	{
 		return;
 	}
 
-	if (bEnabled)
+	if (bRagdollEnabled)
 	{
-		// 레그돌 활성화
-		GetMesh()->SetAllBodiesBelowSimulatePhysics(
-			RagdollRootBone,
-			true,
-			bRagdollIncludeSelf);
+		GetMesh()->SetAllBodiesBelowSimulatePhysics(RagdollRootBone, true, bRagdollIncludeSelf);
 	}
 	else
 	{
-		// 레그돌 비활성화
 		GetMesh()->SetAllBodiesSimulatePhysics(false);
 	}
 }

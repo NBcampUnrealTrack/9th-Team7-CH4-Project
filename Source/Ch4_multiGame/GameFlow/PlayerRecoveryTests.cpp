@@ -128,6 +128,17 @@ private:
 		{
 			return false;
 		}
+		if (Stage == 0 && RemoteConnectedAt <= 0.0)
+		{
+			RemoteConnectedAt = Now;
+			return false;
+		}
+		// Each process owns its Automation controller. Give the client controller time to start
+		// its latent command before the server publishes the deliberately out-of-bounds state.
+		if (Stage == 0 && Now - RemoteConnectedAt < 6.0)
+		{
+			return false;
+		}
 
 		if (Stage == 0)
 		{
@@ -139,6 +150,9 @@ private:
 			}
 			// Leave enough time for the remote process to observe the replicated out-of-bounds state.
 			Rule->PlayerRecoveryCheckIntervalSeconds = 2.0f;
+			// The checked-in Blueprint still serializes the former 4000 cm override. Exercise the new
+			// 12000 cm policy in memory without modifying the user's binary asset.
+			Rule->MaximumPlayerCartDistance = 12000.0f;
 			if (State->GetCurrentGamePhase() == ECh4GamePhase::Waiting
 				&& (!Rule->RequestCargoInitialization(1) || !Rule->RequestGameStart()))
 			{
@@ -154,8 +168,10 @@ private:
 			HostPawn = LocalCharacter;
 			RemotePawn = RemoteCharacter;
 			const FVector CartLocation = Cart->GetActorLocation();
+			LocalCharacter->GetCharacterMovement()->SetMovementMode(MOVE_Flying);
+			LocalCharacter->GetCharacterMovement()->StopMovementImmediately();
 			LocalCharacter->SetActorLocation(
-				CartLocation + FVector(4500.0, 0.0, 100.0), false, nullptr, ETeleportType::TeleportPhysics);
+				CartLocation + FVector(12500.0, 0.0, 100.0), false, nullptr, ETeleportType::TeleportPhysics);
 			RemoteCharacter->SetActorLocation(
 				CartLocation - FVector(0.0, 0.0, 2000.0), false, nullptr, ETeleportType::TeleportPhysics);
 			LocalCharacter->ForceNetUpdate();
@@ -212,7 +228,7 @@ private:
 			State->GetCurrentGamePhase(),
 			LocalCharacter->GetActorLocation(),
 			Cart->GetActorLocation(),
-			4000.0f,
+			12000.0f,
 			1500.0f);
 		if (Reason != ECh4PlayerRecoveryReason::None)
 		{
@@ -235,6 +251,7 @@ private:
 	double StartedAt = 0.0;
 	double OutOfBoundsAt = 0.0;
 	double RecoveryObservedAt = 0.0;
+	double RemoteConnectedAt = 0.0;
 	double HostRecoveryDistance = 0.0;
 	double RemoteRecoveryDistance = 0.0;
 	int32 Stage = 0;
@@ -256,23 +273,29 @@ bool FCh4PlayerRecoveryPolicyTest::RunTest(const FString& Parameters)
 	const auto Evaluate = [&CartLocation](const ECh4GamePhase Phase, const FVector& PlayerLocation)
 	{
 		return ACh4_multiGameGameMode::EvaluatePlayerRecovery(
-			Phase, PlayerLocation, CartLocation, 4000.0f, 1500.0f);
+			Phase, PlayerLocation, CartLocation, 12000.0f, 1500.0f);
 	};
 
 	TestEqual(TEXT("Waiting never recovers a distant Player"),
-		static_cast<uint8>(Evaluate(ECh4GamePhase::Waiting, CartLocation + FVector(5000.0, 0.0, 0.0))),
+		static_cast<uint8>(Evaluate(ECh4GamePhase::Waiting, CartLocation + FVector(12500.0, 0.0, 0.0))),
 		static_cast<uint8>(EReason::None));
 	TestEqual(TEXT("A nearby Player remains in place while Playing"),
 		static_cast<uint8>(Evaluate(ECh4GamePhase::Playing, CartLocation + FVector(1000.0, 0.0, 0.0))),
 		static_cast<uint8>(EReason::None));
-	TestEqual(TEXT("A Player beyond 4000 cm is recovered"),
+	TestEqual(TEXT("A Player beyond the former 4000 cm threshold remains inside the new range"),
 		static_cast<uint8>(Evaluate(ECh4GamePhase::Playing, CartLocation + FVector(4500.0, 0.0, 0.0))),
+		static_cast<uint8>(EReason::None));
+	TestEqual(TEXT("A Player exactly at 12000 cm remains in place"),
+		static_cast<uint8>(Evaluate(ECh4GamePhase::Playing, CartLocation + FVector(12000.0, 0.0, 0.0))),
+		static_cast<uint8>(EReason::None));
+	TestEqual(TEXT("A Player just beyond 12000 cm is recovered"),
+		static_cast<uint8>(Evaluate(ECh4GamePhase::Playing, CartLocation + FVector(12001.0, 0.0, 0.0))),
 		static_cast<uint8>(EReason::DistanceExceeded));
 	TestEqual(TEXT("A horizontally nearby Player 3000 cm below the Cart is recovered"),
 		static_cast<uint8>(Evaluate(ECh4GamePhase::Playing, CartLocation + FVector(100.0, 0.0, -3000.0))),
 		static_cast<uint8>(EReason::BelowCart));
 	TestEqual(TEXT("Cleared never recovers a distant Player"),
-		static_cast<uint8>(Evaluate(ECh4GamePhase::Cleared, CartLocation + FVector(5000.0, 0.0, 0.0))),
+		static_cast<uint8>(Evaluate(ECh4GamePhase::Cleared, CartLocation + FVector(12500.0, 0.0, 0.0))),
 		static_cast<uint8>(EReason::None));
 	FVector InvalidLocation = CartLocation;
 	InvalidLocation.X = std::numeric_limits<double>::quiet_NaN();
@@ -286,23 +309,33 @@ bool FCh4PlayerRecoveryPolicyTest::RunTest(const FString& Parameters)
 		CartLocation, FRotator(40.0, 90.0, 30.0), 300.0f, 100.0f, 150.0f, TiltedCandidates);
 	ACh4_multiGameGameMode::BuildPlayerRecoveryCandidates(
 		CartLocation, FRotator(0.0, 90.0, 0.0), 300.0f, 100.0f, 150.0f, FlatCandidates);
-	TestEqual(TEXT("Recovery provides four ordered fallback candidates"), TiltedCandidates.Num(), 4);
+	TestEqual(TEXT("Recovery provides six ordered rear-only fallback candidates"), TiltedCandidates.Num(), 6);
 	TestTrue(TEXT("Cart pitch and roll do not move candidates underground or sideways"),
 		TiltedCandidates == FlatCandidates);
 	TestTrue(TEXT("The first candidate is 300 cm behind yaw and 100 cm above the Cart"),
 		TiltedCandidates.IsValidIndex(0)
 			&& TiltedCandidates[0].Equals(FVector(100.0, -100.0, 900.0), 0.01));
-	TestTrue(TEXT("The final fallback is farther behind the Cart"),
-		TiltedCandidates.IsValidIndex(3)
-			&& FVector::DistSquared2D(TiltedCandidates[3], CartLocation)
+	TestTrue(TEXT("The final fallback is farther behind and to the right of the Cart"),
+		TiltedCandidates.IsValidIndex(5)
+			&& FVector::DistSquared2D(TiltedCandidates[5], CartLocation)
 				> FVector::DistSquared2D(TiltedCandidates[0], CartLocation));
+	const FVector YawForward = FRotationMatrix(FRotator(0.0, 90.0, 0.0)).GetUnitAxis(EAxis::X);
+	for (int32 CandidateIndex = 0; CandidateIndex < TiltedCandidates.Num(); ++CandidateIndex)
+	{
+		const FVector HorizontalOffset = FVector(
+			TiltedCandidates[CandidateIndex].X - CartLocation.X,
+			TiltedCandidates[CandidateIndex].Y - CartLocation.Y,
+			0.0);
+		TestTrue(FString::Printf(TEXT("Candidate %d stays in the Cart's rear hemisphere"), CandidateIndex),
+			FVector::DotProduct(HorizontalOffset, YawForward) <= KINDA_SMALL_NUMBER);
+	}
 
 	const ACh4_multiGameGameMode* Defaults = GetDefault<ACh4_multiGameGameMode>();
 	TestTrue(TEXT("Player Cart recovery is enabled by default"), Defaults->bEnablePlayerCartRecovery);
 	TestEqual(TEXT("Recovery checks default to 0.5 seconds"),
 		Defaults->PlayerRecoveryCheckIntervalSeconds, 0.5f);
-	TestEqual(TEXT("The default maximum Cart distance is 4000 cm"),
-		Defaults->MaximumPlayerCartDistance, 4000.0f);
+	TestEqual(TEXT("The default maximum Cart distance is exactly three times the former 4000 cm"),
+		Defaults->MaximumPlayerCartDistance, 12000.0f);
 	TestEqual(TEXT("The default below-Cart threshold is 1500 cm"),
 		Defaults->MaximumVerticalDistanceBelowCart, 1500.0f);
 	return true;
@@ -401,7 +434,7 @@ bool FCh4PlayerRecoveryWorldTest::RunTest(const FString& Parameters)
 		HeldCargo->SetActorLocation(Players[0]->GetActorLocation());
 		HeldCargo->AttachToComponent(Players[0]->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
 		Players[0]->GrabbedComponent = HeldCargo->GetStaticMeshComponent();
-		Players[0]->SetActorLocation(FVector(4500.0, 0.0, 100.0));
+		Players[0]->SetActorLocation(FVector(12500.0, 0.0, 100.0));
 		Players[0]->GetCharacterMovement()->Velocity = FVector(200.0, 0.0, -1000.0);
 		USceneComponent* GrabAnchor = Cast<USceneComponent>(Cart->GetDefaultSubobjectByName(TEXT("Anchor_1")));
 		bSuccess &= TestNotNull(TEXT("Cart recovery fixture has its normal first grab anchor"), GrabAnchor);
@@ -411,7 +444,7 @@ bool FCh4PlayerRecoveryWorldTest::RunTest(const FString& Parameters)
 			bSuccess &= TestTrue(TEXT("Second Player uses the normal Cart grab path before recovery"),
 				Cart->TryGrabPlayer(Players[1]));
 		}
-		Players[1]->SetActorLocation(FVector(4500.0, 200.0, 100.0));
+		Players[1]->SetActorLocation(FVector(12500.0, 200.0, 100.0));
 		Players[1]->GetCharacterMovement()->Velocity = FVector(-200.0, 0.0, -1000.0);
 
 		bSuccess &= TestTrue(TEXT("Transition actor can register its authoritative Cart once"),

@@ -105,7 +105,9 @@ void UCh4_multiGameGameInstance::CacheHatUnlockConfig()
 void UCh4_multiGameGameInstance::LoadPlayerProgress()
 {
 	PlayerProgress = nullptr;
-	if (UGameplayStatics::DoesSaveGameExist(PlayerProgressSlotName, PlayerProgressUserIndex))
+	const bool bSaveExists = UGameplayStatics::DoesSaveGameExist(
+		PlayerProgressSlotName, PlayerProgressUserIndex);
+	if (bSaveExists)
 	{
 		PlayerProgress = Cast<UCh4PlayerProgressSaveGame>(
 			UGameplayStatics::LoadGameFromSlot(PlayerProgressSlotName, PlayerProgressUserIndex));
@@ -123,7 +125,14 @@ void UCh4_multiGameGameInstance::LoadPlayerProgress()
 	}
 
 	UE_LOG(LogCh4_multiGame, Log,
-		TEXT("[HatUnlock] Local progress loaded BestScore=%d BestDeliveredCargo=%d"),
+		TEXT("[HatProgress] Load Slot=%s UserIndex=%d Exists=%s Loaded=%s SaveClass=%s"),
+		*PlayerProgressSlotName,
+		PlayerProgressUserIndex,
+		bSaveExists ? TEXT("true") : TEXT("false"),
+		bSaveExists && IsValid(PlayerProgress) ? TEXT("true") : TEXT("false"),
+		*UCh4PlayerProgressSaveGame::StaticClass()->GetPathName());
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatProgress] Runtime Profile BestScore=%d BestCargo=%d"),
 		GetBestSingleGameScore(), GetBestSingleGameDeliveredCargo());
 }
 
@@ -391,24 +400,150 @@ bool UCh4_multiGameGameInstance::RecordGameResult(const FCh4GameResult& Result)
 	{
 		LoadPlayerProgress();
 	}
-	if (!IsValid(PlayerProgress) || !PlayerProgress->ApplyGameResult(Result))
+	if (!IsValid(PlayerProgress))
 	{
 		return false;
 	}
 
-	if (!SavePlayerProgress())
+	const int32 OldBestScore = PlayerProgress->BestSingleGameScore;
+	const int32 OldBestCargo = PlayerProgress->BestSingleGameDeliveredCargo;
+	const bool bImproved = PlayerProgress->ApplyGameResult(Result);
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatProgress] Result received Score=%d DeliveredCargo=%d"),
+		FMath::Max(Result.FinalCargoScore, 0),
+		FMath::Max(Result.DeliveredCargoCount, 0));
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatProgress] BestScore %d -> %d"),
+		OldBestScore, PlayerProgress->BestSingleGameScore);
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatProgress] BestCargo %d -> %d"),
+		OldBestCargo, PlayerProgress->BestSingleGameDeliveredCargo);
+
+	if (bImproved)
 	{
-		UE_LOG(LogCh4_multiGame, Warning,
-			TEXT("[HatUnlock] Personal best improved in memory but SaveGameToSlot failed"));
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[HatProgress] Saving profile Slot=%s UserIndex=%d..."),
+			*PlayerProgressSlotName, PlayerProgressUserIndex);
+		if (SavePlayerProgress())
+		{
+			UE_LOG(LogCh4_multiGame, Log, TEXT("[HatProgress] Save succeeded"));
+		}
+		else
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[HatProgress] Save FAILED: personal best remains updated in runtime memory"));
+		}
 	}
 	else
 	{
 		UE_LOG(LogCh4_multiGame, Log,
-			TEXT("[HatUnlock] Personal best saved BestScore=%d BestDeliveredCargo=%d"),
-			PlayerProgress->BestSingleGameScore,
-			PlayerProgress->BestSingleGameDeliveredCargo);
+			TEXT("[HatProgress] Best record unchanged; save skipped"));
 	}
-	return true;
+	return bImproved;
+}
+
+void UCh4_multiGameGameInstance::DumpHatUnlockState() const
+{
+	const UCh4HatUnlockSettings* Settings = GetDefault<UCh4HatUnlockSettings>();
+	const FSoftObjectPath ConfigReference = Settings
+		? Settings->HatUnlockConfig.ToSoftObjectPath() : FSoftObjectPath();
+	const bool bConfigAssigned = ConfigReference.IsValid();
+	const bool bConfiguredAssetLoaded = IsValid(CachedHatUnlockConfig);
+	const UCh4HatUnlockConfigDataAsset* RuntimeConfig = GetHatUnlockConfig();
+
+	const bool bSaveExists = UGameplayStatics::DoesSaveGameExist(
+		PlayerProgressSlotName, PlayerProgressUserIndex);
+	UCh4PlayerProgressSaveGame* DiskProgress = bSaveExists
+		? Cast<UCh4PlayerProgressSaveGame>(UGameplayStatics::LoadGameFromSlot(
+			PlayerProgressSlotName, PlayerProgressUserIndex))
+		: nullptr;
+
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HatDebug] ===== BEGIN ====="));
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatDebug] SaveGame Class=%s Slot=%s UserIndex=%d Exists=%s Loaded=%s"),
+		*UCh4PlayerProgressSaveGame::StaticClass()->GetPathName(),
+		*PlayerProgressSlotName,
+		PlayerProgressUserIndex,
+		bSaveExists ? TEXT("true") : TEXT("false"),
+		IsValid(DiskProgress) ? TEXT("true") : TEXT("false"));
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatDebug] Runtime Profile Valid=%s BestScore=%d BestCargo=%d"),
+		IsValid(PlayerProgress) ? TEXT("true") : TEXT("false"),
+		GetBestSingleGameScore(),
+		GetBestSingleGameDeliveredCargo());
+	if (IsValid(DiskProgress))
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[HatDebug] Loaded SaveGame BestScore=%d BestCargo=%d"),
+			FMath::Max(DiskProgress->BestSingleGameScore, 0),
+			FMath::Max(DiskProgress->BestSingleGameDeliveredCargo, 0));
+	}
+	else
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[HatDebug] Loaded SaveGame BestScore=N/A BestCargo=N/A"));
+	}
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatDebug] Config Reference=%s Assigned=%s Loaded=%s RuntimeObject=%s Source=%s"),
+		bConfigAssigned ? *ConfigReference.ToString() : TEXT("None"),
+		bConfigAssigned ? TEXT("true") : TEXT("false"),
+		bConfiguredAssetLoaded ? TEXT("true") : TEXT("false"),
+		*GetPathNameSafe(RuntimeConfig),
+		bConfiguredAssetLoaded ? TEXT("Configured DataAsset") : TEXT("Native fallback"));
+	if (!bConfigAssigned)
+	{
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[HatDebug] ERROR: Unlock config is not assigned"));
+	}
+	else if (!bConfiguredAssetLoaded)
+	{
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[HatDebug] ERROR: Assigned unlock config failed to load: %s"),
+			*ConfigReference.ToString());
+	}
+	if (!RuntimeConfig)
+	{
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[HatDebug] ERROR: No runtime unlock config is available"));
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[HatDebug] ===== END ====="));
+		return;
+	}
+
+	const int32 BestScore = GetBestSingleGameScore();
+	const int32 BestCargo = GetBestSingleGameDeliveredCargo();
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatDebug] Requirements KnightScore=%d DrinkHelmetScore=%d SnapbackCargo=%d TrooperCargo=%d"),
+		RuntimeConfig->KnightScoreRequirement,
+		RuntimeConfig->DrinkHelmetScoreRequirement,
+		RuntimeConfig->SnapbackCargoRequirement,
+		RuntimeConfig->TrooperCargoRequirement);
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatDebug] Knight: BestScore %d >= Requirement %d Result=%s"),
+		BestScore,
+		FMath::Max(RuntimeConfig->KnightScoreRequirement, 0),
+		RuntimeConfig->IsHeadwearUnlocked(Ch4Headwear::IronHelmet, BestScore, BestCargo)
+			? TEXT("TRUE") : TEXT("FALSE"));
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatDebug] DrinkHelmet: BestScore %d >= Requirement %d Result=%s"),
+		BestScore,
+		FMath::Max(RuntimeConfig->DrinkHelmetScoreRequirement, 0),
+		RuntimeConfig->IsHeadwearUnlocked(Ch4Headwear::DrinkingHat, BestScore, BestCargo)
+			? TEXT("TRUE") : TEXT("FALSE"));
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatDebug] Snapback: BestCargo %d >= Requirement %d Result=%s"),
+		BestCargo,
+		FMath::Max(RuntimeConfig->SnapbackCargoRequirement, 0),
+		RuntimeConfig->IsHeadwearUnlocked(Ch4Headwear::Snapback, BestScore, BestCargo)
+			? TEXT("TRUE") : TEXT("FALSE"));
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatDebug] Trooper: BestCargo %d >= Requirement %d Result=%s"),
+		BestCargo,
+		FMath::Max(RuntimeConfig->TrooperCargoRequirement, 0),
+		RuntimeConfig->IsHeadwearUnlocked(Ch4Headwear::TrooperHat, BestScore, BestCargo)
+			? TEXT("TRUE") : TEXT("FALSE"));
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HatDebug] ===== END ====="));
 }
 
 int32 UCh4_multiGameGameInstance::GetBestSingleGameScore() const

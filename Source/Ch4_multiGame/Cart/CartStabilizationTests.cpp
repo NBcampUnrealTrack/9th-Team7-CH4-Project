@@ -3,8 +3,10 @@
 #include "Cart/CartBase.h"
 #include "Cart/CartStabilizationMath.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/AutomationTest.h"
 #include "PhysicsEngine/BodyInstance.h"
@@ -295,11 +297,14 @@ bool FCh4CartStabilizationConfigurationTest::RunTest(const FString& Parameters)
 		{
 			return false;
 		}
+		Player->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 		Player->SetActorLocation(Anchor->GetComponentLocation());
 		TestTrue(FString::Printf(TEXT("Grabber %d receives a distinct server anchor"), Index + 1),
 			Cart->TryGrabPlayer(Player));
 		TestNotNull(FString::Printf(TEXT("Grabber %d has an assigned anchor"), Index + 1),
 			Cart->GetAnchorFor(Player));
+		TestEqual(FString::Printf(TEXT("Grabber %d disables CharacterMovement while attached"), Index + 1),
+			Player->GetCharacterMovement()->MovementMode, MOVE_None);
 		Grabbers.Add(Player);
 	}
 	TestFalse(TEXT("Duplicate grab cannot consume another anchor"), Cart->TryGrabPlayer(Grabbers[0]));
@@ -310,6 +315,10 @@ bool FCh4CartStabilizationConfigurationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Release returns the player's anchor"), Cart->ReleasePlayer(Grabbers[0]));
 	TestNull(TEXT("Release clears the player's Cart state"), Grabbers[0]->GrabbedCart);
 	TestNull(TEXT("Release removes the anchor assignment"), Cart->GetAnchorFor(Grabbers[0]));
+	TestEqual(TEXT("Release restores the Character's pre-grab movement mode"),
+		Grabbers[0]->GetCharacterMovement()->MovementMode, MOVE_Walking);
+	TestFalse(TEXT("Release does not invent mesh physics that was disabled before the grab"),
+		Grabbers[0]->GetMesh()->IsAnySimulatingPhysics());
 	TestTrue(TEXT("Released player can grab once again"), Cart->TryGrabPlayer(Grabbers[0]));
 	TestTrue(TEXT("Enabling preparation lock releases all existing grabbers"), Cart->SetPreparationLocked(true));
 	for (ACh4_PlayerCharacter* Player : Grabbers)

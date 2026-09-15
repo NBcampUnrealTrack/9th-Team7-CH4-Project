@@ -1,5 +1,6 @@
 #include "UI/SkinSelector/Ch4SkinSelectorViewModel.h"
 #include "UI/SkinSelector/Ch4_CharacterPreviewStudio.h"
+#include "Ch4_multiGame.h"
 #include "Blueprint/UserWidget.h"
 #include "Ch4_multiGamePlayerController.h"
 #include "Player/Ch4_multiGamePlayerState.h"
@@ -9,6 +10,7 @@
 #include "UObject/UnrealType.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "View/MVVMView.h"
 
 UWorld* UCh4SkinSelectorViewModel::GetWorld() const
 {
@@ -124,6 +126,24 @@ bool UCh4SkinSelectorViewModel::IsHeadwearUnlocked(const FName HeadwearID) const
 
 void UCh4SkinSelectorViewModel::RefreshHatUnlockState()
 {
+	UUserWidget* OwningWidget = GetOwningUserWidget();
+	UMVVMView* WidgetView = OwningWidget ? OwningWidget->GetExtension<UMVVMView>() : nullptr;
+	UObject* BoundViewModel = WidgetView
+		? WidgetView->GetViewModel(TEXT("Ch4SkinSelectorViewModel")).GetObject()
+		: nullptr;
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[SkinSelector] MVVM source=%s RefreshTarget=%s SameInstance=%s SourcesInitialized=%s BindingsInitialized=%s"),
+		*GetNameSafe(BoundViewModel),
+		*GetNameSafe(this),
+		BoundViewModel == this ? TEXT("true") : TEXT("false"),
+		WidgetView && WidgetView->AreSourcesInitialized() ? TEXT("true") : TEXT("false"),
+		WidgetView && WidgetView->AreBindingsInitialized() ? TEXT("true") : TEXT("false"));
+	if (BoundViewModel && BoundViewModel != this)
+	{
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[SkinSelector] ERROR: The refreshed ViewModel is not the View Binding source; use one ViewModel instance in WBP_SkinSelector"));
+	}
+
 	const ACh4_multiGamePlayerController* PC = GetOwningCh4PlayerController();
 	const UCh4_multiGameGameInstance* GameInstance = PC
 		? PC->GetGameInstance<UCh4_multiGameGameInstance>() : nullptr;
@@ -132,6 +152,35 @@ void UCh4SkinSelectorViewModel::RefreshHatUnlockState()
 		: GetDefault<UCh4HatUnlockConfigDataAsset>();
 	const int32 BestScore = GameInstance ? GameInstance->GetBestSingleGameScore() : 0;
 	const int32 BestCargo = GameInstance ? GameInstance->GetBestSingleGameDeliveredCargo() : 0;
+	if (!PC || !GameInstance)
+	{
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[SkinSelector] ERROR: ViewModel=%s Widget=%s Controller=%s GameInstance=%s"),
+			*GetNameSafe(this),
+			*GetNameSafe(OwningWidget),
+			*GetNameSafe(PC),
+			*GetNameSafe(GameInstance));
+	}
+	if (!Config)
+	{
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[SkinSelector] ERROR: No unlock config is available; refresh aborted"));
+		return;
+	}
+
+	const bool bInitialRefresh = !bHasRefreshedHatUnlockState;
+	const bool bOldDrinkingUnlocked = bIsHatDrinkingUnlocked;
+	const bool bOldHelmetUnlocked = bIsHatHelmetUnlocked;
+	const bool bOldTrooperUnlocked = bIsHatTrooperUnlocked;
+	const bool bOldSnapbackUnlocked = bIsHatSnapbackUnlocked;
+	const ESlateVisibility OldDrinkingLockVisibility = HatDrinkingLockVisibility;
+	const ESlateVisibility OldHelmetLockVisibility = HatHelmetLockVisibility;
+	const ESlateVisibility OldTrooperLockVisibility = HatTrooperLockVisibility;
+	const ESlateVisibility OldSnapbackLockVisibility = HatSnapbackLockVisibility;
+	const FText OldDrinkingRequirementText = HatDrinkingRequirementText;
+	const FText OldHelmetRequirementText = HatHelmetRequirementText;
+	const FText OldTrooperRequirementText = HatTrooperRequirementText;
+	const FText OldSnapbackRequirementText = HatSnapbackRequirementText;
 
 	bIsHatDrinkingUnlocked = Config->IsHeadwearUnlocked(Ch4Headwear::DrinkingHat, BestScore, BestCargo);
 	bIsHatHelmetUnlocked = Config->IsHeadwearUnlocked(Ch4Headwear::IronHelmet, BestScore, BestCargo);
@@ -146,18 +195,75 @@ void UCh4SkinSelectorViewModel::RefreshHatUnlockState()
 	HatTrooperRequirementText = Config->GetRequirementText(Ch4Headwear::TrooperHat);
 	HatSnapbackRequirementText = Config->GetRequirementText(Ch4Headwear::Snapback);
 
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatDrinkingUnlocked);
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatHelmetUnlocked);
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatTrooperUnlocked);
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatSnapbackUnlocked);
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatDrinkingLockVisibility);
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatHelmetLockVisibility);
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatTrooperLockVisibility);
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatSnapbackLockVisibility);
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatDrinkingRequirementText);
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatHelmetRequirementText);
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatTrooperRequirementText);
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatSnapbackRequirementText);
+	const bool bNotifyDrinkingUnlock = bInitialRefresh || bOldDrinkingUnlocked != bIsHatDrinkingUnlocked;
+	const bool bNotifyHelmetUnlock = bInitialRefresh || bOldHelmetUnlocked != bIsHatHelmetUnlocked;
+	const bool bNotifyTrooperUnlock = bInitialRefresh || bOldTrooperUnlocked != bIsHatTrooperUnlocked;
+	const bool bNotifySnapbackUnlock = bInitialRefresh || bOldSnapbackUnlocked != bIsHatSnapbackUnlocked;
+	const bool bNotifyDrinkingLock = bInitialRefresh || OldDrinkingLockVisibility != HatDrinkingLockVisibility;
+	const bool bNotifyHelmetLock = bInitialRefresh || OldHelmetLockVisibility != HatHelmetLockVisibility;
+	const bool bNotifyTrooperLock = bInitialRefresh || OldTrooperLockVisibility != HatTrooperLockVisibility;
+	const bool bNotifySnapbackLock = bInitialRefresh || OldSnapbackLockVisibility != HatSnapbackLockVisibility;
+	const bool bNotifyDrinkingRequirement = bInitialRefresh || !OldDrinkingRequirementText.EqualTo(HatDrinkingRequirementText);
+	const bool bNotifyHelmetRequirement = bInitialRefresh || !OldHelmetRequirementText.EqualTo(HatHelmetRequirementText);
+	const bool bNotifyTrooperRequirement = bInitialRefresh || !OldTrooperRequirementText.EqualTo(HatTrooperRequirementText);
+	const bool bNotifySnapbackRequirement = bInitialRefresh || !OldSnapbackRequirementText.EqualTo(HatSnapbackRequirementText);
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[SkinSelector] Refresh ViewModel=%s Widget=%s Controller=%s GameInstance=%s Config=%s BestScore=%d BestCargo=%d Requirements={Knight:%d Drink:%d Snapback:%d Trooper:%d}"),
+		*GetNameSafe(this),
+		*GetNameSafe(OwningWidget),
+		*GetNameSafe(PC),
+		*GetNameSafe(GameInstance),
+		*GetPathNameSafe(Config),
+		BestScore,
+		BestCargo,
+		Config->KnightScoreRequirement,
+		Config->DrinkHelmetScoreRequirement,
+		Config->SnapbackCargoRequirement,
+		Config->TrooperCargoRequirement);
+
+	if (bNotifyDrinkingUnlock) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatDrinkingUnlocked);
+	if (bNotifyHelmetUnlock) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatHelmetUnlocked);
+	if (bNotifyTrooperUnlock) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatTrooperUnlocked);
+	if (bNotifySnapbackUnlock) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsHatSnapbackUnlocked);
+	if (bNotifyDrinkingLock) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatDrinkingLockVisibility);
+	if (bNotifyHelmetLock) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatHelmetLockVisibility);
+	if (bNotifyTrooperLock) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatTrooperLockVisibility);
+	if (bNotifySnapbackLock) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatSnapbackLockVisibility);
+	if (bNotifyDrinkingRequirement) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatDrinkingRequirementText);
+	if (bNotifyHelmetRequirement) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatHelmetRequirementText);
+	if (bNotifyTrooperRequirement) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatTrooperRequirementText);
+	if (bNotifySnapbackRequirement) UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HatSnapbackRequirementText);
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[SkinSelector] HelmetUnlocked %s -> %s UnlockFieldNotify=%s LockVisibility=%s LockFieldNotify=%s"),
+		bOldHelmetUnlocked ? TEXT("true") : TEXT("false"),
+		bIsHatHelmetUnlocked ? TEXT("true") : TEXT("false"),
+		bNotifyHelmetUnlock ? TEXT("emitted") : TEXT("skipped"),
+		*UEnum::GetValueAsString(HatHelmetLockVisibility),
+		bNotifyHelmetLock ? TEXT("emitted") : TEXT("skipped"));
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[SkinSelector] DrinkingUnlocked %s -> %s UnlockFieldNotify=%s LockVisibility=%s LockFieldNotify=%s"),
+		bOldDrinkingUnlocked ? TEXT("true") : TEXT("false"),
+		bIsHatDrinkingUnlocked ? TEXT("true") : TEXT("false"),
+		bNotifyDrinkingUnlock ? TEXT("emitted") : TEXT("skipped"),
+		*UEnum::GetValueAsString(HatDrinkingLockVisibility),
+		bNotifyDrinkingLock ? TEXT("emitted") : TEXT("skipped"));
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[SkinSelector] SnapbackUnlocked %s -> %s UnlockFieldNotify=%s LockVisibility=%s LockFieldNotify=%s"),
+		bOldSnapbackUnlocked ? TEXT("true") : TEXT("false"),
+		bIsHatSnapbackUnlocked ? TEXT("true") : TEXT("false"),
+		bNotifySnapbackUnlock ? TEXT("emitted") : TEXT("skipped"),
+		*UEnum::GetValueAsString(HatSnapbackLockVisibility),
+		bNotifySnapbackLock ? TEXT("emitted") : TEXT("skipped"));
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[SkinSelector] TrooperUnlocked %s -> %s UnlockFieldNotify=%s LockVisibility=%s LockFieldNotify=%s"),
+		bOldTrooperUnlocked ? TEXT("true") : TEXT("false"),
+		bIsHatTrooperUnlocked ? TEXT("true") : TEXT("false"),
+		bNotifyTrooperUnlock ? TEXT("emitted") : TEXT("skipped"),
+		*UEnum::GetValueAsString(HatTrooperLockVisibility),
+		bNotifyTrooperLock ? TEXT("emitted") : TEXT("skipped"));
+	bHasRefreshedHatUnlockState = true;
 }
 
 void UCh4SkinSelectorViewModel::SetPendingCharacterType(ECh4CharacterType NewType)

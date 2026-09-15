@@ -2,10 +2,12 @@
 
 #include "UI/SkinSelector/Ch4HatUnlockConfigDataAsset.h"
 
+#include "Ch4_multiGamePlayerController.h"
 #include "GameFlow/Ch4GameFlowTypes.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/AutomationTest.h"
 #include "Player/Ch4PlayerProgressSaveGame.h"
+#include "Player/Ch4_multiGameGameInstance.h"
 #include "UI/SkinSelector/Ch4SkinSelectorViewModel.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -138,12 +140,46 @@ bool FCh4HatUnlockProgressTest::RunTest(const FString& Parameters)
 				LoadedProgress->BestSingleGameDeliveredCargo));
 	}
 
+	const FString TestSlot = FString::Printf(TEXT("Ch4HatUnlockAutomation_%s"), *FGuid::NewGuid().ToString());
+	constexpr int32 TestUserIndex = 0;
+	TestTrue(TEXT("Progress writes through the platform SaveGame system"),
+		UGameplayStatics::SaveGameToSlot(Progress, TestSlot, TestUserIndex));
+	UCh4PlayerProgressSaveGame* DiskLoadedProgress = Cast<UCh4PlayerProgressSaveGame>(
+		UGameplayStatics::LoadGameFromSlot(TestSlot, TestUserIndex));
+	TestNotNull(TEXT("Progress reloads from the platform SaveGame system"), DiskLoadedProgress);
+	if (DiskLoadedProgress)
+	{
+		TestEqual(TEXT("Disk-loaded best score persists"), DiskLoadedProgress->BestSingleGameScore, 2100);
+		TestEqual(TEXT("Disk-loaded best cargo persists"), DiskLoadedProgress->BestSingleGameDeliveredCargo, 21);
+	}
+	TestTrue(TEXT("Automation progress slot is removed after verification"),
+		UGameplayStatics::DeleteGameInSlot(TestSlot, TestUserIndex));
+
 	TestEqual(TEXT("Locked UI state shows a hit-test-invisible lock"),
 		UCh4SkinSelectorViewModel::GetLockVisibilityForUnlockedState(false),
 		ESlateVisibility::HitTestInvisible);
 	TestEqual(TEXT("Unlocked UI state collapses the lock"),
 		UCh4SkinSelectorViewModel::GetLockVisibilityForUnlockedState(true),
 		ESlateVisibility::Collapsed);
+
+	const UFunction* ControllerDumpFunction =
+		ACh4_multiGamePlayerController::StaticClass()->FindFunctionByName(
+			GET_FUNCTION_NAME_CHECKED(ACh4_multiGamePlayerController, DumpHatUnlockState));
+	TestNotNull(TEXT("PlayerController exposes the Hat debug dump"), ControllerDumpFunction);
+	if (ControllerDumpFunction)
+	{
+		TestTrue(TEXT("Hat debug dump is callable from the PIE console"),
+			ControllerDumpFunction->HasAnyFunctionFlags(FUNC_Exec));
+	}
+	const UFunction* GameInstanceDumpFunction =
+		UCh4_multiGameGameInstance::StaticClass()->FindFunctionByName(
+			GET_FUNCTION_NAME_CHECKED(UCh4_multiGameGameInstance, DumpHatUnlockState));
+	TestNotNull(TEXT("GameInstance exposes the complete Hat state dump"), GameInstanceDumpFunction);
+	if (GameInstanceDumpFunction)
+	{
+		TestTrue(TEXT("GameInstance Hat dump is available to Blueprint debug flows"),
+			GameInstanceDumpFunction->HasAnyFunctionFlags(FUNC_BlueprintCallable));
+	}
 
 	return true;
 }
