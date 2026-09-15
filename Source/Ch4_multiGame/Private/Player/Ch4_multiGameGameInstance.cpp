@@ -1,6 +1,7 @@
 #include "Player/Ch4_multiGameGameInstance.h"
 
 #include "Ch4_multiGame.h"
+#include "GameFlow/Ch4GameFlowTypes.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/Texture2D.h"
@@ -14,9 +15,19 @@
 #include "Misc/PackageName.h"
 #include "MoviePlayer.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
+#include "Player/Ch4PlayerProgressSaveGame.h"
 #include "Player/Ch4_PlayerCharacter.h"
+#include "UI/SkinSelector/Ch4HatUnlockConfigDataAsset.h"
+#include "UI/SkinSelector/Ch4HatUnlockSettings.h"
 #include "UObject/UObjectGlobals.h"
+
+namespace
+{
+	const FString PlayerProgressSlotName(TEXT("Ch4PlayerProgress"));
+	constexpr int32 PlayerProgressUserIndex = 0;
+}
 
 UCh4_multiGameGameInstance::UCh4_multiGameGameInstance()
 {
@@ -32,6 +43,8 @@ UCh4_multiGameGameInstance::UCh4_multiGameGameInstance()
 void UCh4_multiGameGameInstance::Init()
 {
 	Super::Init();
+	CacheHatUnlockConfig();
+	LoadPlayerProgress();
 	InitializeSteamSessions();
 
 	// Context-aware PreLoadMap runs before MoviePlayer's ordinary PreLoadMap playback hook.
@@ -73,7 +86,51 @@ void UCh4_multiGameGameInstance::Shutdown()
 	CachedLoadingScreenFallbackImage = nullptr;
 	CachedLoadingScreenImages.Reset();
 	CachedLoadingScreenData = nullptr;
+	CachedHatUnlockConfig = nullptr;
+	PlayerProgress = nullptr;
 	Super::Shutdown();
+}
+
+void UCh4_multiGameGameInstance::CacheHatUnlockConfig()
+{
+	const UCh4HatUnlockSettings* Settings = GetDefault<UCh4HatUnlockSettings>();
+	CachedHatUnlockConfig = Settings ? Settings->HatUnlockConfig.LoadSynchronous() : nullptr;
+	if (!IsValid(CachedHatUnlockConfig))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[HatUnlock] HatUnlockConfig is not assigned in Project Settings > Game > Hat Unlocks; using safe native defaults"));
+	}
+}
+
+void UCh4_multiGameGameInstance::LoadPlayerProgress()
+{
+	PlayerProgress = nullptr;
+	if (UGameplayStatics::DoesSaveGameExist(PlayerProgressSlotName, PlayerProgressUserIndex))
+	{
+		PlayerProgress = Cast<UCh4PlayerProgressSaveGame>(
+			UGameplayStatics::LoadGameFromSlot(PlayerProgressSlotName, PlayerProgressUserIndex));
+		if (!IsValid(PlayerProgress))
+		{
+			UE_LOG(LogCh4_multiGame, Warning,
+				TEXT("[HatUnlock] Existing progress slot could not be loaded as Ch4PlayerProgressSaveGame; starting with locked defaults"));
+		}
+	}
+
+	if (!IsValid(PlayerProgress))
+	{
+		PlayerProgress = Cast<UCh4PlayerProgressSaveGame>(
+			UGameplayStatics::CreateSaveGameObject(UCh4PlayerProgressSaveGame::StaticClass()));
+	}
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatUnlock] Local progress loaded BestScore=%d BestDeliveredCargo=%d"),
+		GetBestSingleGameScore(), GetBestSingleGameDeliveredCargo());
+}
+
+bool UCh4_multiGameGameInstance::SavePlayerProgress() const
+{
+	return IsValid(PlayerProgress)
+		&& UGameplayStatics::SaveGameToSlot(PlayerProgress, PlayerProgressSlotName, PlayerProgressUserIndex);
 }
 
 void UCh4_multiGameGameInstance::CacheLoadingScreenAssets()
@@ -275,6 +332,14 @@ bool UCh4_multiGameGameInstance::TryGetLocalCharacterType(ECh4CharacterType& Out
 
 bool UCh4_multiGameGameInstance::StoreLocalHeadwearRequest(const FName HeadwearID)
 {
+	if (!IsHeadwearUnlocked(HeadwearID))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[HatUnlock] Rejected locked local headwear request: %s"),
+			*HeadwearID.ToString());
+		return false;
+	}
+
 	LocalHeadwearID = HeadwearID;
 	bHasPendingHeadwearRequest = true;
 	bHasStoredHeadwear = true;
@@ -283,6 +348,17 @@ bool UCh4_multiGameGameInstance::StoreLocalHeadwearRequest(const FName HeadwearI
 
 bool UCh4_multiGameGameInstance::CacheAuthoritativeHeadwear(const FName HeadwearID)
 {
+	if (!IsHeadwearUnlocked(HeadwearID))
+	{
+		LocalHeadwearID = NAME_None;
+		bHasPendingHeadwearRequest = false;
+		bHasStoredHeadwear = true;
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[HatUnlock] Server-confirmed headwear is locked by local progress; cached fallback None instead: %s"),
+			*HeadwearID.ToString());
+		return false;
+	}
+
 	if (bHasPendingHeadwearRequest && HeadwearID != LocalHeadwearID)
 	{
 		return false;
@@ -301,8 +377,71 @@ bool UCh4_multiGameGameInstance::TryGetLocalHeadwear(FName& OutHeadwearID) const
 		return false;
 	}
 
-	OutHeadwearID = LocalHeadwearID;
+	OutHeadwearID = IsHeadwearUnlocked(LocalHeadwearID) ? LocalHeadwearID : NAME_None;
 	return true;
+}
+
+bool UCh4_multiGameGameInstance::RecordGameResult(const FCh4GameResult& Result)
+{
+	if (!Result.bResultAvailable)
+	{
+		return false;
+	}
+	if (!IsValid(PlayerProgress))
+	{
+		LoadPlayerProgress();
+	}
+	if (!IsValid(PlayerProgress) || !PlayerProgress->ApplyGameResult(Result))
+	{
+		return false;
+	}
+
+	if (!SavePlayerProgress())
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[HatUnlock] Personal best improved in memory but SaveGameToSlot failed"));
+	}
+	else
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[HatUnlock] Personal best saved BestScore=%d BestDeliveredCargo=%d"),
+			PlayerProgress->BestSingleGameScore,
+			PlayerProgress->BestSingleGameDeliveredCargo);
+	}
+	return true;
+}
+
+int32 UCh4_multiGameGameInstance::GetBestSingleGameScore() const
+{
+	return IsValid(PlayerProgress) ? FMath::Max(PlayerProgress->BestSingleGameScore, 0) : 0;
+}
+
+int32 UCh4_multiGameGameInstance::GetBestSingleGameDeliveredCargo() const
+{
+	return IsValid(PlayerProgress)
+		? FMath::Max(PlayerProgress->BestSingleGameDeliveredCargo, 0) : 0;
+}
+
+UCh4HatUnlockConfigDataAsset* UCh4_multiGameGameInstance::GetHatUnlockConfig() const
+{
+	return IsValid(CachedHatUnlockConfig)
+		? CachedHatUnlockConfig.Get()
+		: GetMutableDefault<UCh4HatUnlockConfigDataAsset>();
+}
+
+bool UCh4_multiGameGameInstance::IsHeadwearUnlocked(const FName HeadwearID) const
+{
+	const UCh4HatUnlockConfigDataAsset* Config = GetHatUnlockConfig();
+	return Config && Config->IsHeadwearUnlocked(
+		HeadwearID,
+		GetBestSingleGameScore(),
+		GetBestSingleGameDeliveredCargo());
+}
+
+FText UCh4_multiGameGameInstance::GetHeadwearRequirementText(const FName HeadwearID) const
+{
+	const UCh4HatUnlockConfigDataAsset* Config = GetHatUnlockConfig();
+	return Config ? Config->GetRequirementText(HeadwearID) : FText::GetEmpty();
 }
 
 TSubclassOf<ACh4_PlayerCharacter> UCh4_multiGameGameInstance::LoadCharacterClass(

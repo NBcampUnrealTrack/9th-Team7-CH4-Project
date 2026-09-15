@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/SlateWrapperTypes.h"
 #include "MVVMViewModelBase.h"
 #include "Player/Ch4CharacterTypes.h"
 #include "Ch4SkinSelectorViewModel.generated.h"
@@ -74,6 +75,44 @@ public:
 	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|State")
 	bool bIsHatSnapbackSelected = false;
 
+	// Achievement unlock state. Bind these directly to each Button's Is Enabled.
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	bool bIsHatDrinkingUnlocked = false;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	bool bIsHatHelmetUnlocked = false;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	bool bIsHatTrooperUnlocked = false;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	bool bIsHatSnapbackUnlocked = false;
+
+	// Bind directly to the Lock Image Visibility. Visible locks do not intercept input.
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	ESlateVisibility HatDrinkingLockVisibility = ESlateVisibility::HitTestInvisible;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	ESlateVisibility HatHelmetLockVisibility = ESlateVisibility::HitTestInvisible;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	ESlateVisibility HatTrooperLockVisibility = ESlateVisibility::HitTestInvisible;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	ESlateVisibility HatSnapbackLockVisibility = ESlateVisibility::HitTestInvisible;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	FText HatDrinkingRequirementText;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	FText HatHelmetRequirementText;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	FText HatTrooperRequirementText;
+
+	UPROPERTY(FieldNotify, BlueprintReadOnly, Category = "SkinSelector|Hat Unlocks")
+	FText HatSnapbackRequirementText;
+
 	// ----------------------------------------------------------------
 	// [Preview Studio Lifecycle & Control]
 	// ----------------------------------------------------------------
@@ -111,6 +150,15 @@ public:
 	/** UI가 열릴 때 PlayerState 및 Pawn으로부터 현재 착용 상태를 읽어와 초기화 */
 	UFUNCTION(BlueprintCallable, Category = "SkinSelector|Lifecycle")
 	void InitializeFromPlayerState();
+
+	/** Re-evaluates all four hats from the current local SaveGame and shared config. */
+	UFUNCTION(BlueprintCallable, Category = "SkinSelector|Hat Unlocks")
+	void RefreshHatUnlockState();
+
+	UFUNCTION(BlueprintPure, Category = "SkinSelector|Hat Unlocks")
+	bool IsHeadwearUnlocked(FName HeadwearID) const;
+
+	static ESlateVisibility GetLockVisibilityForUnlockedState(bool bUnlocked);
 
 	// ----------------------------------------------------------------
 	// [Actions] 버튼 클릭 명령 (Actions)
