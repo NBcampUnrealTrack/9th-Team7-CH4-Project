@@ -153,7 +153,7 @@ public:
 	FName NameplateSocketName = TEXT("head_socket");
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="UI|Nameplate")
-	FVector NameplateOffset = FVector(0.0f, 0.0f, 80.0f);
+	FVector NameplateOffset = FVector(0.0f, 0.0f, 25.0f);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="UI|Nameplate")
 	float NameplateMaxDrawDistance = 2500.0f;
