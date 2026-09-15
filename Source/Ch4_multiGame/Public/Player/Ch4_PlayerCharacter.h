@@ -158,6 +158,8 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="UI|Nameplate")
 	float NameplateMaxDrawDistance = 2500.0f;
 	
+	void SetRagdollEnabled(bool bEnabled);
+	
 protected:
 	// 각 동물 BP의 Class Defaults에서 설정한다.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Character|Ragdoll")
@@ -369,4 +371,7 @@ protected:
 	float MaxZoom = 600.f;
 	
 	float TargetArmLength = 300.0f;
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastRPC_SetRagdollEnabled(bool bEnabled);
 };

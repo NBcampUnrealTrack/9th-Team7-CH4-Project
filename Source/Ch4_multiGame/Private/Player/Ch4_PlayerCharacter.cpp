@@ -1336,7 +1336,7 @@ void ACh4_PlayerCharacter::TryGrabActor(AActor* TargetActor)
 }
 
 void ACh4_PlayerCharacter::OnGrabBoxBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+                                                 UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
 	if (CurrentFocusedCargo.IsValid())
 	{
@@ -1689,5 +1689,37 @@ void ACh4_PlayerCharacter::ClearCargoInteractionFocus()
 	{
 		CargoPromptComponent->SetVisibility(false);
 		CargoPromptComponent->SetHiddenInGame(true);
+	}
+}
+
+void ACh4_PlayerCharacter::SetRagdollEnabled(bool bEnabled)
+{
+	if (HasAuthority() == false)
+	{
+		return;
+	}
+
+	MulticastRPC_SetRagdollEnabled(bEnabled);
+}
+
+void ACh4_PlayerCharacter::MulticastRPC_SetRagdollEnabled_Implementation(bool bEnabled)
+{
+	if (GetMesh() == nullptr)
+	{
+		return;
+	}
+
+	if (bEnabled)
+	{
+		// 레그돌 활성화
+		GetMesh()->SetAllBodiesBelowSimulatePhysics(
+			RagdollRootBone,
+			true,
+			bRagdollIncludeSelf);
+	}
+	else
+	{
+		// 레그돌 비활성화
+		GetMesh()->SetAllBodiesSimulatePhysics(false);
 	}
 }
