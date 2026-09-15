@@ -4,89 +4,83 @@
 
 UBounceComponent::UBounceComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = false;
+    SetIsReplicatedByDefault(true);
 }
-
 
 void UBounceComponent::BeginPlay()
 {
-	Super::BeginPlay();
-	
-	UPrimitiveComponent* ParentCollision = Cast<UPrimitiveComponent>(GetAttachParent());
+    Super::BeginPlay();
 
-	if (ParentCollision)
-	{
-		ParentCollision->OnComponentBeginOverlap.AddDynamic(this, &UBounceComponent::OnParentBeginOverlap);
-		ParentCollision->OnComponentHit.AddDynamic(this, &UBounceComponent::OnParentHit);
-	}
-	
+    // 서버 권한이 있을 때만 오버랩 이벤트를 바인딩하여 
+    // 불필요한 클라이언트 판정 및 중복 실행 방지
+    AActor* OwnerActor = GetOwner();
+    if (OwnerActor && OwnerActor->HasAuthority())
+    {
+        UPrimitiveComponent* ParentCollision = Cast<UPrimitiveComponent>(GetAttachParent());
+        if (ParentCollision)
+        {
+            ParentCollision->OnComponentBeginOverlap.AddDynamic(this, &UBounceComponent::OnParentBeginOverlap);
+        }
+    }
 }
 
-void UBounceComponent::OnParentBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+void UBounceComponent::OnParentBeginOverlap(
+    UPrimitiveComponent* OverlappedComponent,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
 {
-	UE_LOG(LogTemp,Warning,TEXT("바운스 액터와 오버랩 발생"));
-	BounceActor(OtherActor, OtherComp);
-}
-
-void UBounceComponent::OnParentHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
-{
-	UE_LOG(LogTemp, Warning, TEXT("바운스 벽과 Hit 발생"));
-	BounceActor(OtherActor, OtherComp);
+    BounceActor(OtherActor, OtherComp);
 }
 
 void UBounceComponent::BounceActor(AActor* TargetActor, UPrimitiveComponent* TargetComp)
 {
-	
-	if (!GetOwner() || !GetOwner()->HasAuthority())
-	{
-		return;
-	}
-	
-	if (!TargetActor||TargetActor==GetOwner())
-	{
-		return;
-	}
-	//튕겨낼 방향 계산 (부모 액터의 UpVector를 쓸지, 지정된 로컬 방향을 쓸지)
-	FVector LaunchDirection;
-	
-	if (bUseComponentForwardVector)
-	{
-		// BounceComponent의 로컬 X축 방향
-		LaunchDirection = GetForwardVector();
-	}
-	else
-	{
-		// CustomBounceDirection을 BounceComponent의 로컬 좌표 기준으로 변환
-		LaunchDirection = GetComponentTransform()
-			.TransformVectorNoScale(CustomBounceDirection)
-			.GetSafeNormal();
-	}
+    AActor* OwnerActor = GetOwner();
+    if (!OwnerActor || !TargetActor || TargetActor == OwnerActor)
+    {
+        return;
+    }
 
-	
-	// 대상이 플레이어 캐릭터인 경우
-	ACharacter* PlayerCharacter = Cast<ACharacter>(TargetActor);
-	if (PlayerCharacter)
-	{
-		FVector LaunchVelocity = LaunchDirection * BounceForce;
-		PlayerCharacter->LaunchCharacter(LaunchVelocity, true, true);
-		return;
-	}
+    // 서버 권한이 있는 경우에만 실행 (동기화 보장)
+    if (!OwnerActor->HasAuthority())
+    {
+        return;
+    }
 
-	// 대상이 일반 물리 액터인 경우
-	UPrimitiveComponent* PhysComp = TargetComp;
-	if (!PhysComp)
-	{
-		PhysComp = Cast<UPrimitiveComponent>(TargetActor->GetRootComponent());
-	}
-
-	if (PhysComp && PhysComp->IsSimulatingPhysics())
-	{
-		// VelocityChange = true로 설정하여 Mass(질량) 상관없이 속도 직접 부여
-		float ImpulseMagnitude = BounceForce;
-		FVector ImpulseVector = LaunchDirection * ImpulseMagnitude;
-	
-		PhysComp->AddImpulse(ImpulseVector, NAME_None, true /* bVelChange */);
-	}
+    ExecuteBounce(TargetActor, TargetComp);
 }
 
+void UBounceComponent::ExecuteBounce(AActor* TargetActor, UPrimitiveComponent* TargetComp)
+{
+    if (!TargetActor)
+    {
+        return;
+    }
 
+    // 튕겨낼 방향 계산
+    FVector LaunchDirection = bUseComponentForwardVector 
+        ? GetForwardVector() 
+        : GetComponentTransform().TransformVectorNoScale(CustomBounceDirection).GetSafeNormal();
+
+    // 1. 플레이어 캐릭터인 경우
+    ACharacter* PlayerCharacter = Cast<ACharacter>(TargetActor);
+    if (PlayerCharacter)
+    {
+        FVector LaunchVelocity = LaunchDirection * BounceForce;
+        
+        // 서버에서 LaunchCharacter 실행 시 CharacterMovementComponent가 클라이언트에 위치 자동 동기화
+        PlayerCharacter->LaunchCharacter(LaunchVelocity, true, true);
+        return;
+    }
+
+    // 2. 일반 물리 액터인 경우
+    UPrimitiveComponent* PhysComp = TargetComp ? TargetComp : Cast<UPrimitiveComponent>(TargetActor->GetRootComponent());
+    if (PhysComp && PhysComp->IsSimulatingPhysics())
+    {
+        FVector ImpulseVector = LaunchDirection * BounceForce;
+        PhysComp->AddImpulse(ImpulseVector, NAME_None, true /* bVelChange */);
+    }
+}
