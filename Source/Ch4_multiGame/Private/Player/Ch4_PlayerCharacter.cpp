@@ -10,6 +10,7 @@
 #include "InputActionValue.h"
 #include "Cart/CartBase.h"
 #include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/Ch4_multiGameGameInstance.h"
@@ -549,17 +550,21 @@ UWidgetComponent* ACh4_PlayerCharacter::GetNameplateComponent() const
 	GetComponents<UWidgetComponent>(WidgetComps);
 	for (UWidgetComponent* Comp : WidgetComps)
 	{
-		if (Comp && Comp->GetName().Contains(TEXT("Nameplate")))
+		if (Comp && Comp != CargoPromptComponent && Comp->GetName().Contains(TEXT("Nameplate")))
 		{
 			CachedNameplateComponent = Comp;
 			return Comp;
 		}
 	}
 
-	if (WidgetComps.Num() > 0 && WidgetComps[0])
+	// Fallback: CargoPromptComponent가 아닌 위젯 컴포넌트 탐색
+	for (UWidgetComponent* Comp : WidgetComps)
 	{
-		CachedNameplateComponent = WidgetComps[0];
-		return WidgetComps[0];
+		if (Comp && Comp != CargoPromptComponent)
+		{
+			CachedNameplateComponent = Comp;
+			return Comp;
+		}
 	}
 
 	return nullptr;
@@ -586,51 +591,65 @@ void ACh4_PlayerCharacter::UpdateNameplate_Implementation()
 
 	NameplateComp->SetVisibility(true);
 
-	// 2. Attach to S_Headwear / head_socket (or fallback to head bone)
-	if (USkeletalMeshComponent* CharacterMesh = GetMesh())
+	// 2. Attach to RootComponent (Capsule) so the nameplate stays strictly vertical (+Z)
+	// and never rotates or offsets forward with animal bone local axes
+	if (USceneComponent* RootComp = GetRootComponent())
 	{
-		FName SocketToUse = NameplateSocketName;
-		if (!CharacterMesh->DoesSocketExist(SocketToUse))
+		if (NameplateComp->GetAttachParent() != RootComp)
 		{
-			if (CharacterMesh->DoesSocketExist(TEXT("S_Headwear")))
+			NameplateComp->AttachToComponent(RootComp, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		}
+
+		const FVector ActorLoc = GetActorLocation();
+
+		// 1) 캡슐 상단(기본 정수리 위치)을 기준 높이로 설정
+		float CharacterTopZ = 0.0f;
+		if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+		{
+			CharacterTopZ = Capsule->GetScaledCapsuleHalfHeight();
+		}
+
+		// 2) 머리 소켓/본 후보들을 모두 검사하여 가장 높은 실제 월드 Z를 정수리 높이로 채택
+		if (USkeletalMeshComponent* CharacterMesh = GetMesh())
+		{
+			static const FName CandidateSockets[] = {
+				TEXT("S_Headwear"),
+				TEXT("Head"),
+				TEXT("head"),
+				TEXT("head_socket")
+			};
+
+			if (NameplateSocketName != NAME_None && CharacterMesh->DoesSocketExist(NameplateSocketName))
 			{
-				SocketToUse = TEXT("S_Headwear");
+				const float SocketZInActor = CharacterMesh->GetSocketLocation(NameplateSocketName).Z - ActorLoc.Z;
+				CharacterTopZ = FMath::Max(CharacterTopZ, SocketZInActor);
 			}
-			else if (CharacterMesh->DoesSocketExist(TEXT("Head")))
+
+			for (const FName& CandSocket : CandidateSockets)
 			{
-				SocketToUse = TEXT("Head");
-			}
-			else if (CharacterMesh->DoesSocketExist(TEXT("head")))
-			{
-				SocketToUse = TEXT("head");
-			}
-			else
-			{
-				SocketToUse = NAME_None;
+				if (CharacterMesh->DoesSocketExist(CandSocket))
+				{
+					const float SocketZInActor = CharacterMesh->GetSocketLocation(CandSocket).Z - ActorLoc.Z;
+					CharacterTopZ = FMath::Max(CharacterTopZ, SocketZInActor);
+				}
 			}
 		}
 
-		if (NameplateComp->GetAttachSocketName() != SocketToUse || NameplateComp->GetAttachParent() != CharacterMesh)
-		{
-			NameplateComp->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketToUse);
-		}
-
-		// S_Headwear 및 머리 본은 이미 정수리 위치이므로 머리 위 기본 +35cm 띄우고,
-		// 모자/헬멧(DrinkingHat, SpaceHelmet, TrooperHat 등)을 착용 중인 경우 모자 꼭대기 위로 자동 보정 (+20cm)
-		float HeadZOffset = 35.0f;
+		// 3) 모자/헬멧 착용 중인 경우 모자 꼭대기(World Bounds Max Z) 높이 자동 보정
 		if (HatMeshComponent && HatMeshComponent->IsVisible() && HatMeshComponent->GetStaticMesh())
 		{
-			FVector MinBounds, MaxBounds;
-			HatMeshComponent->GetLocalBounds(MinBounds, MaxBounds);
-			const float HatTop = FMath::Max(MaxBounds.Z, 0.0f);
-			HeadZOffset = FMath::Max(HeadZOffset, HatTop + 20.0f);
+			HatMeshComponent->UpdateBounds();
+			const float HatTopWorldZ = HatMeshComponent->Bounds.Origin.Z + HatMeshComponent->Bounds.BoxExtent.Z;
+			const float HatTopInActor = HatTopWorldZ - ActorLoc.Z;
+			CharacterTopZ = FMath::Max(CharacterTopZ, HatTopInActor);
 		}
 
-		const FVector EffectiveOffset = (SocketToUse == TEXT("S_Headwear") || SocketToUse == TEXT("Head") || SocketToUse == TEXT("head"))
-			? FVector(0.0f, 0.0f, HeadZOffset)
-			: NameplateOffset;
+		// 4) 머리/모자 꼭대기 위로 여유 마진(기본 +25cm)을 두고 정확히 수직 중앙 상단에 배치
+		const float MarginAbove = (NameplateOffset.Z > 0.0f) ? NameplateOffset.Z : 25.0f;
+		const float FinalNameplateZ = CharacterTopZ + MarginAbove;
 
-		NameplateComp->SetRelativeLocation(EffectiveOffset);
+		// X=0, Y=0으로 캐릭터 전방(주둥이/얼굴) 쏠림 없이 정확히 수직 상단에 배치
+		NameplateComp->SetRelativeLocation(FVector(0.0f, 0.0f, FinalNameplateZ));
 		NameplateComp->SetRelativeRotation(FRotator::ZeroRotator);
 	}
 
