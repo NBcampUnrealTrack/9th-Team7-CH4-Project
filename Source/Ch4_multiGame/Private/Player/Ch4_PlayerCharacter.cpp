@@ -18,6 +18,7 @@
 #include "Player/EmotionDataAsset.h"
 #include "Player/GrabbableInterface.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "Components/WidgetComponent.h"
@@ -27,6 +28,8 @@
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "PhysicsEngine/SkeletalBodySetup.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/PrimitiveComponent.h"
@@ -68,10 +71,37 @@ namespace
 		}
 	}
 
+	void DumpAllRagdollBoneStates()
+	{
+		if (!GEngine)
+		{
+			return;
+		}
+
+		for (const FWorldContext& Context : GEngine->GetWorldContexts())
+		{
+			UWorld* World = Context.World();
+			if (!World || (Context.WorldType != EWorldType::Game && Context.WorldType != EWorldType::PIE))
+			{
+				continue;
+			}
+
+			for (TActorIterator<ACh4_PlayerCharacter> It(World); It; ++It)
+			{
+				It->DumpRagdollBoneDiagnosticState(TEXT("ConsoleDumpBones"));
+			}
+		}
+	}
+
 	FAutoConsoleCommand Ch4DumpRagdollCommand(
 		TEXT("ch4.Ragdoll.Dump"),
 		TEXT("Dumps partial-ragdoll, physics blend, movement-base, animation and network state for every Ch4 character."),
 		FConsoleCommandDelegate::CreateStatic(&DumpAllRagdollStates));
+
+	FAutoConsoleCommand Ch4DumpRagdollBonesCommand(
+		TEXT("ch4.Ragdoll.DumpBones"),
+		TEXT("Dumps per-body partial-ragdoll simulation, profile, target and final-pose state for every Ch4 character."),
+		FConsoleCommandDelegate::CreateStatic(&DumpAllRagdollBoneStates));
 }
 
 void ACh4_PlayerCharacter::InitLocalPlayerCargoFocus()
@@ -383,23 +413,56 @@ void ACh4_PlayerCharacter::InitializeCharacterPhysics()
 		return;
 	}
 
-	if (UPhysicalAnimationComponent* PhysAnimComp = FindComponentByClass<UPhysicalAnimationComponent>())
-	{
-		PhysAnimComp->SetSkeletalMeshComponent(MeshComp);
+	// Partial physics needs a fresh component-space pose even while a remote mesh
+	// is occluded. The character BPs use AlwaysTickPose, which does not refresh
+	// bone transforms when the mesh is not considered recently rendered.
+	MeshComp->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 
-		// 피직스 에셋 내에 해당 본이 존재하는지 검증 후 안전하게 적용
-		if (PhysAsset->FindBodyIndex(RagdollRootBone) != INDEX_NONE)
+	if (PhysAsset->FindBodyIndex(RagdollRootBone) != INDEX_NONE
+		&& FindComponentByClass<UPhysicalAnimationComponent>())
+	{
+		bCharacterPhysicsInitialized = true;
+		ApplyRagdollPhysicsState();
+		if (CVarCh4RagdollDebug.GetValueOnGameThread() != 0)
 		{
-			PhysAnimComp->ApplyPhysicalAnimationProfileBelow(RagdollRootBone, RagdollProfileName, bRagdollIncludeSelf);
-			MeshComp->SetAllBodiesBelowSimulatePhysics(RagdollRootBone, true, bRagdollIncludeSelf);
-			PhysAnimComp->SetStrengthMultiplyer(RagdollStrengthMultiplier);
-			bCharacterPhysicsInitialized = true;
-			if (CVarCh4RagdollDebug.GetValueOnGameThread() != 0)
-			{
-				DumpRagdollDiagnosticState(TEXT("InitializeCharacterPhysics"));
-			}
+			DumpRagdollDiagnosticState(TEXT("InitializeCharacterPhysics"));
 		}
 	}
+}
+
+void ACh4_PlayerCharacter::ApplyRagdollPhysicsState()
+{
+	USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!MeshComp)
+	{
+		return;
+	}
+
+	MeshComp->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	if (!bRagdollEnabled)
+	{
+		MeshComp->SetAllBodiesSimulatePhysics(false);
+		return;
+	}
+
+	UPhysicsAsset* PhysicsAsset = MeshComp->GetPhysicsAsset();
+	UPhysicalAnimationComponent* PhysicalAnimation = FindComponentByClass<UPhysicalAnimationComponent>();
+	if (!PhysicsAsset || !PhysicalAnimation
+		|| PhysicsAsset->FindBodyIndex(RagdollRootBone) == INDEX_NONE)
+	{
+		return;
+	}
+
+	if (PhysicalAnimation->GetSkeletalMesh() != MeshComp)
+	{
+		PhysicalAnimation->SetSkeletalMeshComponent(MeshComp);
+	}
+	PhysicalAnimation->ApplyPhysicalAnimationProfileBelow(
+		RagdollRootBone, RagdollProfileName, bRagdollIncludeSelf);
+	PhysicalAnimation->SetStrengthMultiplyer(RagdollStrengthMultiplier);
+	MeshComp->SetAllBodiesBelowSimulatePhysics(
+		RagdollRootBone, true, bRagdollIncludeSelf);
+	MeshComp->WakeAllRigidBodies();
 }
 
 void ACh4_PlayerCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
@@ -1033,6 +1096,134 @@ void ACh4_PlayerCharacter::DumpRagdollDiagnosticState(const TCHAR* Reason) const
 		MeshComp ? *MeshComp->GetRelativeTransform().ToHumanReadableString() : TEXT("Invalid"),
 		*GetNameSafe(AnimInstance),
 		*GetNameSafe(ActiveMontage));
+}
+
+void ACh4_PlayerCharacter::DumpRagdollBoneDiagnosticState(const TCHAR* Reason) const
+{
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+	const UPhysicsAsset* PhysicsAsset = MeshComp ? MeshComp->GetPhysicsAsset() : nullptr;
+	const UPhysicalAnimationComponent* PhysicalAnimation = FindComponentByClass<UPhysicalAnimationComponent>();
+	const UAnimInstance* PostProcessInstance = MeshComp ? MeshComp->GetPostProcessInstance() : nullptr;
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[RagdollBoneDebug] BEGIN Reason=%s World=%s Player=%s Local=%d Authority=%d Role=%s Mesh=%s PhysicsAsset=%s PhysAnim=%s PhysAnimBound=%d Strength=%.3f VisibilityTick=%s URO=%d RecentlyRendered=%d PredictedLOD=%d Anim=%s PostProcess=%s MeshTickGroup=%s EndTickGroup=%s"),
+		Reason ? Reason : TEXT("Unknown"),
+		GetWorld() ? *GetWorld()->GetPackage()->GetName() : TEXT("None"),
+		*GetName(),
+		IsLocallyControlled() ? 1 : 0,
+		HasAuthority() ? 1 : 0,
+		*UEnum::GetValueAsString(GetLocalRole()),
+		*GetNameSafe(MeshComp ? MeshComp->GetSkeletalMeshAsset() : nullptr),
+		*GetNameSafe(PhysicsAsset),
+		*GetNameSafe(PhysicalAnimation),
+		PhysicalAnimation && PhysicalAnimation->GetSkeletalMesh() == MeshComp ? 1 : 0,
+		PhysicalAnimation ? PhysicalAnimation->StrengthMultiplyer : -1.0f,
+		MeshComp ? *UEnum::GetValueAsString(MeshComp->VisibilityBasedAnimTickOption) : TEXT("Invalid"),
+		MeshComp && MeshComp->bEnableUpdateRateOptimizations ? 1 : 0,
+		MeshComp && MeshComp->WasRecentlyRendered() ? 1 : 0,
+		MeshComp ? MeshComp->GetPredictedLODLevel() : INDEX_NONE,
+		*GetNameSafe(MeshComp ? MeshComp->GetAnimInstance() : nullptr),
+		*GetNameSafe(PostProcessInstance),
+		MeshComp ? *UEnum::GetValueAsString(MeshComp->PrimaryComponentTick.TickGroup) : TEXT("Invalid"),
+		MeshComp ? *UEnum::GetValueAsString(MeshComp->PrimaryComponentTick.EndTickGroup) : TEXT("Invalid"));
+
+	if (!MeshComp || !PhysicsAsset)
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[RagdollBoneDebug] END Player=%s Error=MissingMeshOrPhysicsAsset"), *GetName());
+		return;
+	}
+
+	if (const FSkeletalMeshRenderData* RenderData = MeshComp->GetSkeletalMeshAsset()->GetResourceForRendering())
+	{
+		for (int32 LODIndex = 0; LODIndex < RenderData->LODRenderData.Num(); ++LODIndex)
+		{
+			const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
+			TArray<FString> MissingRagdollBones;
+			for (const USkeletalBodySetup* BodySetup : PhysicsAsset->SkeletalBodySetups)
+			{
+				if (!BodySetup)
+				{
+					continue;
+				}
+				const int32 BoneIndex = MeshComp->GetBoneIndex(BodySetup->BoneName);
+				const bool bInRagdollBranch = BodySetup->BoneName == RagdollRootBone
+					|| (BoneIndex != INDEX_NONE && MeshComp->BoneIsChildOf(BodySetup->BoneName, RagdollRootBone));
+				if (bInRagdollBranch && BoneIndex != INDEX_NONE
+					&& !LODData.RequiredBones.Contains(static_cast<FBoneIndexType>(BoneIndex)))
+				{
+					MissingRagdollBones.Add(BodySetup->BoneName.ToString());
+				}
+			}
+
+			UE_LOG(LogCh4_multiGame, Log,
+				TEXT("[RagdollBoneDebug] LOD=%d RequiredBones=%d ActiveBones=%d MissingRagdollBodies=%s"),
+				LODIndex,
+				LODData.RequiredBones.Num(),
+				LODData.ActiveBoneIndices.Num(),
+				MissingRagdollBones.IsEmpty() ? TEXT("None") : *FString::Join(MissingRagdollBones, TEXT(",")));
+		}
+	}
+
+	for (const USkeletalBodySetup* BodySetup : PhysicsAsset->SkeletalBodySetups)
+	{
+		if (!BodySetup)
+		{
+			continue;
+		}
+
+		const FName BoneName = BodySetup->BoneName;
+		const int32 BoneIndex = MeshComp->GetBoneIndex(BoneName);
+		const FBodyInstance* Body = MeshComp->GetBodyInstance(BoneName);
+		const bool bInRagdollBranch = BoneName == RagdollRootBone
+			|| (BoneIndex != INDEX_NONE && MeshComp->BoneIsChildOf(BoneName, RagdollRootBone));
+		const FPhysicalAnimationProfile* Profile = BodySetup->FindPhysicalAnimationProfile(RagdollProfileName);
+		const FPhysicalAnimationData* ProfileData = Profile ? &Profile->PhysicalAnimationData : nullptr;
+		const FTransform RenderWorld = BoneIndex != INDEX_NONE ? MeshComp->GetBoneTransform(BoneIndex) : FTransform::Identity;
+		const FTransform PhysicsWorld = Body && Body->IsValidBodyInstance()
+			? Body->GetUnrealWorldTransform() : FTransform::Identity;
+		const FTransform TargetWorld = PhysicalAnimation
+			? PhysicalAnimation->GetBodyTargetTransform(BoneName) : FTransform::Identity;
+		const double RenderPhysicsPositionError = Body && Body->IsValidBodyInstance()
+			? FVector::Distance(RenderWorld.GetLocation(), PhysicsWorld.GetLocation()) : -1.0;
+		const double RenderPhysicsRotationError = Body && Body->IsValidBodyInstance()
+			? FMath::RadiansToDegrees(RenderWorld.GetRotation().AngularDistance(PhysicsWorld.GetRotation())) : -1.0;
+		const double PhysicsTargetPositionError = PhysicalAnimation && Body && Body->IsValidBodyInstance()
+			? FVector::Distance(PhysicsWorld.GetLocation(), TargetWorld.GetLocation()) : -1.0;
+		const double PhysicsTargetRotationError = PhysicalAnimation && Body && Body->IsValidBodyInstance()
+			? FMath::RadiansToDegrees(PhysicsWorld.GetRotation().AngularDistance(TargetWorld.GetRotation())) : -1.0;
+
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[RagdollBoneDebug] Bone=%s BoneIndex=%d BelowRoot=%d BodyExists=%d BodyValid=%d Simulating=%d Awake=%d Blend=%.3f PhysicsType=%s Collision=%s Profile=%s ProfileFound=%d LocalSimulation=%d Orient=%.1f AngVel=%.1f Pos=%.1f Vel=%.1f MaxLin=%.1f MaxAng=%.1f RenderPos=%s PhysicsPos=%s TargetPos=%s RenderPhysicsPosError=%.3f RenderPhysicsRotError=%.3f PhysicsTargetPosError=%.3f PhysicsTargetRotError=%.3f"),
+			*BoneName.ToString(),
+			BoneIndex,
+			bInRagdollBranch ? 1 : 0,
+			Body ? 1 : 0,
+			Body && Body->IsValidBodyInstance() ? 1 : 0,
+			Body && Body->IsInstanceSimulatingPhysics() ? 1 : 0,
+			Body && Body->IsInstanceAwake() ? 1 : 0,
+			Body ? Body->PhysicsBlendWeight : -1.0f,
+			*UEnum::GetValueAsString(BodySetup->PhysicsType),
+			Body ? *UEnum::GetValueAsString(Body->GetCollisionEnabled()) : TEXT("Invalid"),
+			*RagdollProfileName.ToString(),
+			ProfileData ? 1 : 0,
+			ProfileData && ProfileData->bIsLocalSimulation ? 1 : 0,
+			ProfileData ? ProfileData->OrientationStrength : -1.0f,
+			ProfileData ? ProfileData->AngularVelocityStrength : -1.0f,
+			ProfileData ? ProfileData->PositionStrength : -1.0f,
+			ProfileData ? ProfileData->VelocityStrength : -1.0f,
+			ProfileData ? ProfileData->MaxLinearForce : -1.0f,
+			ProfileData ? ProfileData->MaxAngularForce : -1.0f,
+			*RenderWorld.GetLocation().ToCompactString(),
+			*PhysicsWorld.GetLocation().ToCompactString(),
+			*TargetWorld.GetLocation().ToCompactString(),
+			RenderPhysicsPositionError,
+			RenderPhysicsRotationError,
+			PhysicsTargetPositionError,
+			PhysicsTargetRotationError);
+	}
+
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[RagdollBoneDebug] END Player=%s"), *GetName());
 }
 
 void ACh4_PlayerCharacter::ServerRPC_RequestCartGrab_Implementation(ACartBase* TargetCart)
@@ -1922,19 +2113,7 @@ void ACh4_PlayerCharacter::SetRagdollEnabled(bool bEnabled)
 
 void ACh4_PlayerCharacter::OnRep_RagdollEnabled()
 {
-	if (GetMesh() == nullptr)
-	{
-		return;
-	}
-
-	if (bRagdollEnabled)
-	{
-		GetMesh()->SetAllBodiesBelowSimulatePhysics(RagdollRootBone, true, bRagdollIncludeSelf);
-	}
-	else
-	{
-		GetMesh()->SetAllBodiesSimulatePhysics(false);
-	}
+	ApplyRagdollPhysicsState();
 
 	if (CVarCh4RagdollDebug.GetValueOnGameThread() != 0)
 	{

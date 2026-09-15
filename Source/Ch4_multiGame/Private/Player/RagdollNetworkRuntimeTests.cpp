@@ -14,6 +14,8 @@
 #include "Map/LevelFloorBase.h"
 #include "Map/RoadBase.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "PhysicsEngine/PhysicalAnimationComponent.h"
+#include "Player/Ch4CharacterTypes.h"
 #include "Player/Ch4_PlayerCharacter.h"
 
 namespace Ch4RagdollRuntime
@@ -146,6 +148,71 @@ namespace Ch4RagdollRuntime
 		Test->TestTrue(FString::Printf(TEXT("%s %s keeps chest body simulation"), Segment, *GetNameSafe(Character)),
 			RootBody && RootBody->IsInstanceSimulatingPhysics());
 	}
+
+	void VerifyVisualRagdollState(FAutomationTestBase* Test, const TCHAR* ObserverRole,
+		const ACh4_PlayerCharacter* Character)
+	{
+		static const FName VisualRagdollBones[] =
+		{
+			TEXT("chest"), TEXT("head"),
+			TEXT("upperarm_l"), TEXT("lowerarm_l"), TEXT("hand_l"),
+			TEXT("upperarm_r"), TEXT("lowerarm_r"), TEXT("hand_r")
+		};
+
+		const USkeletalMeshComponent* Mesh = Character ? Character->GetMesh() : nullptr;
+		Test->TestNotNull(FString::Printf(TEXT("%s %s has a skeletal mesh"),
+			ObserverRole, *GetNameSafe(Character)), Mesh);
+		if (!Mesh)
+		{
+			return;
+		}
+
+		Test->TestEqual(FString::Printf(TEXT("%s %s refreshes remote bone transforms even when culled"),
+			ObserverRole, *GetNameSafe(Character)), Mesh->VisibilityBasedAnimTickOption,
+			EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones);
+		Test->TestFalse(FString::Printf(TEXT("%s %s does not use update-rate optimization"),
+			ObserverRole, *GetNameSafe(Character)), Mesh->bEnableUpdateRateOptimizations);
+
+		const UPhysicalAnimationComponent* PhysicalAnimation =
+			Character->FindComponentByClass<UPhysicalAnimationComponent>();
+		Test->TestTrue(FString::Printf(TEXT("%s %s has PhysicalAnimation bound to the rendered mesh"),
+			ObserverRole, *GetNameSafe(Character)),
+			PhysicalAnimation && PhysicalAnimation->GetSkeletalMesh() == Mesh);
+
+		for (const FName BoneName : VisualRagdollBones)
+		{
+			const FBodyInstance* Body = Mesh->GetBodyInstance(BoneName);
+			const FString Prefix = FString::Printf(TEXT("%s %s Bone=%s"),
+				ObserverRole, *GetNameSafe(Character), *BoneName.ToString());
+			Test->TestNotNull(Prefix + TEXT(" has a PhysicsAsset body"), Body);
+			if (!Body || !Body->IsValidBodyInstance())
+			{
+				continue;
+			}
+
+			Test->TestTrue(Prefix + TEXT(" simulates"), Body->IsInstanceSimulatingPhysics());
+			Test->TestTrue(Prefix + TEXT(" is awake"), Body->IsInstanceAwake());
+			Test->TestTrue(Prefix + TEXT(" has full physics blend"), Body->PhysicsBlendWeight >= 0.99f);
+
+			const int32 BoneIndex = Mesh->GetBoneIndex(BoneName);
+			Test->TestTrue(Prefix + TEXT(" exists in the skeleton"), BoneIndex != INDEX_NONE);
+			if (BoneIndex == INDEX_NONE)
+			{
+				continue;
+			}
+
+			const FTransform RenderWorld = Mesh->GetBoneTransform(BoneIndex);
+			const FTransform PhysicsWorld = Body->GetUnrealWorldTransform();
+			const double PositionError = FVector::Distance(RenderWorld.GetLocation(), PhysicsWorld.GetLocation());
+			const double RotationError = FMath::RadiansToDegrees(
+				RenderWorld.GetRotation().AngularDistance(PhysicsWorld.GetRotation()));
+			Test->TestTrue(Prefix + FString::Printf(TEXT(" reaches render pose (position error %.3f cm)"), PositionError),
+				PositionError <= 1.0);
+			Test->TestTrue(Prefix + FString::Printf(TEXT(" reaches render pose (rotation error %.3f deg)"), RotationError),
+				RotationError <= 2.0);
+		}
+	}
+
 }
 
 class FCh4RagdollNetworkRuntimeCommand final : public IAutomationLatentCommand
@@ -156,6 +223,12 @@ public:
 	{
 		FParse::Value(FCommandLine::Get(), TEXT("Ch4RagdollExpectedPlayers="), ExpectedPlayers);
 		ExpectedPlayers = FMath::Max(ExpectedPlayers, 2);
+
+		int32 CharacterTypeIndex = INDEX_NONE;
+		if (FParse::Value(FCommandLine::Get(), TEXT("Ch4RagdollCharacterType="), CharacterTypeIndex))
+		{
+			RequestedCharacterType = Ch4Character::FromIndex(CharacterTypeIndex);
+		}
 	}
 
 	virtual bool Update() override
@@ -189,12 +262,30 @@ public:
 
 		APlayerController* LocalController = World->GetFirstPlayerController();
 		const bool bHost = LocalController && LocalController->HasAuthority();
+		if (Ch4Character::IsValidType(RequestedCharacterType) && !bRequestedAppearanceApplied)
+		{
+			for (ACh4_PlayerCharacter* Character : Characters)
+			{
+				Character->ApplyCharacterType(RequestedCharacterType);
+			}
+			bRequestedAppearanceApplied = true;
+			StageAt = Now;
+			Test->AddInfo(FString::Printf(TEXT("RAGDOLL_FIXTURE_CHARACTER_TYPE Type=%s"),
+				*UEnum::GetValueAsString(RequestedCharacterType)));
+			return false;
+		}
+		if (bRequestedAppearanceApplied && !bBaselineLogged && Now - StageAt < 1.0)
+		{
+			return false;
+		}
 		if (!bBaselineLogged)
 		{
 			Ch4RagdollRuntime::VerifyDeterministicMapPartOwnership(Test, World, bHost ? TEXT("Host") : TEXT("Client"));
 			for (ACh4_PlayerCharacter* Character : Characters)
 			{
 				Ch4RagdollRuntime::AddCharacterSample(Test, bHost ? TEXT("Host") : TEXT("Client"), TEXT("Baseline"), Character);
+				Character->DumpRagdollBoneDiagnosticState(bHost ? TEXT("HostBaseline") : TEXT("ClientBaseline"));
+				Ch4RagdollRuntime::VerifyVisualRagdollState(Test, bHost ? TEXT("Host") : TEXT("Client"), Character);
 			}
 			for (const ARoadBase* Road : Roads)
 			{
@@ -205,6 +296,10 @@ public:
 			}
 			bBaselineLogged = true;
 			StageAt = Now;
+			if (FParse::Param(FCommandLine::Get(), TEXT("Ch4RagdollVisualOnly")))
+			{
+				return true;
+			}
 			return false;
 		}
 
@@ -329,6 +424,8 @@ private:
 	int32 SegmentIndex = 0;
 	bool bBaselineLogged = false;
 	bool bTeleportIssued = false;
+	bool bRequestedAppearanceApplied = false;
+	ECh4CharacterType RequestedCharacterType = ECh4CharacterType::Invalid;
 	FName ClosestRoadName = NAME_None;
 	TSet<FName> ObservedRoads;
 };

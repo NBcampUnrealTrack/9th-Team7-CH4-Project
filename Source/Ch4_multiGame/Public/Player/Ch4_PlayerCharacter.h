@@ -47,6 +47,9 @@ public:
 	/** Writes one complete partial-ragdoll snapshot. Use ch4.Ragdoll.Dump in PIE/Standalone. */
 	void DumpRagdollDiagnosticState(const TCHAR* Reason) const;
 
+	/** Writes per-body simulation, profile and final-pose data. Use ch4.Ragdoll.DumpBones in PIE/Standalone. */
+	void DumpRagdollBoneDiagnosticState(const TCHAR* Reason) const;
+
 	bool IsRagdollEnabledForDiagnostics() const { return bRagdollEnabled; }
 
 	UPROPERTY(VisibleAnywhere, Category="Camera")
@@ -251,6 +254,7 @@ protected:
 	void ClearCargoInteractionFocus();
 
 	void InitializeCharacterPhysics();
+	void ApplyRagdollPhysicsState();
 
 	void AddPlayerInputMappingContext();
 	void ApplyCharacterTypeFromPlayerState();
