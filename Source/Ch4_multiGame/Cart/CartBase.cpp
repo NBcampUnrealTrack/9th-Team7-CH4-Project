@@ -16,9 +16,20 @@ ACartBase::ACartBase()
     bReplicates = true;
     SetReplicateMovement(true);
 
+    // 물리 물체라 위치가 자주 바뀐다. 복제 빈도를 올려 보간 품질을 높인다.
+    NetUpdateFrequency = 60.0f;
+    MinNetUpdateFrequency = 30.0f;
+
     // ── 카트 본체 ──
+    CartRoot = CreateDefaultSubobject<USceneComponent>(TEXT("CartRoot"));
+    SetRootComponent(CartRoot);
+
     CartMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CartMesh"));
-    SetRootComponent(CartMesh);
+    CartMesh->SetupAttachment(CartRoot);
+
+    // 물리로 독립해서 움직이므로 부모 트랜스폼을 따르지 않는다.
+    CartMesh->SetUsingAbsoluteLocation(true);
+    CartMesh->SetUsingAbsoluteRotation(true);
 
     UprightSafetyConstraint = CreateDefaultSubobject<UPhysicsConstraintComponent>(TEXT("UprightSafetyConstraint"));
     UprightSafetyConstraint->SetupAttachment(CartMesh);
@@ -30,6 +41,8 @@ ACartBase::ACartBase()
     CartMesh->SetCollisionResponseToAllChannels(ECR_Block);
 
     CartMesh->SetSimulatePhysics(true);
+    
+    // ── 이하 바퀴, 앵커는 기존과 동일 ──
     
     // ── 바퀴 (서스펜션 레이 시작점) ──
     const FVector WheelOffsets[] = {
@@ -96,6 +109,14 @@ void ACartBase::BeginPlay()
         return;
     }
 
+    // 메시가 절대 좌표를 쓰므로, 시작 시 액터 위치와 일치시킨다.
+    if (CartRoot)
+    {
+        CartMesh->SetWorldLocationAndRotation(
+            CartRoot->GetComponentLocation(),
+            CartRoot->GetComponentRotation());
+    }
+    
     InitializeStabilizationSettings();
     CartMesh->SetSimulatePhysics(!bPreparationLocked);
     CartMesh->SetMassOverrideInKg(NAME_None, 220.0f, true);
@@ -118,6 +139,12 @@ void ACartBase::BeginPlay()
 
     // 클라이언트는 서버가 복제한 위치를 그대로 따른다.
     // CartMesh->SetSimulatePhysics(false);
+    
+    if (!HasAuthority())
+    {
+        CartMesh->SetSimulatePhysics(false);
+        CartMesh->SetEnableGravity(false);
+    }
 }
 
 void ACartBase::Tick(float DeltaTime)
@@ -126,6 +153,7 @@ void ACartBase::Tick(float DeltaTime)
 
     if (!HasAuthority())
     {
+        InterpolateClientTransform(DeltaTime);
         return;
     }
 
@@ -140,6 +168,8 @@ void ACartBase::Tick(float DeltaTime)
     ApplyGrip(DeltaTime);
     ApplyUprightStabilization(DeltaTime);
     ApplyPlayerForces(DeltaTime);
+
+    SyncRootToPhysics();
 
     if (bDrawCartPhysicsDebug)
     {
@@ -506,6 +536,39 @@ void ACartBase::ApplyPlayerForces(float DeltaTime)
         CartMesh->AddForceAtLocation(Force, Anchor->GetComponentLocation());
     }
 }
+
+void ACartBase::SyncRootToPhysics()
+{
+    if (!CartRoot || !CartMesh)
+    {
+        return;
+    }
+
+    // 물리로 움직인 메시 위치를 루트에 옮겨야 복제가 나간다.
+    CartRoot->SetWorldLocationAndRotation(
+        CartMesh->GetComponentLocation(),
+        CartMesh->GetComponentRotation());
+}
+
+void ACartBase::InterpolateClientTransform(float DeltaTime)
+{
+    if (!CartRoot || !CartMesh)
+    {
+        return;
+    }
+
+    // 루트는 복제로 툭툭 점프한다. 메시가 그 자리를 부드럽게 따라간다.
+    const FVector TargetLocation = CartRoot->GetComponentLocation();
+    const FRotator TargetRotation = CartRoot->GetComponentRotation();
+
+    const FVector NewLocation = FMath::VInterpTo(
+        CartMesh->GetComponentLocation(), TargetLocation, DeltaTime, ClientInterpSpeed);
+    const FRotator NewRotation = FMath::RInterpTo(
+        CartMesh->GetComponentRotation(), TargetRotation, DeltaTime, ClientInterpSpeed);
+
+    CartMesh->SetWorldLocationAndRotation(NewLocation, NewRotation);
+}
+
 
 // ── 앵커 조회 ──
 

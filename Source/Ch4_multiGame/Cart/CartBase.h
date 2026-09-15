@@ -37,6 +37,9 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, Category="Cart")
+    TObjectPtr<USceneComponent> CartRoot;
+    
+    UPROPERTY(VisibleAnywhere, Category="Cart")
     TObjectPtr<UStaticMeshComponent> CartMesh;
 
     /** World-up angular safety net. Translation and yaw remain unrestricted. */
@@ -177,6 +180,10 @@ private:
     UPROPERTY(Replicated)
     TArray<TObjectPtr<ACh4_PlayerCharacter>> AnchorOccupants;
 
+    /** 클라이언트가 복제된 위치를 따라가는 속도. 클수록 빠르게 붙는다. */
+    UPROPERTY(EditAnywhere, Category="Cart|Network", meta=(ClampMin="1.0"))
+    float ClientInterpSpeed = 12.0f;
+    
     UPROPERTY(ReplicatedUsing = OnRep_PreparationLocked)
     bool bPreparationLocked = false;
 
@@ -209,4 +216,10 @@ private:
     void InitializeStabilizationSettings();
     void ConfigureUprightSafetyConstraint();
     void DrawCartPhysicsDebug() const;
+    
+    /** 서버: 물리 결과를 액터 루트에 반영해 복제되게 한다. */
+    void SyncRootToPhysics();
+
+    /** 클라이언트: 복제된 루트 위치로 메시를 부드럽게 따라가게 한다. */
+    void InterpolateClientTransform(float DeltaTime);
 };
