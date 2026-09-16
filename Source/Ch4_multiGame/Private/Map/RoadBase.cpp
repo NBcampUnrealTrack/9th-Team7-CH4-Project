@@ -6,205 +6,139 @@
 
 ARoadBase::ARoadBase()
 {
-	PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = false;
 
-	bReplicates = true;
-	SetReplicateMovement(true);
+    bReplicates = true;
+    SetReplicateMovement(true);
 
-	// 루트 컴포넌트
-	USceneComponent* RootComp = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-	SetRootComponent(RootComp);
+    USceneComponent* RootComp = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    SetRootComponent(RootComp);
 
-	// 시작점
-	StartPoint = CreateDefaultSubobject<USceneComponent>(TEXT("StartPoint"));
-	StartPoint->SetupAttachment(RootComponent);
+    StartPoint = CreateDefaultSubobject<USceneComponent>(TEXT("StartPoint"));
+    StartPoint->SetupAttachment(RootComponent);
 
-	// 끝점
-	EndPoint = CreateDefaultSubobject<USceneComponent>(TEXT("EndPoint"));
-	EndPoint->SetupAttachment(RootComponent);
+    EndPoint = CreateDefaultSubobject<USceneComponent>(TEXT("EndPoint"));
+    EndPoint->SetupAttachment(RootComponent);
 
-	// 도로 Spline
-	SplineComponent = CreateDefaultSubobject<USplineComponent>(TEXT("RoadSpline"));
-	SplineComponent->SetupAttachment(RootComponent);
+    SplineComponent = CreateDefaultSubobject<USplineComponent>(TEXT("RoadSpline"));
+    SplineComponent->SetupAttachment(RootComponent);
 
-	// Spline Mesh 진행 방향
-	ForwardAxis = ESplineMeshAxis::X;
-	
-	
-	// PCG 컴포넌트
-	PCGComponent = CreateDefaultSubobject<UPCGComponent>(TEXT("PCGComponent"));
+    ForwardAxis = ESplineMeshAxis::X;
+    
+    PCGComponent = CreateDefaultSubobject<UPCGComponent>(TEXT("PCGComponent"));
 }
 
 void ARoadBase::BeginPlay()
 {
-	Super::BeginPlay();
-
-
+    Super::BeginPlay();
 }
 
 void ARoadBase::OnConstruction(const FTransform& Transform)
 {
-	Super::OnConstruction(Transform);
-	
+    Super::OnConstruction(Transform);
 
-	if (!SplineComponent)
-	{
-		return;
-	}
+    if (!SplineComponent) return;
 
-	// Spline 데이터 갱신
-	SplineComponent->UpdateSpline();
+    SplineComponent->UpdateSpline();
 
-	// 기존 Spline Mesh 제거
-	for (USplineMeshComponent* Comp : SplineMeshComponents)
-	{
-		if (Comp)
-		{
-			Comp->UnregisterComponent();
-			Comp->DestroyComponent();
-		}
-	}
+    for (USplineMeshComponent* Comp : SplineMeshComponents)
+    {
+        if (Comp)
+        {
+            Comp->UnregisterComponent();
+            Comp->DestroyComponent();
+        }
+    }
 
-	SplineMeshComponents.Empty();
+    SplineMeshComponents.Empty();
 
-	// 메시가 없거나 길이가 잘못되었으면 종료
-	if (!MeshToUse || MeshLength <= 0.0f)
-	{
-		return;
-	}
+    if (!MeshToUse || MeshLength <= 0.0f) return;
 
-	// Spline 전체 길이
-	const float SplineLength = SplineComponent->GetSplineLength();
+    const float SplineLength = SplineComponent->GetSplineLength();
+    const int32 NumberOfMeshes = FMath::CeilToInt(SplineLength / MeshLength);
+    const int32 LastIndex = NumberOfMeshes - 1;
 
-	// 생성할 Mesh 개수
-	// 기존 TruncToInt는 남는 구간을 버리기 때문에
-	// CeilToInt로 올림하여 마지막 남는 구간도 생성
-	const int32 NumberOfMeshes = FMath::CeilToInt(SplineLength / MeshLength);
+    if (LastIndex < 0) return;
 
-	const int32 LastIndex = NumberOfMeshes - 1;
+    for (int32 Index = 0; Index <= LastIndex; ++Index)
+    {
+        USplineMeshComponent* SplineMeshComp = NewObject<USplineMeshComponent>(this);
+        if (!SplineMeshComp) continue;
 
-	if (LastIndex < 0)
-	{
-		return;
-	}
+        SplineMeshComp->CreationMethod = EComponentCreationMethod::UserConstructionScript;
+        SplineMeshComp->SetMobility(EComponentMobility::Movable);
+        SplineMeshComp->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+        SplineMeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
-	// Spline을 MeshLength 단위로 나눠서 Mesh 생성
-	for (int32 Index = 0; Index <= LastIndex; ++Index)
-	{
-		USplineMeshComponent* SplineMeshComp = NewObject<USplineMeshComponent>(this);
+        SplineMeshComp->AttachToComponent(SplineComponent, FAttachmentTransformRules::KeepRelativeTransform);
+        SplineMeshComp->SetStaticMesh(MeshToUse);
+        SplineMeshComp->SetForwardAxis(ForwardAxis);
 
-		if (!SplineMeshComp)
-		{
-			continue;
-		}
+        const float StartDistance = Index * MeshLength;
+        const float EndDistance = FMath::Min((Index + 1) * MeshLength, SplineLength);
 
-		SplineMeshComp->CreationMethod = EComponentCreationMethod::UserConstructionScript;
+        FVector StartPos = SplineComponent->GetLocationAtDistanceAlongSpline(StartDistance, ESplineCoordinateSpace::Local);
+        FVector StartTangent = SplineComponent->GetTangentAtDistanceAlongSpline(StartDistance, ESplineCoordinateSpace::Local);
+        FVector EndPos = SplineComponent->GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::Local);
+        FVector EndTangent = SplineComponent->GetTangentAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::Local);
 
-		SplineMeshComp->SetMobility(EComponentMobility::Movable);
+        StartTangent = StartTangent.GetClampedToMaxSize(MeshLength);
+        EndTangent = EndTangent.GetClampedToMaxSize(MeshLength);
 
-		// 충돌 설정
-		SplineMeshComp->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
-
-		SplineMeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-
-		// Spline에 부착
-		SplineMeshComp->AttachToComponent(
-			SplineComponent,
-			FAttachmentTransformRules::KeepRelativeTransform);
-
-		// 메시 설정
-		SplineMeshComp->SetStaticMesh(MeshToUse);
-		SplineMeshComp->SetForwardAxis(ForwardAxis);
-
-		// 시작 / 끝 거리
-		const float StartDistance = Index * MeshLength;
-
-		// 마지막 Mesh가 Spline을 넘어가지 않도록
-		// Spline의 실제 길이를 최대값으로 사용
-		const float EndDistance =
-			FMath::Min((Index + 1) * MeshLength, SplineLength);
-
-		// 시작 위치
-		FVector StartPos =
-			SplineComponent->GetLocationAtDistanceAlongSpline(
-				StartDistance,
-				ESplineCoordinateSpace::Local);
-
-		// 시작 탄젠트
-		FVector StartTangent =
-			SplineComponent->GetTangentAtDistanceAlongSpline(
-				StartDistance,
-				ESplineCoordinateSpace::Local);
-
-		// 끝 위치
-		FVector EndPos =
-			SplineComponent->GetLocationAtDistanceAlongSpline(
-				EndDistance,
-				ESplineCoordinateSpace::Local);
-
-		// 끝 탄젠트
-		FVector EndTangent =
-			SplineComponent->GetTangentAtDistanceAlongSpline(
-				EndDistance,
-				ESplineCoordinateSpace::Local);
-
-		// 탄젠트 크기 제한
-		StartTangent = StartTangent.GetClampedToMaxSize(MeshLength);
-
-		EndTangent = EndTangent.GetClampedToMaxSize(MeshLength);
-
-		// Spline Mesh 시작 / 끝 설정
-		SplineMeshComp->SetStartAndEnd(
-			StartPos,
-			StartTangent,
-			EndPos,
-			EndTangent,
-			true);
-
-		// 컴포넌트 등록
-		SplineMeshComp->RegisterComponent();
-
-		// 배열에 저장
-		SplineMeshComponents.Add(SplineMeshComp);
-	}
+        SplineMeshComp->SetStartAndEnd(StartPos, StartTangent, EndPos, EndTangent, true);
+        SplineMeshComp->RegisterComponent();
+        SplineMeshComponents.Add(SplineMeshComp);
+    }
 }
-
 
 void ARoadBase::GenerateObstacles(int32 InRandomSeed)
 {
-	if (UPCGComponent* PCGComp = FindComponentByClass<UPCGComponent>())
-	{
-		PCGComp->Seed = InRandomSeed;
-		// UE 5.8 exposes DirtyGenerated only in WITH_EDITOR builds. Forced runtime
-		// generation below already rebuilds generated resources from the current actor.
-#if WITH_EDITOR
-		PCGComp->DirtyGenerated(); // 이동된 도로 위치/바운드 강제 갱신
-#endif
-		PCGComp->Generate(true);   // 런타임 스폰 강제 실행
-	}
-}
+    UPCGComponent* PCGComp = FindComponentByClass<UPCGComponent>();
+    if (!PCGComp) return;
 
+    PCGComp->Seed = InRandomSeed;
+
+    // 도로 위치 이동에 맞춰 Spline 좌표와 Transform 강제 갱신
+    if (SplineComponent)
+    {
+        SplineComponent->UpdateSpline();
+    }
+    UpdateComponentTransforms();
+
+    // 기존에 생성되어 있던 PCG 리소스 정리
+    PCGComp->CleanupLocalImmediate(true);
+
+#if WITH_EDITOR
+    // 에디터 뷰포트 미플레이(Editor World) 상태일 때 강제 갱신 처리
+    if (!GetWorld() || !GetWorld()->IsGameWorld())
+    {
+        PCGComp->DirtyGenerated();
+        PCGComp->Generate(true);
+        return;
+    }
+#endif
+
+    // 런타임 게임 중 (서버) 실행
+    PCGComp->Generate(true);
+}
 
 void ARoadBase::SetRoadComponentsStatic()
 {
-	TArray<UActorComponent*> Components;
-	GetComponents(Components);
+    TArray<UActorComponent*> Components;
+    GetComponents(Components);
 
-	for (UActorComponent* Component : Components)
-	{
-		if (!Component)
-		{
-			continue;
-		}
+    for (UActorComponent* Component : Components)
+    {
+        if (!Component) continue;
 
-		if (USceneComponent* SceneComponent = Cast<USceneComponent>(Component))
-		{
-			SceneComponent->SetMobility(EComponentMobility::Static);
-		}
+        if (USceneComponent* SceneComponent = Cast<USceneComponent>(Component))
+        {
+            SceneComponent->SetMobility(EComponentMobility::Static);
+        }
 
-		if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))
-		{
-			PrimitiveComponent->SetCollisionObjectType(ECC_WorldStatic);
-		}
-	}
+        if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))
+        {
+            PrimitiveComponent->SetCollisionObjectType(ECC_WorldStatic);
+        }
+    }
 }
