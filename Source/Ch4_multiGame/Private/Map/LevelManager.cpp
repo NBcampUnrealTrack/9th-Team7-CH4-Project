@@ -24,13 +24,12 @@ void ALevelManager::BeginPlay()
         return;
     }
 
+    // 서버 전용: PCG 생성 및 도로 배치 총괄
     if (HasAuthority())
     {
-        //서버에서 매 판 무작위 PCG Seed 생성
         PCGSeed = FMath::RandRange(1, 999999);
         
         MiddleZoneOrder.Empty();
-
         for (int32 Index = 0; Index < MiddleRoadActors.Num(); ++Index)
         {
             MiddleZoneOrder.Add(Index);
@@ -45,10 +44,10 @@ void ALevelManager::BeginPlay()
             }
         }
 
-        // 도로 및 배경 재배치
+        // 서버에서 도로 및 배경 배치 실행
         ArrangePlacedZones();
         
-        // 이동된 도로 및 스태틱 메쉬의 콜리전/트랜스폼이 월드에 동기화 완료된 후 PCG 생성 (0.05초 지연)
+        // 이동 및 물리 갱신 후 서버 단에서 PCG 강제 실행 (0.1초 지연)
         GetWorldTimerManager().SetTimer(PCGGenerateTimerHandle, this, &ALevelManager::TriggerPCGGeneration, 0.1f, false);
     }
 }
@@ -60,31 +59,17 @@ void ALevelManager::OnRep_MiddleZoneOrder()
         return;
     }
 
+    // 클라이언트는 받은 배치 정보로 도로 위치만 정렬 (PCG 생성은 서버 복제에 위임)
     ArrangePlacedZones();
-    
-    //만약 PCGSeed가 이미도착해 있는 상태라면 PCG 생성 타이머 가동
-    if (PCGSeed != 0 && GetWorld())
-    {
-        GetWorldTimerManager().SetTimer(PCGGenerateTimerHandle, this, &ALevelManager::TriggerPCGGeneration, 0.05f, false);
-    }
-}
-
-void ALevelManager::OnRep_PCGSeed()
-{
-    // MiddleZoneOrder가 아직 도착 안 해서 도로 배치가 안 되었다면 생성 대기
-    // 도로 배치가 이미 끝난 상태(MiddleZoneOrder가 채워짐)일 때만 PCG 생성 실행
-    if (MiddleZoneOrder.Num() > 0 || !bShuffleMiddleZones)
-    {
-        if (GetWorld())
-        {
-            GetWorldTimerManager().SetTimer(PCGGenerateTimerHandle, this, &ALevelManager::TriggerPCGGeneration, 0.05f, false);
-        }
-    }
 }
 
 void ALevelManager::TriggerPCGGeneration()
 {
-    UE_LOG(LogTemp, Warning, TEXT("========== TriggerPCGGeneration =========="));
+    // 서버에서만 실행 보장
+    if (!HasAuthority())
+    {
+        return;
+    }
 
     if (PCGSeed == 0)
     {
@@ -96,7 +81,6 @@ void ALevelManager::TriggerPCGGeneration()
 
     if (StartRoadActor)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Generate StartRoad: %s"), *StartRoadActor->GetName());
         StartRoadActor->GenerateObstacles(PCGSeed + CurrentIndex++);
     }
 
@@ -104,30 +88,20 @@ void ALevelManager::TriggerPCGGeneration()
     {
         if (Road)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Generate MiddleRoad: %s"), *Road->GetName());
             Road->GenerateObstacles(PCGSeed + CurrentIndex++);
         }
     }
 
     if (EndRoadActor)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Generate EndRoad: %s"), *EndRoadActor->GetName());
         EndRoadActor->GenerateObstacles(PCGSeed + CurrentIndex++);
     }
 }
 
-
 bool ALevelManager::IsLevelManagerManagedActor(const AActor* Actor) const
 {
-    if (!Actor)
-    {
-        return false;
-    }
-
-    if (Actor == this)
-    {
-        return true;
-    }
+    if (!Actor) return false;
+    if (Actor == this) return true;
 
     if (Actor == StartRoadActor || Actor == StartEnvironmentActor || Actor == StartPostProcessVolume || Actor == StartLandscapeActor)
     {
@@ -141,34 +115,22 @@ bool ALevelManager::IsLevelManagerManagedActor(const AActor* Actor) const
 
     for (ARoadBase* Road : MiddleRoadActors)
     {
-        if (Actor == Road)
-        {
-            return true;
-        }
+        if (Actor == Road) return true;
     }
 
     for (ALevelFloorBase* Environment : MiddleEnvironmentActors)
     {
-        if (Actor == Environment)
-        {
-            return true;
-        }
+        if (Actor == Environment) return true;
     }
 
     for (AZonePostProcessVolume* PostProcessVolume : MiddlePostProcessVolumes)
     {
-        if (Actor == PostProcessVolume)
-        {
-            return true;
-        }
+        if (Actor == PostProcessVolume) return true;
     }
 
     for (ALandscape* LandscapeActor : MiddleLandscapeActors)
     {
-        if (Actor == LandscapeActor)
-        {
-            return true;
-        }
+        if (Actor == LandscapeActor) return true;
     }
 
     return false;
@@ -176,46 +138,26 @@ bool ALevelManager::IsLevelManagerManagedActor(const AActor* Actor) const
 
 void ALevelManager::MoveTaggedActorsWithRoad(ARoadBase* Road, const FTransform& OriginalRoadTransform, const FTransform& FinalRoadTransform)
 {
-    if (!Road)
-    {
-        return;
-    }
+    if (!Road) return;
 
     const TArray<FName>& RoadTags = Road->Tags;
-
-    if (RoadTags.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[%s] Road [%s] has no Tags"), HasAuthority() ? TEXT("Server") : TEXT("Client"), *Road->GetName());
-        return;
-    }
+    if (RoadTags.Num() == 0) return;
 
     const FVector RoadLocationDelta = FinalRoadTransform.GetLocation() - OriginalRoadTransform.GetLocation();
 
     for (const FName& RoadTag : RoadTags)
     {
-        if (RoadTag.IsNone())
-        {
-            continue;
-        }
+        if (RoadTag.IsNone()) continue;
 
         TArray<AActor*> TaggedActors;
         UGameplayStatics::GetAllActorsWithTag(GetWorld(), RoadTag, TaggedActors);
 
-        UE_LOG(LogTemp, Warning, TEXT("[%s] Road [%s] Tag [%s] Actor Count = %d"), HasAuthority() ? TEXT("Server") : TEXT("Client"), *Road->GetName(), *RoadTag.ToString(), TaggedActors.Num());
-
         for (AActor* Actor : TaggedActors)
         {
-            if (!Actor || Actor == Road || IsLevelManagerManagedActor(Actor))
-            {
-                continue;
-            }
+            if (!Actor || Actor == Road || IsLevelManagerManagedActor(Actor)) continue;
 
             USceneComponent* ActorRootComponent = Actor->GetRootComponent();
-
-            if (!ActorRootComponent)
-            {
-                continue;
-            }
+            if (!ActorRootComponent) continue;
 
             const FVector OriginalActorLocation = Actor->GetActorLocation();
             const FVector FinalActorLocation = OriginalActorLocation + RoadLocationDelta;
@@ -225,38 +167,22 @@ void ALevelManager::MoveTaggedActorsWithRoad(ARoadBase* Road, const FTransform& 
             ActorRootComponent->SetMobility(EComponentMobility::Movable);
             Actor->SetActorLocation(FinalActorLocation);
             ActorRootComponent->SetMobility(OriginalMobility);
-
-            UE_LOG(LogTemp, Verbose, TEXT("[%s] Moved Actor [%s] with Road [%s] Tag [%s]"), HasAuthority() ? TEXT("Server") : TEXT("Client"), *Actor->GetName(), *Road->GetName(), *RoadTag.ToString());
         }
     }
 }
 
 void ALevelManager::ArrangePlacedZones()
 {
-    if (!StartRoadActor || !StartEnvironmentActor || !EndRoadActor || !EndEnvironmentActor)
-    {
-        UE_LOG(LogTemp, Error, TEXT("LevelManager: Required Start or End actors are missing."));
-        return;
-    }
-
-    if (MiddleRoadActors.Num() != MiddleEnvironmentActors.Num())
-    {
-        UE_LOG(LogTemp, Error, TEXT("LevelManager: MiddleRoadActors and MiddleEnvironmentActors counts do not match."));
-        return;
-    }
+    if (!StartRoadActor || !StartEnvironmentActor || !EndRoadActor || !EndEnvironmentActor) return;
+    if (MiddleRoadActors.Num() != MiddleEnvironmentActors.Num()) return;
 
     const float EnvironmentBaseZ = StartEnvironmentActor->GetActorLocation().Z;
 
     auto SetRootMobility = [](AActor* Actor, EComponentMobility::Type Mobility)
     {
-        if (!Actor)
+        if (Actor && Actor->GetRootComponent())
         {
-            return;
-        }
-
-        if (USceneComponent* RootComponent = Actor->GetRootComponent())
-        {
-            RootComponent->SetMobility(Mobility);
+            Actor->GetRootComponent()->SetMobility(Mobility);
         }
     };
 
@@ -265,25 +191,10 @@ void ALevelManager::ArrangePlacedZones()
     SetRootMobility(StartPostProcessVolume, EComponentMobility::Movable);
     SetRootMobility(StartLandscapeActor, EComponentMobility::Movable);
 
-    for (ARoadBase* Road : MiddleRoadActors)
-    {
-        SetRootMobility(Road, EComponentMobility::Movable);
-    }
-
-    for (ALevelFloorBase* Environment : MiddleEnvironmentActors)
-    {
-        SetRootMobility(Environment, EComponentMobility::Movable);
-    }
-
-    for (AZonePostProcessVolume* PostProcessVolume : MiddlePostProcessVolumes)
-    {
-        SetRootMobility(PostProcessVolume, EComponentMobility::Movable);
-    }
-
-    for (ALandscape* LandscapeActor : MiddleLandscapeActors)
-    {
-        SetRootMobility(LandscapeActor, EComponentMobility::Movable);
-    }
+    for (ARoadBase* Road : MiddleRoadActors) SetRootMobility(Road, EComponentMobility::Movable);
+    for (ALevelFloorBase* Environment : MiddleEnvironmentActors) SetRootMobility(Environment, EComponentMobility::Movable);
+    for (AZonePostProcessVolume* PostProcessVolume : MiddlePostProcessVolumes) SetRootMobility(PostProcessVolume, EComponentMobility::Movable);
+    for (ALandscape* LandscapeActor : MiddleLandscapeActors) SetRootMobility(LandscapeActor, EComponentMobility::Movable);
 
     SetRootMobility(EndRoadActor, EComponentMobility::Movable);
     SetRootMobility(EndEnvironmentActor, EComponentMobility::Movable);
@@ -321,7 +232,6 @@ void ALevelManager::ArrangePlacedZones()
         const float RoadZDelta = FinalEndRoadTransform.GetLocation().Z - OriginalRoadZ;
 
         EndRoadActor->SetActorTransform(FinalEndRoadTransform);
-
         MoveTaggedActorsWithRoad(EndRoadActor, OriginalEndRoadTransform, FinalEndRoadTransform);
 
         if (EndEnvironmentActor)
@@ -337,14 +247,10 @@ void ALevelManager::ArrangePlacedZones()
         {
             FVector LandscapeLocation = EndLandscapeActor->GetActorLocation();
             LandscapeLocation.Z += RoadZDelta;
-
-            FVector Origin;
-            FVector Extent;
+            FVector Origin, Extent;
             EndLandscapeActor->GetActorBounds(false, Origin, Extent);
-
             LandscapeLocation.X = FinalEndRoadTransform.GetLocation().X - Extent.X;
             LandscapeLocation.Y = FinalEndRoadTransform.GetLocation().Y - Extent.Y;
-
             EndLandscapeActor->SetActorLocation(LandscapeLocation);
         }
 
@@ -364,26 +270,16 @@ void ALevelManager::ArrangePlacedZones()
     for (int32 Index = MiddleZoneOrder.Num() - 1; Index >= 0; --Index)
     {
         const int32 TargetIndex = MiddleZoneOrder[Index];
-
-        if (!MiddleRoadActors.IsValidIndex(TargetIndex) || !MiddleEnvironmentActors.IsValidIndex(TargetIndex))
-        {
-            UE_LOG(LogTemp, Error, TEXT("LevelManager: Invalid MiddleZoneOrder index [%d]."), TargetIndex);
-            continue;
-        }
+        if (!MiddleRoadActors.IsValidIndex(TargetIndex) || !MiddleEnvironmentActors.IsValidIndex(TargetIndex)) continue;
 
         ARoadBase* Road = MiddleRoadActors[TargetIndex];
         ALevelFloorBase* Environment = MiddleEnvironmentActors[TargetIndex];
-
         ALandscape* LandscapeActor = MiddleLandscapeActors.IsValidIndex(TargetIndex) ? MiddleLandscapeActors[TargetIndex] : nullptr;
         AZonePostProcessVolume* PostProcessVolume = MiddlePostProcessVolumes.IsValidIndex(TargetIndex) ? MiddlePostProcessVolumes[TargetIndex] : nullptr;
 
-        if (!Road || !Environment)
-        {
-            continue;
-        }
+        if (!Road || !Environment) continue;
 
         const FTransform OriginalRoadTransform = Road->GetActorTransform();
-
         FTransform PostProcessRelativeTransform;
         bool bHasPostProcessRelativeTransform = false;
 
@@ -394,13 +290,11 @@ void ALevelManager::ArrangePlacedZones()
         }
 
         const float OriginalRoadZ = OriginalRoadTransform.GetLocation().Z;
-
         const FTransform RoadEndRelative = Road->GetEndPointTransform().GetRelativeTransform(Road->GetActorTransform());
         const FTransform FinalRoadTransform = RoadEndRelative.Inverse() * NextAttachTransform;
         const float RoadZDelta = FinalRoadTransform.GetLocation().Z - OriginalRoadZ;
 
         Road->SetActorTransform(FinalRoadTransform);
-
         MoveTaggedActorsWithRoad(Road, OriginalRoadTransform, FinalRoadTransform);
 
         FVector EnvironmentLocation = Environment->GetActorLocation();
@@ -413,14 +307,10 @@ void ALevelManager::ArrangePlacedZones()
         {
             FVector LandscapeLocation = LandscapeActor->GetActorLocation();
             LandscapeLocation.Z += RoadZDelta;
-
-            FVector Origin;
-            FVector Extent;
+            FVector Origin, Extent;
             LandscapeActor->GetActorBounds(false, Origin, Extent);
-
             LandscapeLocation.X = FinalRoadTransform.GetLocation().X - Extent.X;
             LandscapeLocation.Y = FinalRoadTransform.GetLocation().Y - Extent.Y;
-
             LandscapeActor->SetActorLocation(LandscapeLocation);
         }
 
@@ -451,7 +341,6 @@ void ALevelManager::ArrangePlacedZones()
         const float RoadZDelta = FinalStartRoadTransform.GetLocation().Z - OriginalRoadZ;
 
         StartRoadActor->SetActorTransform(FinalStartRoadTransform);
-
         MoveTaggedActorsWithRoad(StartRoadActor, OriginalStartRoadTransform, FinalStartRoadTransform);
 
         if (StartEnvironmentActor)
@@ -467,14 +356,10 @@ void ALevelManager::ArrangePlacedZones()
         {
             FVector LandscapeLocation = StartLandscapeActor->GetActorLocation();
             LandscapeLocation.Z += RoadZDelta;
-
-            FVector Origin;
-            FVector Extent;
+            FVector Origin, Extent;
             StartLandscapeActor->GetActorBounds(false, Origin, Extent);
-
             LandscapeLocation.X = FinalStartRoadTransform.GetLocation().X - Extent.X;
             LandscapeLocation.Y = FinalStartRoadTransform.GetLocation().Y - Extent.Y;
-
             StartLandscapeActor->SetActorLocation(LandscapeLocation);
         }
 
@@ -486,12 +371,8 @@ void ALevelManager::ArrangePlacedZones()
 
     auto SetRoadComponentsStatic = [](ARoadBase* Road)
     {
-        if (!Road)
-        {
-            return;
-        }
+        if (!Road) return;
 
-        // 도로 액터의 RootComponent는 원래대로 Static 전환
         if (USceneComponent* RootComponent = Road->GetRootComponent())
         {
             RootComponent->SetMobility(EComponentMobility::Static);
@@ -504,12 +385,7 @@ void ALevelManager::ArrangePlacedZones()
         {
             if (Component)
             {
-                // PCGComponent만 Mobility 변경 대상에서 제외
-                if (Component->IsA(UPCGComponent::StaticClass()))
-                {
-                    continue;
-                }
-
+                if (Component->IsA(UPCGComponent::StaticClass())) continue;
                 Component->SetMobility(EComponentMobility::Static);
             }
         }
@@ -517,13 +393,7 @@ void ALevelManager::ArrangePlacedZones()
     
     SetRoadComponentsStatic(StartRoadActor);
     SetRoadComponentsStatic(EndRoadActor);
-    
-    for (ARoadBase* Road : MiddleRoadActors)
-    {
-        SetRoadComponentsStatic(Road);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("LevelManager: Auto arrangement complete."));
+    for (ARoadBase* Road : MiddleRoadActors) SetRoadComponentsStatic(Road);
 }
 
 void ALevelManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
