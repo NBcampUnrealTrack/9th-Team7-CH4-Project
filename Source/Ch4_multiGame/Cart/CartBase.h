@@ -30,12 +30,19 @@ public:
     UFUNCTION(BlueprintPure, Category="Cart|Preparation")
     bool IsPreparationLocked() const { return bPreparationLocked; }
 
+    /** Moves both the replicated Actor root and the independent server physics body as one teleport. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Cart|Transition")
+    bool TeleportCartToTransform(const FTransform& Destination);
+
     /** 이 플레이어가 배정받은 앵커. 없으면 nullptr. */
     USceneComponent* GetAnchorFor(const ACh4_PlayerCharacter* Player) const;
 
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(VisibleAnywhere, Category="Cart")
+    TObjectPtr<USceneComponent> CartRoot;
+    
     UPROPERTY(VisibleAnywhere, Category="Cart")
     TObjectPtr<UStaticMeshComponent> CartMesh;
 
@@ -177,6 +184,22 @@ private:
     UPROPERTY(Replicated)
     TArray<TObjectPtr<ACh4_PlayerCharacter>> AnchorOccupants;
 
+    /** Remote clients only: smooth ordinary replicated position corrections. */
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Network Smoothing", meta=(ClampMin="0.0"))
+    float ClientPositionInterpSpeed = 12.0f;
+
+    /** Remote clients only: smooth ordinary replicated rotation corrections. */
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Network Smoothing", meta=(ClampMin="0.0"))
+    float ClientRotationInterpSpeed = 12.0f;
+
+    /** Larger replicated moves are teleports and snap immediately instead of crossing the map visually. */
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Network Smoothing", meta=(ClampMin="0.0", Units="cm"))
+    float ClientSmoothingSnapDistance = 1000.0f;
+
+    /** Large in-place rotation changes also snap immediately. */
+    UPROPERTY(EditDefaultsOnly, Category="Cart|Network Smoothing", meta=(ClampMin="0.0", ClampMax="180.0", Units="Degrees"))
+    float ClientSmoothingSnapAngleDegrees = 60.0f;
+    
     UPROPERTY(ReplicatedUsing = OnRep_PreparationLocked)
     bool bPreparationLocked = false;
 
@@ -184,6 +207,7 @@ private:
     void OnRep_PreparationLocked();
 
     bool bWasSimulatingBeforePreparationLock = true;
+    bool bCartTeleportInProgress = false;
 
     /** 서버 전용. 플레이어별 최신 입력값. */
     TMap<TObjectPtr<ACh4_PlayerCharacter>, FVector2D> PlayerInputs;
@@ -209,4 +233,13 @@ private:
     void InitializeStabilizationSettings();
     void ConfigureUprightSafetyConstraint();
     void DrawCartPhysicsDebug() const;
+    
+    /** 서버: 물리 결과를 액터 루트에 반영해 복제되게 한다. */
+    void SyncRootToPhysics();
+
+    /** 클라이언트: 복제된 루트 위치로 메시를 부드럽게 따라가게 한다. */
+    void InterpolateClientTransform(float DeltaTime);
+
+    /** Remote clients never own Cart physics; replicated state only drives the visual interpolation target. */
+    void DisableClientPhysics();
 };

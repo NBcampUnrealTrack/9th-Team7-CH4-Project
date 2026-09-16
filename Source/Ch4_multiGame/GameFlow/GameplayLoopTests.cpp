@@ -323,7 +323,8 @@ bool FCh4PreparationTransitionTest::RunTest(const FString& Parameters)
 	FirstBody->SetPhysicsAngularVelocityInRadians(FVector(0, 0, 3));
 	const bool bOriginalSim = FirstBody->IsSimulatingPhysics();
 	const ECollisionEnabled::Type OriginalCollision = FirstBody->GetCollisionEnabled();
-	UPrimitiveComponent* CartBody = Cast<UPrimitiveComponent>(Cart->GetRootComponent());
+	UPrimitiveComponent* CartBody = Cast<UPrimitiveComponent>(
+		Cart->GetDefaultSubobjectByName(TEXT("CartMesh")));
 	if (!CartBody) return false;
 	const ECollisionEnabled::Type CartCollision = CartBody->GetCollisionEnabled();
 	TestTrue(TEXT("Physics fixture actually simulates"), bOriginalSim);
@@ -352,6 +353,13 @@ bool FCh4PreparationTransitionTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Game starts only after physics restoration"), F.State->GetCurrentGamePhase(), ECh4GamePhase::Playing);
 	TestFalse(TEXT("Main Area restoration releases the preparation Cart lock"), CartBase->IsPreparationLocked());
 	TestTrue(TEXT("Main Area restoration resumes authoritative Cart simulation"), CartBody->IsSimulatingPhysics());
+	TestTrue(TEXT("Preparation moves the replicated Cart root to the destination"),
+		Cart->GetActorLocation().Equals(Point->CartDestination->GetActorLocation(), 0.1f));
+	TestTrue(TEXT("Preparation also moves the absolute Cart physics body to the destination"),
+		CartBody->GetComponentLocation().Equals(Point->CartDestination->GetActorLocation(), 0.1f));
+	CartBase->Tick(1.0f / 60.0f);
+	TestTrue(TEXT("First server physics sync cannot restore the Shop transform"),
+		Cart->GetActorLocation().Equals(Point->CartDestination->GetActorLocation(), 0.1f));
 	TestEqual(TEXT("Original simulation state restored"), FirstBody->IsSimulatingPhysics(), bOriginalSim);
 	TestEqual(TEXT("Original collision state restored"), FirstBody->GetCollisionEnabled(), OriginalCollision);
 	TestTrue(TEXT("Old linear velocity is cleared"), FirstBody->GetPhysicsLinearVelocity().IsNearlyZero());
