@@ -58,6 +58,10 @@ public:
 	UFUNCTION(Exec, BlueprintCallable, Category="Development")
 	void TestGameResult(bool bSuccess = true);
 
+	/** PIE console command: prints local Hat progress, disk save, requirements, and unlock decisions. */
+	UFUNCTION(Exec, BlueprintCallable, Category="Development")
+	void DumpHatUnlockState();
+
 	/** Saves the local choice for travel and asks the server to update replicated PlayerState. */
 	UFUNCTION(BlueprintCallable, Category="Player|Character")
 	void RequestCharacterType(ECh4CharacterType CharacterType);
@@ -178,6 +182,7 @@ protected:
 	virtual void OnPossess(APawn* InPawn) override;
 	virtual void OnRep_PlayerState() override;
 	virtual void AcknowledgePossession(APawn* InPawn) override;
+	virtual void PostSeamlessTravel() override;
 
 	/** Input mapping context setup */
 	virtual void SetupInputComponent() override;
@@ -214,7 +219,9 @@ private:
 
 	bool bSubmittedPersistedCharacterType = false;
 	bool bSubmittedPersistedHeadwear = false;
+	bool bRecordedGameResultForBoundState = false;
 	TWeakObjectPtr<class ACh4_multiGameGameState> BoundResultGameState;
+	FTimerHandle GameResultBindRetryTimer;
 
 	UPROPERTY(Transient)
 	float CachedMouseSensitivity = 1.0f;

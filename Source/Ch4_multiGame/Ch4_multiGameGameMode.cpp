@@ -29,6 +29,36 @@ ACh4_multiGameGameMode::ACh4_multiGameGameMode()
 	LobbyMap = TSoftObjectPtr<UWorld>(FSoftObjectPath(TEXT("/Game/Lobby/L_Lobby.L_Lobby")));
 }
 
+void ACh4_multiGameGameMode::PostLogin(APlayerController* NewPlayer)
+{
+	Super::PostLogin(NewPlayer);
+
+	if (HasAuthority())
+	{
+		if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+		{
+			GI->UpdateSteamSessionPlayerCount(GetNumPlayers());
+		}
+	}
+}
+
+void ACh4_multiGameGameMode::Logout(AController* Exiting)
+{
+	const int32 RemainingPlayerCount = IsValid(Cast<APlayerController>(Exiting))
+		? FMath::Max(GetNumPlayers() - 1, 0)
+		: GetNumPlayers();
+
+	Super::Logout(Exiting);
+
+	if (HasAuthority())
+	{
+		if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
+		{
+			GI->UpdateSteamSessionPlayerCount(RemainingPlayerCount);
+		}
+	}
+}
+
 bool ACh4_multiGameGameMode::RegisterGameplayCart(ACartBase* Cart)
 {
 	if (!HasAuthority() || !IsValid(Cart) || Cart->IsActorBeingDestroyed()
@@ -85,7 +115,7 @@ void ACh4_multiGameGameMode::BuildPlayerRecoveryCandidates(
 	const float LateralOffset,
 	TArray<FVector>& OutCandidates)
 {
-	OutCandidates.Reset(4);
+	OutCandidates.Reset(6);
 	const float CartYaw = FMath::IsFinite(CartRotation.Yaw) ? CartRotation.Yaw : 0.0f;
 	const FRotationMatrix YawRotation(FRotator(0.0f, CartYaw, 0.0f));
 	const FVector Forward = YawRotation.GetUnitAxis(EAxis::X);
@@ -95,11 +125,15 @@ void ACh4_multiGameGameMode::BuildPlayerRecoveryCandidates(
 	const float SafeLateralOffset = FMath::Max(LateralOffset, 0.0f);
 	const FVector ElevatedCartLocation = CartLocation + FVector::UpVector * SafeHeightOffset;
 	const FVector Behind = ElevatedCartLocation - Forward * SafeBehindDistance;
+	const FVector FarBehind = ElevatedCartLocation
+		- Forward * (SafeBehindDistance + SafeLateralOffset);
 
 	OutCandidates.Add(Behind);
-	OutCandidates.Add(Behind + Right * SafeLateralOffset);
 	OutCandidates.Add(Behind - Right * SafeLateralOffset);
-	OutCandidates.Add(ElevatedCartLocation - Forward * (SafeBehindDistance + SafeLateralOffset));
+	OutCandidates.Add(Behind + Right * SafeLateralOffset);
+	OutCandidates.Add(FarBehind);
+	OutCandidates.Add(FarBehind - Right * SafeLateralOffset);
+	OutCandidates.Add(FarBehind + Right * SafeLateralOffset);
 }
 
 #if WITH_DEV_AUTOMATION_TESTS

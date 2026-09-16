@@ -25,6 +25,7 @@
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UnrealType.h"
 #include "Player/Ch4_multiGamePlayerState.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -272,6 +273,10 @@ void ACh4_multiGamePlayerController::OnPossess(APawn* InPawn)
 
 void ACh4_multiGamePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (GetWorld())
+	{
+		GetWorldTimerManager().ClearTimer(GameResultBindRetryTimer);
+	}
 	RemoveGameResultUI();
 	if (bPauseInputCaptured) HidePauseMenu();
 	if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
@@ -297,6 +302,13 @@ void ACh4_multiGamePlayerController::AcknowledgePossession(APawn* InPawn)
 	BindGameResultState();
 }
 
+void ACh4_multiGamePlayerController::PostSeamlessTravel()
+{
+	Super::PostSeamlessTravel();
+	SynchronizeCharacterSelectionForCurrentWorld();
+	BindGameResultState();
+}
+
 void ACh4_multiGamePlayerController::BindGameResultState()
 {
 	if (!IsLocalPlayerController())
@@ -306,18 +318,34 @@ void ACh4_multiGamePlayerController::BindGameResultState()
 
 	ACh4_multiGameGameState* CurrentGameState = GetWorld()
 		? GetWorld()->GetGameState<ACh4_multiGameGameState>() : nullptr;
-	if (ACh4_multiGameGameState* PreviousGameState = BoundResultGameState.Get())
+	ACh4_multiGameGameState* PreviousGameState = BoundResultGameState.Get();
+	const bool bBoundStateChanged = PreviousGameState != CurrentGameState;
+	if (PreviousGameState)
 	{
 		PreviousGameState->OnGameResultChanged.RemoveDynamic(
 			this, &ACh4_multiGamePlayerController::HandleGameResultChanged);
 	}
 	BoundResultGameState = CurrentGameState;
+	if (bBoundStateChanged)
+	{
+		bRecordedGameResultForBoundState = false;
+	}
 
 	if (!CurrentGameState)
 	{
 		RemoveGameResultUI();
+		if (GetWorld() && !GetWorldTimerManager().IsTimerActive(GameResultBindRetryTimer))
+		{
+			GetWorldTimerManager().SetTimer(
+				GameResultBindRetryTimer,
+				this,
+				&ThisClass::BindGameResultState,
+				0.1f,
+				true);
+		}
 		return;
 	}
+	GetWorldTimerManager().ClearTimer(GameResultBindRetryTimer);
 
 	CurrentGameState->OnGameResultChanged.AddDynamic(
 		this, &ACh4_multiGamePlayerController::HandleGameResultChanged);
@@ -333,10 +361,24 @@ void ACh4_multiGamePlayerController::HandleGameResultChanged(const FCh4GameResul
 	{
 		// This callback only binds on the owning local controller. Every participant
 		// consumes the same replicated server snapshot into their own local SaveGame.
-		if (UCh4_multiGameGameInstance* GameInstance =
-			GetGameInstance<UCh4_multiGameGameInstance>())
+		if (!bRecordedGameResultForBoundState)
 		{
-			GameInstance->RecordGameResult(NewResult);
+			if (UCh4_multiGameGameInstance* GameInstance =
+				GetGameInstance<UCh4_multiGameGameInstance>())
+			{
+				GameInstance->RecordGameResult(NewResult);
+				bRecordedGameResultForBoundState = true;
+			}
+			else
+			{
+				UE_LOG(LogCh4_multiGame, Error,
+					TEXT("[HatProgress] Result reached local PlayerController but Ch4 GameInstance is unavailable"));
+			}
+		}
+		else
+		{
+			UE_LOG(LogCh4_multiGame, Verbose,
+				TEXT("[HatProgress] Duplicate metadata update ignored for progress; Result UI still refreshed"));
 		}
 		ShowGameResult(NewResult);
 	}
@@ -405,10 +447,33 @@ void ACh4_multiGamePlayerController::RemoveGameResultUI()
 			this, &ACh4_multiGamePlayerController::HandleGameResultChanged);
 	}
 	BoundResultGameState.Reset();
+	bRecordedGameResultForBoundState = false;
 	if (GameResultWidget)
 	{
 		GameResultWidget->RemoveFromParent();
 		GameResultWidget = nullptr;
+	}
+}
+
+void ACh4_multiGamePlayerController::DumpHatUnlockState()
+{
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HatDebug] Invocation Controller=%s Class=%s Local=%s Authority=%s World=%s NetMode=%d"),
+		*GetNameSafe(this),
+		*GetNameSafe(GetClass()),
+		IsLocalPlayerController() ? TEXT("true") : TEXT("false"),
+		HasAuthority() ? TEXT("true") : TEXT("false"),
+		*GetNameSafe(GetWorld()),
+		static_cast<int32>(GetNetMode()));
+	if (UCh4_multiGameGameInstance* GameInstance =
+		GetGameInstance<UCh4_multiGameGameInstance>())
+	{
+		GameInstance->DumpHatUnlockState();
+	}
+	else
+	{
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[HatDebug] ERROR: Ch4 GameInstance is unavailable"));
 	}
 }
 

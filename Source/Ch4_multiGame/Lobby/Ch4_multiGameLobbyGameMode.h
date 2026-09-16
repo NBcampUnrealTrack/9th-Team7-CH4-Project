@@ -87,6 +87,8 @@ private:
 	int32 ReleaseCharacterSlot(AController* Controller);
 	int32 FindAssignedCharacterSlot(AController* Controller) const;
 	void StartGameTravel();
+	void HandleGameplaySessionAvailabilityUpdated(bool bSucceeded);
+	void PerformGameTravel();
 	void ShowServerDebugStatus(const FString& EventMessage, const FColor& Color, float Duration) const;
 	int32 GetListenPort() const;
 	FString GetPlayerLogLabel(const AController* Controller) const;

@@ -4,6 +4,11 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Player/Ch4_multiGameGameInstance.h"
 
+UCh4MainMenuViewModel::UCh4MainMenuViewModel()
+{
+	SelectedRoomInfoText = NSLOCTEXT("Ch4MainMenu", "NoRoomSelected", "선택된 방이 없습니다.");
+}
+
 UWorld* UCh4MainMenuViewModel::GetWorld() const
 {
 	if (HasAnyFlags(RF_ClassDefaultObject)) return nullptr;
@@ -51,11 +56,38 @@ void UCh4MainMenuViewModel::RefreshSteamState()
 	RoomList.Reset();
 	for (UCh4RoomEntryData* Room : GI->GetSteamRooms()) RoomList.Add(Room);
 	SelectedRoomIndex = RoomList.IndexOfByKey(Selection);
+	SelectedRoomEntry = (SelectedRoomIndex != INDEX_NONE) ? RoomList[SelectedRoomIndex].Get() : nullptr;
+
+	for (const TObjectPtr<UCh4RoomEntryData>& Room : RoomList)
+	{
+		if (Room)
+		{
+			Room->bIsSelected = (Room == SelectedRoomEntry);
+		}
+	}
+
+	if (SelectedRoomEntry)
+	{
+		SelectedRoomInfoText = FText::Format(
+			NSLOCTEXT("Ch4MainMenu", "SelectedRoomFormat", "선택된 방: {0} ({1}/{2})"),
+			FText::FromString(SelectedRoomEntry->ServerName),
+			FText::AsNumber(SelectedRoomEntry->CurrentPlayers),
+			FText::AsNumber(SelectedRoomEntry->MaxPlayers));
+	}
+	else
+	{
+		SelectedRoomInfoText = NSLOCTEXT("Ch4MainMenu", "NoRoomSelected", "선택된 방이 없습니다.");
+	}
+
 	SetbIsLoading(GI->IsSteamSessionBusy());
 	SetbCanJoinRoom(!bIsLoading && SelectedRoomIndex != INDEX_NONE
-		&& Selection && Selection->CurrentPlayers < Selection->MaxPlayers);
+		&& SelectedRoomEntry && SelectedRoomEntry->CurrentPlayers < SelectedRoomEntry->MaxPlayers);
 	SetStatusText(GI->GetSteamSessionStatus());
+
 	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(RoomList);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedRoomIndex);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedRoomEntry);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedRoomInfoText);
 }
 
 void UCh4MainMenuViewModel::ShowRoomSelection()
@@ -103,9 +135,36 @@ void UCh4MainMenuViewModel::SelectRoom(int32 Index)
 
 void UCh4MainMenuViewModel::SelectRoomEntry(UCh4RoomEntryData* RoomEntry)
 {
+	SelectedRoomEntry = RoomEntry;
 	SelectedRoomIndex = RoomEntry ? RoomList.IndexOfByKey(RoomEntry) : INDEX_NONE;
+
+	for (const TObjectPtr<UCh4RoomEntryData>& Room : RoomList)
+	{
+		if (Room)
+		{
+			Room->bIsSelected = (Room == RoomEntry);
+		}
+	}
+
+	if (RoomEntry)
+	{
+		SelectedRoomInfoText = FText::Format(
+			NSLOCTEXT("Ch4MainMenu", "SelectedRoomFormat", "선택된 방: {0} ({1}/{2})"),
+			FText::FromString(RoomEntry->ServerName),
+			FText::AsNumber(RoomEntry->CurrentPlayers),
+			FText::AsNumber(RoomEntry->MaxPlayers));
+	}
+	else
+	{
+		SelectedRoomInfoText = NSLOCTEXT("Ch4MainMenu", "NoRoomSelected", "선택된 방이 없습니다.");
+	}
+
 	SetbCanJoinRoom(!bIsLoading && SelectedRoomIndex != INDEX_NONE
 		&& RoomEntry && RoomEntry->CurrentPlayers < RoomEntry->MaxPlayers);
+
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedRoomIndex);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedRoomEntry);
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedRoomInfoText);
 }
 
 void UCh4MainMenuViewModel::JoinSelectedRoom()

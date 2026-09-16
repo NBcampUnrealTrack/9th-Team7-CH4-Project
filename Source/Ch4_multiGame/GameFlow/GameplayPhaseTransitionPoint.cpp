@@ -339,7 +339,17 @@ void AGameplayPhaseTransitionPoint::MulticastMoveLoad_Implementation(const TArra
 	{
 		if (IsValid(Move.Actor))
 		{
-			bTeleportSucceeded &= Move.Actor->SetActorTransform(Move.Destination, false, nullptr, ETeleportType::TeleportPhysics);
+			if (ACartBase* Cart = Cast<ACartBase>(Move.Actor); Cart && HasAuthority())
+			{
+				// CartRoot is the replicated target while the absolute CartMesh owns server physics.
+				// The Cart API moves both even though preparation has already disabled CartMesh simulation.
+				bTeleportSucceeded &= Cart->TeleportCartToTransform(Move.Destination);
+			}
+			else
+			{
+				bTeleportSucceeded &= Move.Actor->SetActorTransform(
+					Move.Destination, false, nullptr, ETeleportType::TeleportPhysics);
+			}
 		}
 	}
 	for (const FPrimitiveState& Saved : SuspendedPrimitives)
@@ -354,7 +364,14 @@ void AGameplayPhaseTransitionPoint::MulticastMoveLoad_Implementation(const TArra
 	{
 		for (const FActorState& Saved : SuspendedActors)
 		{
-			if (Saved.Actor.IsValid()) Saved.Actor->SetActorTransform(Saved.Source, false, nullptr, ETeleportType::TeleportPhysics);
+			if (ACartBase* Cart = Cast<ACartBase>(Saved.Actor.Get()))
+			{
+				Cart->TeleportCartToTransform(Saved.Source);
+			}
+			else if (Saved.Actor.IsValid())
+			{
+				Saved.Actor->SetActorTransform(Saved.Source, false, nullptr, ETeleportType::TeleportPhysics);
+			}
 		}
 		for (const FPrimitiveState& Saved : SuspendedPrimitives)
 		{

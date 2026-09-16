@@ -17,6 +17,8 @@ class SWidget;
 struct FCh4GameResult;
 struct FWorldContext;
 
+using FCh4SteamSessionAvailabilityCompletion = TFunction<void(bool)>;
+
 /**
  * Keeps this process's local player's final selection across non-seamless travel
  * and owns the local map-loading screen lifecycle.
@@ -53,6 +55,12 @@ public:
 	UFUNCTION(BlueprintPure, Category="Online|Steam")
 	bool HasActiveSteamSession() const;
 
+	/** Host only: hide the existing room and reject every new join before Gameplay travel. */
+	bool SetSteamSessionGameplayAvailability(FCh4SteamSessionAvailabilityCompletion Completion);
+
+	/** Host only: publish the existing room after the Lobby world has initialized. */
+	bool RestoreSteamSessionLobbyAvailability();
+
 	UFUNCTION(BlueprintPure, Category="Online|Steam")
 	FText GetSteamSessionStatus() const { return SteamSessionStatus; }
 
@@ -64,6 +72,10 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category="Online|Steam")
 	FCh4SteamSessionComplete OnSteamSessionComplete;
+
+	/** Updates the advertised open public connection count on the active Steam session (host only). */
+	UFUNCTION(BlueprintCallable, Category="Online|Steam")
+	void UpdateSteamSessionPlayerCount(int32 NewPlayerCount);
 
 	/** Explicit process-wide legacy mode: -Ch4DirectIP -nosteam. Never an automatic fallback. */
 	bool IsDirectIPDebugEnabled() const { return bDirectIPDebugEnabled; }
@@ -89,6 +101,10 @@ public:
 
 	/** Stores a new personal best from a replicated server result and saves only when either record improves. */
 	bool RecordGameResult(const FCh4GameResult& Result);
+
+	/** Prints the local runtime profile, disk SaveGame, requirements, and all four unlock decisions. */
+	UFUNCTION(BlueprintCallable, Category="Player|Progress|Debug")
+	void DumpHatUnlockState() const;
 
 	UFUNCTION(BlueprintPure, Category="Player|Progress")
 	int32 GetBestSingleGameScore() const;
@@ -120,6 +136,7 @@ private:
 	void SetSteamOperation(ECh4SteamSessionOperation Operation, const FText& Message);
 	void CompleteSteamOperation(bool bSucceeded, const FText& Message);
 	void ClearSteamOperationDelegates();
+	void ClearSteamUpdateDelegate();
 	bool BeginSteamCreate();
 	bool BeginSteamJoin(const FOnlineSessionSearchResult& Result);
 	bool BeginSteamDestroy();
@@ -130,12 +147,16 @@ private:
 	void HandleSteamFindComplete(bool bSucceeded);
 	void HandleSteamJoinComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);
 	void HandleSteamDestroyComplete(FName SessionName, bool bSucceeded);
+	void HandleSteamUpdateComplete(FName SessionName, bool bSucceeded);
 	void HandleSteamInviteAccepted(bool bSucceeded, int32 LocalUserNum, FUniqueNetIdPtr UserId,
 		const FOnlineSessionSearchResult& Result);
+	bool UpdateSteamSessionMatchState(
+		ECh4SteamMatchState MatchState,
+		FCh4SteamSessionAvailabilityCompletion Completion = {});
 
 	IOnlineSessionPtr SteamSessionInterface;
 	TSharedPtr<FOnlineSessionSearch> SteamSearch;
-	FDelegateHandle SteamCreateHandle, SteamFindHandle, SteamJoinHandle, SteamDestroyHandle, SteamInviteHandle;
+	FDelegateHandle SteamCreateHandle, SteamFindHandle, SteamJoinHandle, SteamDestroyHandle, SteamUpdateHandle, SteamInviteHandle;
 	FDelegateHandle SteamPostLoadHandle;
 	ECh4SteamSessionOperation SteamOperation = ECh4SteamSessionOperation::Idle;
 	FText SteamSessionStatus;
@@ -144,8 +165,11 @@ private:
 	bool bSteamRehostAfterDestroy = false;
 	bool bSteamLeaveRequested = false;
 	bool bSteamTravelIsHost = false;
+	bool bSteamUpdateInProgress = false;
 	bool bDirectIPDebugEnabled = false;
 	bool bSteamShuttingDown = false;
+	ECh4SteamMatchState PendingSteamMatchState = ECh4SteamMatchState::Lobby;
+	FCh4SteamSessionAvailabilityCompletion PendingSteamUpdateCompletion;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UCh4RoomEntryData>> SteamRooms;

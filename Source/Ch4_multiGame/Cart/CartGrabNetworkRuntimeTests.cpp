@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Player/Ch4_PlayerCharacter.h"
 
@@ -123,6 +124,8 @@ private:
 				Test->AddError(TEXT("Host could not prepare the Cart lock/anchor fixture"));
 				return true;
 			}
+			bHostMeshPhysicsBeforeGrab = HostCharacter->GetMesh()->IsAnySimulatingPhysics();
+			bRemoteMeshPhysicsBeforeGrab = RemoteCharacter->GetMesh()->IsAnySimulatingPhysics();
 			HostCharacter->SetActorLocation(HostAnchor->GetComponentLocation());
 			RemoteCharacter->SetActorLocation(ClientAnchor->GetComponentLocation());
 			HostCharacter->ForceNetUpdate();
@@ -161,6 +164,14 @@ private:
 			}
 			Test->TestTrue(TEXT("Host and remote client receive distinct Cart anchors"),
 				Cart->GetAnchorFor(HostCharacter) != Cart->GetAnchorFor(RemoteCharacter));
+			Test->TestEqual(TEXT("Host CharacterMovement is disabled while attached to the Cart"),
+				HostCharacter->GetCharacterMovement()->MovementMode, MOVE_None);
+			Test->TestEqual(TEXT("Remote CharacterMovement is disabled on the server while attached to the Cart"),
+				RemoteCharacter->GetCharacterMovement()->MovementMode, MOVE_None);
+			Test->TestFalse(TEXT("Cart grab does not enable host mesh physics"),
+				HostCharacter->GetMesh()->IsAnySimulatingPhysics());
+			Test->TestFalse(TEXT("Cart grab does not enable remote mesh physics"),
+				RemoteCharacter->GetMesh()->IsAnySimulatingPhysics());
 			Test->TestTrue(TEXT("Host move intent uses the same authoritative Cart path"),
 				Cart->SetPlayerMoveInput(HostCharacter, FVector2D(0.0f, 1.0f)));
 			Stage = 3;
@@ -178,7 +189,15 @@ private:
 		if (Stage == 4 && !Cart->GetAnchorFor(RemoteCharacter))
 		{
 			Test->TestNull(TEXT("Remote release clears server Cart state"), RemoteCharacter->GrabbedCart);
+			Test->TestTrue(TEXT("Remote release restores CharacterMovement on the server"),
+				RemoteCharacter->GetCharacterMovement()->MovementMode != MOVE_None);
+			Test->TestEqual(TEXT("Remote release restores its pre-grab mesh physics state on the server"),
+				RemoteCharacter->GetMesh()->IsAnySimulatingPhysics(), bRemoteMeshPhysicsBeforeGrab);
 			Test->TestTrue(TEXT("Host release returns its independent anchor"), Cart->ReleasePlayer(HostCharacter));
+			Test->TestTrue(TEXT("Host release restores CharacterMovement"),
+				HostCharacter->GetCharacterMovement()->MovementMode != MOVE_None);
+			Test->TestEqual(TEXT("Host release restores its pre-grab mesh physics state"),
+				HostCharacter->GetMesh()->IsAnySimulatingPhysics(), bHostMeshPhysicsBeforeGrab);
 			ACh4_multiGameGameMode* Rule = World->GetAuthGameMode<ACh4_multiGameGameMode>();
 			ACh4_multiGameGameState* State = World->GetGameState<ACh4_multiGameGameState>();
 			if (!Rule || !State || !Rule->RequestCargoInitialization(1) || !Rule->RequestGameStart())
@@ -229,6 +248,7 @@ private:
 	{
 		if (Stage == 0 && Cart->IsPreparationLocked())
 		{
+			bClientMeshPhysicsBeforeGrab = LocalCharacter->GetMesh()->IsAnySimulatingPhysics();
 			LocalCharacter->ServerRPC_RequestCartGrab(Cart);
 			Stage = 1;
 			Test->AddInfo(TEXT("CART_GRAB_CLIENT sent locked grab request through owned Character RPC"));
@@ -243,6 +263,10 @@ private:
 		}
 		if (Stage == 2 && LocalCharacter->GrabbedCart == Cart)
 		{
+			Test->TestEqual(TEXT("Client CharacterMovement is disabled while attached to the Cart"),
+				LocalCharacter->GetCharacterMovement()->MovementMode, MOVE_None);
+			Test->TestFalse(TEXT("Client Cart grab does not enable mesh physics"),
+				LocalCharacter->GetMesh()->IsAnySimulatingPhysics());
 			LocalCharacter->ServerRPC_SetCartMoveInput(FVector2D(0.0f, 1.0f));
 			StageStartedAt = Now;
 			Stage = 3;
@@ -256,6 +280,10 @@ private:
 		}
 		if (Stage == 4 && !LocalCharacter->GrabbedCart)
 		{
+			Test->TestTrue(TEXT("Client release restores CharacterMovement"),
+				LocalCharacter->GetCharacterMovement()->MovementMode != MOVE_None);
+			Test->TestEqual(TEXT("Client release restores its pre-grab mesh physics state"),
+				LocalCharacter->GetMesh()->IsAnySimulatingPhysics(), bClientMeshPhysicsBeforeGrab);
 			Stage = 5;
 			return false;
 		}
@@ -291,6 +319,9 @@ private:
 	double StageStartedAt = 0.0;
 	int32 Stage = 0;
 	bool bObservedResultBeforeGameOver = false;
+	bool bHostMeshPhysicsBeforeGrab = false;
+	bool bRemoteMeshPhysicsBeforeGrab = false;
+	bool bClientMeshPhysicsBeforeGrab = false;
 };
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCh4CartGrabNetworkRuntimeTest,

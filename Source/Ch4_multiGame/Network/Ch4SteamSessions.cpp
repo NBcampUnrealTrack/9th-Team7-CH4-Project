@@ -18,6 +18,14 @@
 
 #define LOCTEXT_NAMESPACE "Ch4SteamSessions"
 
+namespace
+{
+	const TCHAR* GetSteamMatchStateLabel(const ECh4SteamMatchState MatchState)
+	{
+		return MatchState == ECh4SteamMatchState::Lobby ? TEXT("Lobby") : TEXT("Playing");
+	}
+}
+
 void UCh4_multiGameGameInstance::LogMatchTravel(const UWorld* World, const FString& Destination, bool bSeamless) const
 {
 	const UNetDriver* Driver = World ? World->GetNetDriver() : nullptr;
@@ -85,11 +93,23 @@ void UCh4_multiGameGameInstance::ClearSteamOperationDelegates()
 	SteamDestroyHandle.Reset();
 }
 
+void UCh4_multiGameGameInstance::ClearSteamUpdateDelegate()
+{
+	if (SteamSessionInterface.IsValid())
+	{
+		SteamSessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SteamUpdateHandle);
+	}
+	SteamUpdateHandle.Reset();
+	bSteamUpdateInProgress = false;
+	PendingSteamUpdateCompletion = {};
+}
+
 void UCh4_multiGameGameInstance::ShutdownSteamSessions()
 {
 	bSteamShuttingDown = true;
 	FCoreUObjectDelegates::PostLoadMapWithWorld.Remove(SteamPostLoadHandle);
 	ClearSteamOperationDelegates();
+	ClearSteamUpdateDelegate();
 	if (SteamSessionInterface.IsValid())
 	{
 		SteamSessionInterface->ClearOnSessionUserInviteAcceptedDelegate_Handle(SteamInviteHandle);
@@ -113,11 +133,153 @@ bool UCh4_multiGameGameInstance::HasActiveSteamSession() const
 	return SteamSessionInterface.IsValid() && SteamSessionInterface->GetNamedSession(NAME_GameSession) != nullptr;
 }
 
+bool UCh4_multiGameGameInstance::SetSteamSessionGameplayAvailability(
+	FCh4SteamSessionAvailabilityCompletion Completion)
+{
+	return UpdateSteamSessionMatchState(ECh4SteamMatchState::Playing, MoveTemp(Completion));
+}
+
+bool UCh4_multiGameGameInstance::RestoreSteamSessionLobbyAvailability()
+{
+	return UpdateSteamSessionMatchState(ECh4SteamMatchState::Lobby);
+}
+
+bool UCh4_multiGameGameInstance::UpdateSteamSessionMatchState(
+	const ECh4SteamMatchState MatchState,
+	FCh4SteamSessionAvailabilityCompletion Completion)
+{
+	// Direct-IP and local automation have no online room to update. Match travel remains unchanged.
+	if (bDirectIPDebugEnabled || !HasActiveSteamSession())
+	{
+		if (Completion) Completion(true);
+		return true;
+	}
+	if (bSteamShuttingDown || !GetWorld() || GetWorld()->GetNetMode() != NM_ListenServer)
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[SteamSession] MatchState update rejected: only the listen-server host may update the room"));
+		if (Completion) Completion(false);
+		return false;
+	}
+	if (bSteamUpdateInProgress)
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[SteamSession] MatchState update rejected: another UpdateSession request is in progress"));
+		if (Completion) Completion(false);
+		return false;
+	}
+
+	FNamedOnlineSession* Session = SteamSessionInterface->GetNamedSession(NAME_GameSession);
+	if (!Session)
+	{
+		if (Completion) Completion(false);
+		return false;
+	}
+
+	FString CurrentState;
+	Session->SessionSettings.Get(Ch4SteamSessions::MatchStateKey, CurrentState);
+	const bool bLobbyTarget = MatchState == ECh4SteamMatchState::Lobby;
+	const bool bPolicyAlreadyApplied = CurrentState == GetSteamMatchStateLabel(MatchState)
+		&& Session->SessionSettings.bShouldAdvertise == bLobbyTarget
+		&& Session->SessionSettings.bAllowJoinInProgress == bLobbyTarget
+		&& Session->SessionSettings.bAllowInvites == bLobbyTarget
+		&& Session->SessionSettings.bAllowJoinViaPresence == bLobbyTarget;
+	if (bPolicyAlreadyApplied)
+	{
+		if (Completion) Completion(true);
+		return true;
+	}
+
+	FOnlineSessionSettings UpdatedSettings = Session->SessionSettings;
+	Ch4SteamSessions::ApplyMatchState(UpdatedSettings, MatchState);
+	PendingSteamMatchState = MatchState;
+	PendingSteamUpdateCompletion = MoveTemp(Completion);
+	bSteamUpdateInProgress = true;
+	SteamUpdateHandle = SteamSessionInterface->AddOnUpdateSessionCompleteDelegate_Handle(
+		FOnUpdateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleSteamUpdateComplete));
+
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[SteamSession] MatchState: %s -> %s"),
+		CurrentState.IsEmpty() ? TEXT("Unknown") : *CurrentState,
+		GetSteamMatchStateLabel(MatchState));
+	const bool bAccepted = SteamSessionInterface->UpdateSession(NAME_GameSession, UpdatedSettings, true);
+	if (!bAccepted)
+	{
+		FCh4SteamSessionAvailabilityCompletion FailedCompletion = MoveTemp(PendingSteamUpdateCompletion);
+		ClearSteamUpdateDelegate();
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[SteamSession] UpdateSession rejected the %s MatchState request"),
+			GetSteamMatchStateLabel(MatchState));
+		if (FailedCompletion) FailedCompletion(false);
+	}
+	return bAccepted;
+}
+
+void UCh4_multiGameGameInstance::HandleSteamUpdateComplete(FName SessionName, const bool bSucceeded)
+{
+	if (bSteamShuttingDown || SessionName != NAME_GameSession || !bSteamUpdateInProgress)
+	{
+		return;
+	}
+
+	const ECh4SteamMatchState CompletedState = PendingSteamMatchState;
+	FCh4SteamSessionAvailabilityCompletion Completion = MoveTemp(PendingSteamUpdateCompletion);
+	ClearSteamUpdateDelegate();
+	if (bSucceeded)
+	{
+		const bool bLobby = CompletedState == ECh4SteamMatchState::Lobby;
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[SteamSession] MatchState update complete: %s | Advertising=%s JoinInProgress=%s Invites=%s PresenceJoin=%s"),
+			GetSteamMatchStateLabel(CompletedState),
+			bLobby ? TEXT("enabled") : TEXT("disabled"),
+			bLobby ? TEXT("enabled") : TEXT("disabled"),
+			bLobby ? TEXT("enabled") : TEXT("disabled"),
+			bLobby ? TEXT("enabled") : TEXT("disabled"));
+	}
+	else
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[SteamSession] MatchState update failed: %s"),
+			GetSteamMatchStateLabel(CompletedState));
+	}
+	if (Completion) Completion(bSucceeded);
+}
+
 TArray<UCh4RoomEntryData*> UCh4_multiGameGameInstance::GetSteamRooms() const
 {
 	TArray<UCh4RoomEntryData*> Result;
 	for (UCh4RoomEntryData* Room : SteamRooms) Result.Add(Room);
 	return Result;
+}
+
+void UCh4_multiGameGameInstance::UpdateSteamSessionPlayerCount(int32 NewPlayerCount)
+{
+	if (bSteamShuttingDown || !SteamSessionInterface.IsValid() || !bSteamTravelIsHost)
+	{
+		return;
+	}
+
+	FNamedOnlineSession* Session = SteamSessionInterface->GetNamedSession(NAME_GameSession);
+	if (!Session)
+	{
+		return;
+	}
+
+	const int32 MaxPlayers = Session->SessionSettings.NumPublicConnections;
+	const int32 ClampedPlayerCount = FMath::Clamp(NewPlayerCount, 1, MaxPlayers);
+	const int32 NewOpenSlots = FMath::Clamp(MaxPlayers - ClampedPlayerCount, 0, MaxPlayers);
+
+	int32 CurrentAdvertised = 0;
+	const bool bHasAdvertised = Session->SessionSettings.Get(Ch4SteamSessions::PlayerCountKey, CurrentAdvertised);
+
+	if (!bHasAdvertised || CurrentAdvertised != ClampedPlayerCount || Session->NumOpenPublicConnections != NewOpenSlots)
+	{
+		Session->SessionSettings.Set(Ch4SteamSessions::PlayerCountKey, ClampedPlayerCount, EOnlineDataAdvertisementType::ViaOnlineService);
+		Session->NumOpenPublicConnections = NewOpenSlots;
+		SteamSessionInterface->UpdateSession(NAME_GameSession, Session->SessionSettings, true);
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[SteamSession] Updated advertised player count: %d/%d (NumOpenPublicConnections=%d)"),
+			ClampedPlayerCount, MaxPlayers, NewOpenSlots);
+	}
 }
 
 void UCh4_multiGameGameInstance::SetSteamOperation(ECh4SteamSessionOperation Operation, const FText& Message)
@@ -279,6 +441,18 @@ void UCh4_multiGameGameInstance::HandleSteamFindComplete(bool bSucceeded)
 		CompleteSteamOperation(false, LOCTEXT("FindFailed", "Steam room search failed. Please try again."));
 		return;
 	}
+	const int32 RawSessionCount = SteamSearch->SearchResults.Num();
+	int32 PlayingSessionCount = 0;
+	for (const FOnlineSessionSearchResult& Result : SteamSearch->SearchResults)
+	{
+		FString MatchState;
+		if (Result.IsValid()
+			&& Result.Session.SessionSettings.Get(Ch4SteamSessions::MatchStateKey, MatchState)
+			&& MatchState == Ch4SteamSessions::PlayingMatchState)
+		{
+			++PlayingSessionCount;
+		}
+	}
 	// Keep the existing UI's list index and SearchResultIndex identical after filtering.
 	// This also prevents old index-based Blueprint bindings from selecting a different room.
 	SteamSearch->SearchResults.RemoveAll([](const FOnlineSessionSearchResult& Result)
@@ -291,12 +465,22 @@ void UCh4_multiGameGameInstance::HandleSteamFindComplete(bool bSucceeded)
 		UCh4RoomEntryData* Entry = NewObject<UCh4RoomEntryData>(this);
 		Entry->ServerName = Result.Session.OwningUserName.IsEmpty() ? TEXT("Steam Host") : Result.Session.OwningUserName;
 		Entry->MaxPlayers = Result.Session.SessionSettings.NumPublicConnections;
-		Entry->CurrentPlayers = FMath::Clamp(Entry->MaxPlayers - Result.Session.NumOpenPublicConnections, 0, Entry->MaxPlayers);
+		int32 AdvertisedPlayers = 0;
+		if (Result.Session.SessionSettings.Get(Ch4SteamSessions::PlayerCountKey, AdvertisedPlayers))
+		{
+			Entry->CurrentPlayers = FMath::Clamp(AdvertisedPlayers, 1, Entry->MaxPlayers);
+		}
+		else
+		{
+			Entry->CurrentPlayers = FMath::Clamp(Entry->MaxPlayers - Result.Session.NumOpenPublicConnections, 0, Entry->MaxPlayers);
+		}
 		Entry->PingInMs = Result.PingInMs;
 		Entry->SearchResultIndex = Index;
 		SteamRooms.Add(Entry);
 	}
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[SteamSession] Found %d compatible sessions"), SteamRooms.Num());
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[SteamSession] Found %d raw sessions | Compatible Lobby sessions: %d | Filtered Playing sessions: %d"),
+		RawSessionCount, SteamRooms.Num(), PlayingSessionCount);
 	CompleteSteamOperation(true, FText::GetEmpty());
 }
 
@@ -314,11 +498,24 @@ bool UCh4_multiGameGameInstance::JoinSteamGame(UCh4RoomEntryData* Room)
 bool UCh4_multiGameGameInstance::BeginSteamJoin(const FOnlineSessionSearchResult& Result)
 {
 	if (HasActiveSteamSession()) return RejectSteamRequest(TEXT("Leave the current Steam session before joining."));
-	if (!Result.IsValid() || !Ch4SteamSessions::IsCompatible(Result.Session.SessionSettings))
+	if (!Result.IsValid())
+	{
+		return RejectSteamRequest(TEXT("This Steam room is no longer available."));
+	}
+	if (!Ch4SteamSessions::IsLobbySession(Result.Session.SessionSettings))
+	{
+		return RejectSteamRequest(TEXT("Game already started. Select a Lobby room from a new search."));
+	}
+	if (!Ch4SteamSessions::IsCompatible(Result.Session.SessionSettings))
 	{
 		return RejectSteamRequest(TEXT("This Steam room belongs to a different game or incompatible build/protocol."));
 	}
-	if (Result.Session.NumOpenPublicConnections <= 0) return RejectSteamRequest(TEXT("This Steam room is full."));
+	int32 AdvertisedPlayers = 0;
+	const bool bHasAdvertised = Result.Session.SessionSettings.Get(Ch4SteamSessions::PlayerCountKey, AdvertisedPlayers);
+	const int32 EffectiveOpenSlots = bHasAdvertised
+		? FMath::Max(Result.Session.SessionSettings.NumPublicConnections - AdvertisedPlayers, 0)
+		: Result.Session.NumOpenPublicConnections;
+	if (EffectiveOpenSlots <= 0) return RejectSteamRequest(TEXT("This Steam room is full."));
 	SetSteamOperation(ECh4SteamSessionOperation::Joining, LOCTEXT("Joining", "Joining Steam room..."));
 	SteamJoinHandle = SteamSessionInterface->AddOnJoinSessionCompleteDelegate_Handle(
 		FOnJoinSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleSteamJoinComplete));
@@ -392,6 +589,7 @@ bool UCh4_multiGameGameInstance::DestroySteamSession()
 
 bool UCh4_multiGameGameInstance::BeginSteamDestroy()
 {
+	ClearSteamUpdateDelegate();
 	ClearSteamOperationDelegates();
 	SetSteamOperation(ECh4SteamSessionOperation::Destroying, LOCTEXT("Destroying", "Closing Steam session..."));
 	if (!HasActiveSteamSession())
