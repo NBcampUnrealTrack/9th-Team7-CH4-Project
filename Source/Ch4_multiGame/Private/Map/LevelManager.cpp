@@ -59,7 +59,7 @@ void ALevelManager::OnRep_MiddleZoneOrder()
         return;
     }
 
-    // 클라이언트는 받은 배치 정보로 도로 위치만 정렬 (PCG 생성은 서버 복제에 위임)
+    // 클라이언트는 받은 배치 정보로 도로 및 로컬 액터 위치 정렬
     ArrangePlacedZones();
 }
 
@@ -139,6 +139,10 @@ bool ALevelManager::IsLevelManagerManagedActor(const AActor* Actor) const
 void ALevelManager::MoveTaggedActorsWithRoad(ARoadBase* Road, const FTransform& OriginalRoadTransform, const FTransform& FinalRoadTransform)
 {
     if (!Road) return;
+
+    // 멀티플레이어 환경 안전성 확보:
+    // 태그된 외부 액터들의 이동은 서버에서만 처리하며, 클라이언트는 서버로부터 Transform 복제를 받습니다.
+    if (!HasAuthority()) return;
 
     const TArray<FName>& RoadTags = Road->Tags;
     if (RoadTags.Num() == 0) return;
