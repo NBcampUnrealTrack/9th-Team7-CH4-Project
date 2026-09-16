@@ -5,7 +5,6 @@
 #include "Ch4_multiGame.h"
 #include "AssetRegistry/AssetData.h"
 #include "EngineUtils.h"
-#include "Engine/Engine.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "GameFramework/GameSession.h"
@@ -130,7 +129,6 @@ void ACh4_multiGameLobbyGameMode::InitGame(
 			*GetNameSafe(NetDriver),
 			NetDriver ? *NetDriver->GetClass()->GetPathName() : TEXT("Unavailable"));
 	}
-	ShowServerDebugStatus(StartupMessage, bIsListenServer ? FColor::Green : FColor::Red, 30.0f);
 }
 
 void ACh4_multiGameLobbyGameMode::InitGameState()
@@ -254,14 +252,6 @@ void ACh4_multiGameLobbyGameMode::PostLogin(APlayerController* NewPlayer)
 		*PawnLabel,
 		NewPlayer->GetPawn() ? TEXT("YES") : TEXT("NO"));
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Players: %d / %d"), GetNumPlayers(), MaxLobbyPlayers);
-	ShowServerDebugStatus(
-		FString::Printf(
-			TEXT("PLAYER JOINED\nPlayers: %d / %d\nPawn: %s"),
-			GetNumPlayers(),
-			MaxLobbyPlayers,
-			NewPlayer->GetPawn() ? TEXT("OK") : TEXT("MISSING")),
-		NewPlayer->GetPawn() ? FColor::Green : FColor::Red,
-		12.0f);
 }
 
 void ACh4_multiGameLobbyGameMode::Logout(AController* Exiting)
@@ -297,10 +287,6 @@ void ACh4_multiGameLobbyGameMode::Logout(AController* Exiting)
 				: nullptr));
 	}
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Players: %d / %d"), RemainingPlayerCount, MaxLobbyPlayers);
-	ShowServerDebugStatus(
-		FString::Printf(TEXT("PLAYER LEFT\nPlayers: %d / %d"), RemainingPlayerCount, MaxLobbyPlayers),
-		FColor::Yellow,
-		10.0f);
 
 	// PlayerArray cleanup finishes after Logout. Recompute both replicated counts on
 	// the next event-loop turn before evaluating the existing all-Ready travel rule.
@@ -407,10 +393,6 @@ void ACh4_multiGameLobbyGameMode::CheckAllPlayersReady()
 		ReadyPlayers,
 		TotalPlayers);
 	const bool bHasMinimumPlayers = TotalPlayers >= MinPlayersToStart;
-	ShowServerDebugStatus(
-		FString::Printf(TEXT("READY PLAYERS: %d / %d"), ReadyPlayers, TotalPlayers),
-		bHasMinimumPlayers && ReadyPlayers == TotalPlayers ? FColor::Green : FColor::Cyan,
-		8.0f);
 
 	if (!bHasMinimumPlayers)
 	{
@@ -657,7 +639,6 @@ void ACh4_multiGameLobbyGameMode::StartGameTravel()
 	{
 		UE_LOG(LogCh4_multiGame, Error,
 			TEXT("[Lobby] Travel aborted: GameplayMaps contains no valid map packages"));
-		ShowServerDebugStatus(TEXT("TRAVEL FAILED\nNo valid gameplay maps"), FColor::Red, 15.0f);
 		return;
 	}
 
@@ -670,10 +651,6 @@ void ACh4_multiGameLobbyGameMode::StartGameTravel()
 	bTravelStarted = true;
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Selected Gameplay Map: %s"), *MapPackage);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Traveling to %s"), *MapPackage);
-	ShowServerDebugStatus(
-		FString::Printf(TEXT("ALL PLAYERS READY\nTraveling to %s"), *MapPackage),
-		FColor::Green,
-		10.0f);
 
 	// Match travel keeps the existing NetDriver through seamless travel. Only the
 	// initial Steam room creation uses ?listen; absolute travel drops lobby options.
@@ -710,7 +687,6 @@ void ACh4_multiGameLobbyGameMode::HandleGameplaySessionAvailabilityUpdated(const
 		UE_LOG(LogCh4_multiGame, Error,
 			TEXT("[Lobby] Travel aborted: Steam room could not be hidden before Gameplay travel"));
 		ResetTravelAfterFailure();
-		ShowServerDebugStatus(TEXT("TRAVEL FAILED\nSteam room availability update failed"), FColor::Red, 15.0f);
 		if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
 		{
 			// UpdateSession may already have copied the requested flags locally even
@@ -754,7 +730,6 @@ void ACh4_multiGameLobbyGameMode::PerformGameTravel()
 		UE_LOG(LogCh4_multiGame, Error,
 			TEXT("[Lobby] ServerTravel failed for %s"),
 			*TravelURL);
-		ShowServerDebugStatus(TEXT("SERVER TRAVEL FAILED\nCheck Output Log"), FColor::Red, 15.0f);
 		if (UCh4_multiGameGameInstance* GI = GetGameInstance<UCh4_multiGameGameInstance>())
 		{
 			GI->RestoreSteamSessionLobbyAvailability();
@@ -769,18 +744,6 @@ void ACh4_multiGameLobbyGameMode::ResetTravelAfterFailure()
 	PendingTravelDestination.Reset();
 }
 
-void ACh4_multiGameLobbyGameMode::ShowServerDebugStatus(
-	const FString& EventMessage,
-	const FColor& Color,
-	const float Duration) const
-{
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, Duration, Color, FString::Printf(
-			TEXT("[LOBBY SERVER]\n%s"),
-			*EventMessage));
-	}
-}
 
 int32 ACh4_multiGameLobbyGameMode::GetListenPort() const
 {

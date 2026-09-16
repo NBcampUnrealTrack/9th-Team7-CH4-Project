@@ -77,7 +77,7 @@ void UCh4_multiGameNetworkDebugSubsystem::HandleNetworkFailure(
 		*GetNameSafe(World),
 		*GetNameSafe(NetDriver));
 	if (SessionGI) SessionGI->HandleSteamConnectionFailure(World, FailureName + TEXT(": ") + ErrorString);
-	ShowFailureMessage(TEXT("NETWORK CONNECTION FAILED"), Details);
+	LogFailureMessage(TEXT("NETWORK CONNECTION FAILED"), Details);
 }
 
 void UCh4_multiGameNetworkDebugSubsystem::HandleTravelFailure(
@@ -107,18 +107,12 @@ void UCh4_multiGameNetworkDebugSubsystem::HandleTravelFailure(
 	{
 		SessionGI->HandleSteamConnectionFailure(World, FailureName + TEXT(": ") + ErrorString);
 	}
-	ShowFailureMessage(TEXT("MAP TRAVEL FAILED"), Details);
+	LogFailureMessage(TEXT("MAP TRAVEL FAILED"), Details);
 }
 
-void UCh4_multiGameNetworkDebugSubsystem::ShowFailureMessage(
+void UCh4_multiGameNetworkDebugSubsystem::LogFailureMessage(
 	const FString& Title,
 	const FString& Details) const
 {
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 20.0f, FColor::Red, FString::Printf(
-			TEXT("[%s]\n%s\nSee Output Log: [NetworkDebug]"),
-			*Title,
-			*Details));
-	}
+	UE_LOG(LogCh4_multiGame, Error, TEXT("[NetworkDebug] %s | %s"), *Title, *Details);
 }

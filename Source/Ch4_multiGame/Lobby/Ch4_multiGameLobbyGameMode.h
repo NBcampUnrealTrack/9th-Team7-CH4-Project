@@ -89,7 +89,6 @@ private:
 	void StartGameTravel();
 	void HandleGameplaySessionAvailabilityUpdated(bool bSucceeded);
 	void PerformGameTravel();
-	void ShowServerDebugStatus(const FString& EventMessage, const FColor& Color, float Duration) const;
 	int32 GetListenPort() const;
 	FString GetPlayerLogLabel(const AController* Controller) const;
 
