@@ -1,5 +1,6 @@
 #include "UI/MainMenu/Ch4MainMenuViewModel.h"
 
+#include "Ch4_multiGame.h"
 #include "Engine/World.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Player/Ch4_multiGameGameInstance.h"
@@ -106,7 +107,21 @@ void UCh4MainMenuViewModel::ShowMainMenu()
 
 void UCh4MainMenuViewModel::HostGame()
 {
-	if (UCh4_multiGameGameInstance* GI = ResolveSteamGameInstance()) GI->HostSteamGame();
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HostDebug] Ch4MainMenuViewModel::HostGame invoked: ViewModel=%s World=%s CanInteract=%d"),
+		*GetName(), *GetNameSafe(GetWorld()), !bIsLoading);
+	if (UCh4_multiGameGameInstance* GI = ResolveSteamGameInstance())
+	{
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] Resolved GameInstanceClass=%s"),
+			*GI->GetClass()->GetPathName());
+		const bool bAccepted = GI->HostSteamGame();
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] HostSteamGame returned=%d Status=%s"),
+			bAccepted, *GI->GetSteamSessionStatus().ToString());
+	}
+	else
+	{
+		UE_LOG(LogCh4_multiGame, Warning, TEXT("[HostDebug] Host stopped: ViewModel could not resolve GameInstance"));
+	}
 }
 
 void UCh4MainMenuViewModel::FindRooms()

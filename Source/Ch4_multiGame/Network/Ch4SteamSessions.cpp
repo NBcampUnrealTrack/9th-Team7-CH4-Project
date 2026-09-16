@@ -42,6 +42,10 @@ void UCh4_multiGameGameInstance::LogMatchTravel(const UWorld* World, const FStri
 
 void UCh4_multiGameGameInstance::InitializeSteamSessions()
 {
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] GameInstanceClass=%s Shipping=%d DirectIPFlag=%d NoSteamFlag=%d"),
+		*GetClass()->GetPathName(), UE_BUILD_SHIPPING,
+		FParse::Param(FCommandLine::Get(), TEXT("Ch4DirectIP")),
+		FParse::Param(FCommandLine::Get(), TEXT("nosteam")));
 	SteamPostLoadHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &ThisClass::HandleSteamPostLoadMap);
 #if !UE_BUILD_SHIPPING
 	// An explicit offline/debug launch selects one IP driver for the entire process.
@@ -64,6 +68,7 @@ void UCh4_multiGameGameInstance::InitializeSteamSessions()
 #endif
 	IOnlineSubsystem* OSS = Online::GetSubsystem(GetWorld());
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[SteamSession] OSS initialized: %s"), OSS ? *OSS->GetSubsystemName().ToString() : TEXT("Unavailable"));
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] OSS AppId=%s"), OSS ? *OSS->GetAppId() : TEXT("Unavailable"));
 	if (OSS && OSS->GetSubsystemName() == FName(TEXT("STEAM")))
 	{
 		SteamSessionInterface = OSS->GetSessionInterface();
@@ -310,18 +315,27 @@ bool UCh4_multiGameGameInstance::RejectSteamRequest(const FString& Message)
 
 bool UCh4_multiGameGameInstance::EnsureSteamReady()
 {
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HostDebug] EnsureSteamReady World=%s LocalPlayer=%s ShuttingDown=%d DirectIP=%d"),
+		*GetNameSafe(GetWorld()), *GetNameSafe(GetFirstGamePlayer()), bSteamShuttingDown, bDirectIPDebugEnabled);
 	if (bSteamShuttingDown || bDirectIPDebugEnabled || !GetWorld()
 		|| GetWorld()->WorldType == EWorldType::PIE || !GetFirstGamePlayer())
 	{
 		return RejectSteamRequest(TEXT("Steam requires a local player in a standalone game process. Direct IP debug mode and PIE are not supported."));
 	}
 	IOnlineSubsystem* OSS = Online::GetSubsystem(GetWorld());
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] EnsureSteamReady OSS=%s AppId=%s"),
+		OSS ? *OSS->GetSubsystemName().ToString() : TEXT("Unavailable"),
+		OSS ? *OSS->GetAppId() : TEXT("Unavailable"));
 	if (!OSS || OSS->GetSubsystemName() != FName(TEXT("STEAM")))
 	{
-		return RejectSteamRequest(TEXT("Steam OSS is unavailable. Start Steam and sign in, then restart the game. No IP fallback was used."));
+		return RejectSteamRequest(TEXT("Steam OSS is unavailable. Start Steam and sign in, then restart the game. For a local Shipping test outside Steam, provide the test App ID in steam_appid.txt beside the actual Binaries/Win64 executable. No IP fallback was used."));
 	}
 	const IOnlineIdentityPtr Identity = OSS->GetIdentityInterface();
 	const FUniqueNetIdPtr LocalId = Identity.IsValid() ? Identity->GetUniquePlayerId(0) : nullptr;
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] IdentityValid=%d LoggedIn=%d UniqueNetIdValid=%d"),
+		Identity.IsValid(), Identity.IsValid() && Identity->GetLoginStatus(0) == ELoginStatus::LoggedIn,
+		LocalId.IsValid() && LocalId->IsValid());
 	if (!Identity.IsValid() || Identity->GetLoginStatus(0) != ELoginStatus::LoggedIn || !LocalId.IsValid() || !LocalId->IsValid())
 	{
 		return RejectSteamRequest(TEXT("The local Steam user is not logged in."));
@@ -335,10 +349,16 @@ bool UCh4_multiGameGameInstance::EnsureSteamReady()
 				FOnSessionUserInviteAcceptedDelegate::CreateUObject(this, &ThisClass::HandleSteamInviteAccepted));
 		}
 	}
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] SessionInterfaceValid=%d NamedSession=%d SessionState=%s"),
+		SteamSessionInterface.IsValid(), HasActiveSteamSession(),
+		SteamSessionInterface.IsValid() ? EOnlineSessionState::ToString(SteamSessionInterface->GetSessionState(NAME_GameSession)) : TEXT("Unavailable"));
 	if (!SteamSessionInterface.IsValid()) return RejectSteamRequest(TEXT("Steam SessionInterface is unavailable."));
 	const FNetDriverDefinition* Definition = GEngine ? GEngine->NetDriverDefinitions.FindByPredicate(
 		[](const FNetDriverDefinition& Item) { return Item.DefName == NAME_GameNetDriver; }) : nullptr;
 	UClass* DriverClass = LoadClass<UNetDriver>(nullptr, Ch4SteamSessions::NetDriverPath);
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] GameNetDriverDefinition=%s DriverClassLoaded=%d DriverAvailable=%d"),
+		Definition ? *Definition->DriverClassName.ToString() : TEXT("None"), DriverClass != nullptr,
+		DriverClass && DriverClass->GetDefaultObject<UNetDriver>()->IsAvailable());
 	if (!Definition || Definition->DriverClassName != FName(Ch4SteamSessions::NetDriverPath)
 		|| !DriverClass || !DriverClass->GetDefaultObject<UNetDriver>()->IsAvailable())
 	{
@@ -359,6 +379,9 @@ bool UCh4_multiGameGameInstance::CheckSteamMenuRequest()
 
 bool UCh4_multiGameGameInstance::HostSteamGame()
 {
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] HostSteamGame invoked: World=%s NetMode=%s Busy=%d NamedSession=%d"),
+		*GetNameSafe(GetWorld()), GetWorld() ? *ToString(GetWorld()->GetNetMode()) : TEXT("None"),
+		IsSteamSessionBusy(), HasActiveSteamSession());
 	if (!CheckSteamMenuRequest()) return false;
 	// Reuse the existing Gameplay GameMode's Lobby soft reference; do not duplicate its asset path.
 	const FString GameModePath = UGameMapsSettings::GetGlobalDefaultGameMode();
@@ -366,6 +389,8 @@ bool UCh4_multiGameGameInstance::HostSteamGame()
 	const ACh4_multiGameGameMode* Defaults = GameModeClass ? GameModeClass->GetDefaultObject<ACh4_multiGameGameMode>() : nullptr;
 	if (!Defaults) return RejectSteamRequest(TEXT("The configured Gameplay GameMode must provide the existing LobbyMap reference."));
 	SteamLobbyPackage = Defaults->LobbyMap.ToSoftObjectPath().GetLongPackageName();
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] Configured GameMode=%s LobbyPackage=%s CookedMapExists=%d"),
+		*GameModePath, *SteamLobbyPackage, FPackageName::DoesPackageExist(SteamLobbyPackage));
 	if (!FPackageName::IsValidLongPackageName(SteamLobbyPackage) || !FPackageName::DoesPackageExist(SteamLobbyPackage))
 	{
 		return RejectSteamRequest(TEXT("The Gameplay GameMode LobbyMap is missing or was not cooked."));
@@ -387,7 +412,19 @@ bool UCh4_multiGameGameInstance::BeginSteamCreate()
 		FOnCreateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleSteamCreateComplete));
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[SteamSession] Creating session: four-player presence lobby"));
 	// UE 5.8 Steam implements the int32 overload using the process's one local Steam user.
-	const bool bAccepted = SteamSessionInterface->CreateSession(0, NAME_GameSession, Ch4SteamSessions::BuildSettings());
+	const FOnlineSessionSettings Settings = Ch4SteamSessions::BuildSettings();
+	FString GameId, MatchState;
+	int32 Protocol = 0;
+	Settings.Get(Ch4SteamSessions::GameIdKey, GameId);
+	Settings.Get(Ch4SteamSessions::ProtocolKey, Protocol);
+	Settings.Get(Ch4SteamSessions::MatchStateKey, MatchState);
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[HostDebug] CreateSession requested: Public=%d LAN=%d Advertise=%d Presence=%d Invites=%d PresenceJoin=%d JoinInProgress=%d Lobbies=%d CH4_GAME_ID=%s CH4_PROTOCOL=%d CH4_MATCH_STATE=%s"),
+		Settings.NumPublicConnections, Settings.bIsLANMatch, Settings.bShouldAdvertise, Settings.bUsesPresence,
+		Settings.bAllowInvites, Settings.bAllowJoinViaPresence, Settings.bAllowJoinInProgress,
+		Settings.bUseLobbiesIfAvailable, *GameId, Protocol, *MatchState);
+	const bool bAccepted = SteamSessionInterface->CreateSession(0, NAME_GameSession, Settings);
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] CreateSession request accepted=%d"), bAccepted);
 	if (!bAccepted && SteamOperation == ECh4SteamSessionOperation::Creating)
 	{
 		FailSteamOperation(LOCTEXT("CreateStartFailed", "Steam could not start room creation."));
@@ -397,6 +434,8 @@ bool UCh4_multiGameGameInstance::BeginSteamCreate()
 
 void UCh4_multiGameGameInstance::HandleSteamCreateComplete(FName SessionName, bool bSucceeded)
 {
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] HandleSteamCreateComplete Session=%s Success=%d ShuttingDown=%d Operation=%d"),
+		*SessionName.ToString(), bSucceeded, bSteamShuttingDown, static_cast<int32>(SteamOperation));
 	if (bSteamShuttingDown || SessionName != NAME_GameSession || SteamOperation != ECh4SteamSessionOperation::Creating) return;
 	ClearSteamOperationDelegates();
 	if (bSteamLeaveRequested) { BeginSteamDestroy(); return; }
@@ -409,6 +448,7 @@ void UCh4_multiGameGameInstance::HandleSteamCreateComplete(FName SessionName, bo
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[SteamSession] Create succeeded; opening configured Lobby as Listen Server"));
 	bSteamTravelIsHost = true;
 	SetSteamOperation(ECh4SteamSessionOperation::Travelling, LOCTEXT("OpeningLobby", "Opening Steam room..."));
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[HostDebug] OpenLevel URL=%s?listen"), *SteamLobbyPackage);
 	UGameplayStatics::OpenLevel(this, FName(SteamLobbyPackage), true, TEXT("listen"));
 }
 
@@ -654,6 +694,7 @@ void UCh4_multiGameGameInstance::TravelToSteamMainMenu()
 void UCh4_multiGameGameInstance::HandleSteamPostLoadMap(UWorld* LoadedWorld)
 {
 	if (bSteamShuttingDown || !LoadedWorld || LoadedWorld->GetGameInstance() != this) return;
+	LogMatchTravel(LoadedWorld, LoadedWorld->URL.ToString(), false);
 	if (SteamOperation == ECh4SteamSessionOperation::Travelling)
 	{
 		if (bSteamLeaveRequested)
