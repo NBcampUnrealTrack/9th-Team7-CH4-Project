@@ -30,6 +30,7 @@ namespace Ch4SteamSessions
 	inline const FName GameIdKey(TEXT("CH4_GAME_ID"));
 	inline const FName ProtocolKey(TEXT("CH4_PROTOCOL"));
 	inline const FName MatchStateKey(TEXT("CH4_MATCH_STATE"));
+	inline const FName PlayerCountKey(TEXT("CH4_PLAYER_COUNT"));
 	inline const FString GameId(TEXT("Ch4MultiGame"));
 	inline const FString LobbyMatchState(TEXT("Lobby"));
 	inline const FString PlayingMatchState(TEXT("Playing"));

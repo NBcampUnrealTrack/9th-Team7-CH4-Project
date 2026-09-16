@@ -28,6 +28,7 @@ FOnlineSessionSettings Ch4SteamSessions::BuildSettings(const ECh4SteamMatchState
 	Settings.Set(GameIdKey, GameId, EOnlineDataAdvertisementType::ViaOnlineService);
 	Settings.Set(ProtocolKey, ProtocolVersion, EOnlineDataAdvertisementType::ViaOnlineService);
 	ApplyMatchState(Settings, MatchState);
+	Settings.Set(PlayerCountKey, 1, EOnlineDataAdvertisementType::ViaOnlineService);
 	// Preserve UE's BuildUniqueId in addition to our explicit application protocol version.
 	return Settings;
 }

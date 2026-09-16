@@ -8,6 +8,7 @@
 #include "Online/OnlineSessionNames.h"
 #include "Player/Ch4_multiGameGameInstance.h"
 #include "UI/MainMenu/Ch4MainMenuTypes.h"
+#include "UI/MainMenu/Ch4MainMenuViewModel.h"
 
 namespace Ch4SteamTests
 {
@@ -54,6 +55,9 @@ bool FCh4SteamSessionSettingsTest::RunTest(const FString& Parameters)
 	int32 Protocol = 0;
 	TestTrue(TEXT("Game ID is filtered before the Steam result cap"), Search->QuerySettings.Get(Ch4SteamSessions::GameIdKey, GameId) && GameId == Ch4SteamSessions::GameId);
 	TestTrue(TEXT("Protocol is filtered at the backend too"), Search->QuerySettings.Get(Ch4SteamSessions::ProtocolKey, Protocol) && Protocol == Ch4SteamSessions::ProtocolVersion);
+	int32 AdvertisedPlayers = 0;
+	TestTrue(TEXT("Initial player count is advertised as 1"),
+		Settings.Get(Ch4SteamSessions::PlayerCountKey, AdvertisedPlayers) && AdvertisedPlayers == 1);
 	MatchState.Reset();
 	TestTrue(TEXT("Backend search only requests Lobby rooms"),
 		Search->QuerySettings.Get(Ch4SteamSessions::MatchStateKey, MatchState)
@@ -147,6 +151,11 @@ bool FCh4SteamSessionGuardsTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Second visible room keeps index one"), GI->SteamRooms[1]->SearchResultIndex, 1);
 		TestEqual(TEXT("Displayed player count includes the host"), GI->SteamRooms[0]->CurrentPlayers, 1);
 	}
+	RoomResult.Session.SessionSettings.Set(Ch4SteamSessions::PlayerCountKey, 3, EOnlineDataAdvertisementType::ViaOnlineService);
+	GI->SteamSearch->SearchResults = {RoomResult};
+	GI->SteamOperation = ECh4SteamSessionOperation::Finding;
+	GI->HandleSteamFindComplete(true);
+	TestEqual(TEXT("Advertised player count overrides fallback slot calculation"), GI->SteamRooms[0]->CurrentPlayers, 3);
 	GI->SteamOperation = ECh4SteamSessionOperation::Finding;
 	TestFalse(TEXT("Create during Find is rejected"), GI->HostSteamGame());
 	TestFalse(TEXT("Duplicate Find is rejected"), GI->FindSteamGames());
@@ -206,6 +215,66 @@ bool FCh4SteamDriverConfigTest::RunTest(const FString& Parameters)
 	int32 AppId = 0;
 	TestTrue(TEXT("Steam is the configured production OSS"), ProjectConfig.GetString(TEXT("OnlineSubsystem"), TEXT("DefaultPlatformService"), Service) && Service == TEXT("Steam"));
 	TestTrue(TEXT("Development App ID is 480"), ProjectConfig.GetInt(TEXT("OnlineSubsystemSteam"), TEXT("SteamDevAppId"), AppId) && AppId == 480);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCh4MainMenuSelectionTest, "Ch4_multiGame.Steam.MainMenuSelection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCh4MainMenuSelectionTest::RunTest(const FString& Parameters)
+{
+	UCh4MainMenuViewModel* VM = NewObject<UCh4MainMenuViewModel>();
+	TestNotNull(TEXT("ViewModel created"), VM);
+	TestEqual(TEXT("Initial room index is INDEX_NONE"), VM->SelectedRoomIndex, INDEX_NONE);
+	TestNull(TEXT("Initial selected room entry is null"), VM->SelectedRoomEntry.Get());
+	TestEqual(TEXT("Initial room info text is NoRoomSelected"),
+		VM->SelectedRoomInfoText.ToString(),
+		NSLOCTEXT("Ch4MainMenu", "NoRoomSelected", "선택된 방이 없습니다.").ToString());
+
+	UCh4RoomEntryData* Room1 = NewObject<UCh4RoomEntryData>();
+	Room1->ServerName = TEXT("Alpha");
+	Room1->CurrentPlayers = 2;
+	Room1->MaxPlayers = 4;
+	Room1->SearchResultIndex = 0;
+
+	UCh4RoomEntryData* Room2 = NewObject<UCh4RoomEntryData>();
+	Room2->ServerName = TEXT("Bravo");
+	Room2->CurrentPlayers = 4;
+	Room2->MaxPlayers = 4;
+	Room2->SearchResultIndex = 1;
+
+	VM->RoomList.Add(Room1);
+	VM->RoomList.Add(Room2);
+
+	// Select Room1
+	VM->SelectRoomEntry(Room1);
+	TestEqual(TEXT("SelectedRoomIndex is 0"), VM->SelectedRoomIndex, 0);
+	TestEqual(TEXT("SelectedRoomEntry is Room1"), VM->SelectedRoomEntry.Get(), Room1);
+	TestTrue(TEXT("Room1 is marked selected"), Room1->bIsSelected);
+	TestFalse(TEXT("Room2 is not selected"), Room2->bIsSelected);
+	TestTrue(TEXT("Can join Room1 (not full)"), VM->bCanJoinRoom);
+	TestTrue(TEXT("Selected text contains Alpha"), VM->SelectedRoomInfoText.ToString().Contains(TEXT("Alpha")));
+
+	// Select Room2 (Full)
+	VM->SelectRoomEntry(Room2);
+	TestEqual(TEXT("SelectedRoomIndex is 1"), VM->SelectedRoomIndex, 1);
+	TestEqual(TEXT("SelectedRoomEntry is Room2"), VM->SelectedRoomEntry.Get(), Room2);
+	TestFalse(TEXT("Room1 unselected"), Room1->bIsSelected);
+	TestTrue(TEXT("Room2 selected"), Room2->bIsSelected);
+	TestFalse(TEXT("Cannot join full room"), VM->bCanJoinRoom);
+	TestTrue(TEXT("Selected text contains Bravo"), VM->SelectedRoomInfoText.ToString().Contains(TEXT("Bravo")));
+
+	// Deselect (pass nullptr)
+	VM->SelectRoomEntry(nullptr);
+	TestEqual(TEXT("SelectedRoomIndex reset to INDEX_NONE"), VM->SelectedRoomIndex, INDEX_NONE);
+	TestNull(TEXT("SelectedRoomEntry reset to null"), VM->SelectedRoomEntry.Get());
+	TestFalse(TEXT("Room1 unselected"), Room1->bIsSelected);
+	TestFalse(TEXT("Room2 unselected"), Room2->bIsSelected);
+	TestFalse(TEXT("Cannot join room"), VM->bCanJoinRoom);
+	TestEqual(TEXT("Selected text reset to NoRoomSelected"),
+		VM->SelectedRoomInfoText.ToString(),
+		NSLOCTEXT("Ch4MainMenu", "NoRoomSelected", "선택된 방이 없습니다.").ToString());
+
 	return true;
 }
 

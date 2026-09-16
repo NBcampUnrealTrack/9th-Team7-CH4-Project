@@ -38,6 +38,10 @@ public:
 	// SearchResults 배열 내 인덱스
 	UPROPERTY(BlueprintReadOnly, Category = "Room")
 	int32 SearchResultIndex = 0;
+
+	// 방 목록에서 현재 선택 여부
+	UPROPERTY(BlueprintReadWrite, Category = "Room")
+	bool bIsSelected = false;
 	
 	// UI에 표시할 포맷 텍스트 (예 : "HostName (1/4) - 20ms")
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Room")

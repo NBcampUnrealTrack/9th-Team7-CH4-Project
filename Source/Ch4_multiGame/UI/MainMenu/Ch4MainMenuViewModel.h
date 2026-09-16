@@ -16,6 +16,7 @@ class UCh4MainMenuViewModel : public UMVVMViewModelBase
 	GENERATED_BODY()
 	
 public:
+	UCh4MainMenuViewModel();
 	virtual UWorld* GetWorld() const override;
 	virtual void BeginDestroy() override;
 
@@ -62,8 +63,16 @@ public:
 	TArray<TObjectPtr<UCh4RoomEntryData>> RoomList;
 	
 	// 현재 선택된 방의 인덱스 (-1이면 미선택)
-	UPROPERTY(BlueprintReadOnly, Category = "Menu|Session")
+	UPROPERTY(FieldNotify, Getter, BlueprintReadOnly, Category = "Menu|Session")
 	int32 SelectedRoomIndex = -1;
+
+	// 현재 선택된 방 데이터 (nullptr이면 미선택)
+	UPROPERTY(FieldNotify, Getter, BlueprintReadOnly, Category = "Menu|Session")
+	TObjectPtr<UCh4RoomEntryData> SelectedRoomEntry;
+
+	// 현재 선택된 방 정보 텍스트 (예: "선택된 방: RoomName (1/4)" 또는 "선택된 방이 없습니다.")
+	UPROPERTY(FieldNotify, Getter, BlueprintReadOnly, Category = "Menu|Session")
+	FText SelectedRoomInfoText;
 	
 	// 버튼이 호출할 함수들
 	// [게임 시작] 버튼 -> RoomSelection 패널로 전환
@@ -112,6 +121,9 @@ private:
 	bool GetbCanJoinRoom() const { return bCanJoinRoom; }
 	
 	TArray<TObjectPtr<UCh4RoomEntryData>> GetRoomList() const { return RoomList; }
+	int32 GetSelectedRoomIndex() const { return SelectedRoomIndex; }
+	UCh4RoomEntryData* GetSelectedRoomEntry() const { return SelectedRoomEntry.Get(); }
+	FText GetSelectedRoomInfoText() const { return SelectedRoomInfoText; }
 	
 	ESlateVisibility GetMainPanelVisibility() const { return CurrentPanel == EMenuPanel::Main ? ESlateVisibility::Visible : ESlateVisibility::Collapsed; }
 	ESlateVisibility GetRoomSelectionVisibility() const { return CurrentPanel == EMenuPanel::RoomSelection ? ESlateVisibility::Visible : ESlateVisibility::Collapsed; }
