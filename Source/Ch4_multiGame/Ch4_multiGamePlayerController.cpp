@@ -5,7 +5,6 @@
 #include "Ch4_multiGame.h"
 #include "Blueprint/UserWidget.h"
 #include "EnhancedInputSubsystems.h"
-#include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "InputMappingContext.h"
 #include "Widgets/Input/SVirtualJoystick.h"
@@ -87,14 +86,6 @@ namespace
 			ParsedOctets[3]);
 		return true;
 	}
-
-	void ShowNetworkCommandMessage(const FString& Message, const FColor& Color)
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 12.0f, Color, Message);
-		}
-	}
 }
 
 ACh4_multiGamePlayerController::ACh4_multiGamePlayerController()
@@ -137,7 +128,6 @@ void ACh4_multiGamePlayerController::JoinHamachi(FString HostIPv4)
 	{
 		const FString Message = TEXT("[NetworkDebug] Direct IP is disabled while using Steam. For legacy testing restart both games with -Ch4DirectIP -nosteam and DefaultPlatformService=Null.");
 		UE_LOG(LogCh4_multiGame, Warning, TEXT("%s"), *Message);
-		ShowNetworkCommandMessage(Message, FColor::Red);
 		return;
 	}
 
@@ -148,8 +138,7 @@ void ACh4_multiGamePlayerController::JoinHamachi(FString HostIPv4)
 			"This window is already a Listen Server.\n"
 			"Launch the Client with Net Mode: Standalone.");
 		UE_LOG(LogCh4_multiGame, Warning,
-			TEXT("[NetworkDebug] JoinHamachi blocked: this instance is already a Listen Server"));
-		ShowNetworkCommandMessage(Message, FColor::Red);
+			TEXT("[NetworkDebug] JoinHamachi blocked: this instance is already a Listen Server | %s"), *Message);
 		return;
 	}
 
@@ -161,8 +150,7 @@ void ACh4_multiGamePlayerController::JoinHamachi(FString HostIPv4)
 			"Use the Host's 25.x.x.x address.\n"
 			"Command: JoinHamachi 25.x.x.x");
 		UE_LOG(LogCh4_multiGame, Warning,
-			TEXT("[NetworkDebug] JoinHamachi rejected a non-Hamachi or malformed address"));
-		ShowNetworkCommandMessage(Message, FColor::Red);
+			TEXT("[NetworkDebug] JoinHamachi rejected a non-Hamachi or malformed address | %s"), *Message);
 		return;
 	}
 
@@ -173,7 +161,6 @@ void ACh4_multiGamePlayerController::JoinHamachi(FString HostIPv4)
 	UE_LOG(LogCh4_multiGame, Log,
 		TEXT("[NetworkDebug] Hamachi direct connection requested on UDP port %d"),
 		HamachiDevelopmentPort);
-	ShowNetworkCommandMessage(TEXT("[HAMACHI] Connecting to Host on UDP 7777..."), FColor::Cyan);
 	ClientTravel(TravelURL, TRAVEL_Absolute);
 }
 

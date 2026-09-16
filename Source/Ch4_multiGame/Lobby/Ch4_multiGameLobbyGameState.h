@@ -66,7 +66,6 @@ private:
 
 	void BroadcastPlayerCountChanged();
 	void BroadcastReadySummaryChanged();
-	void ShowClientDebugStatus() const;
 
 private:
 	UPROPERTY(ReplicatedUsing=OnRep_CurrentPlayerCount, BlueprintReadOnly, Category="Lobby", meta=(AllowPrivateAccess="true"))

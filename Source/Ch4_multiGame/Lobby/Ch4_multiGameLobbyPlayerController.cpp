@@ -4,7 +4,6 @@
 
 #include "Ch4_multiGame.h"
 #include "EnhancedInputComponent.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
@@ -247,14 +246,6 @@ void ACh4_multiGameLobbyPlayerController::HandleReadyInput()
 	}
 
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Ready toggle requested by local player"));
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(
-			-1,
-			5.0f,
-			FColor::Cyan,
-			TEXT("[LOBBY] Ready toggle request sent"));
-	}
 
 	ServerSetReady();
 }

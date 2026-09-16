@@ -27,7 +27,7 @@ private:
 		UWorld* World,
 		ETravelFailure::Type FailureType,
 		const FString& ErrorString);
-	void ShowFailureMessage(const FString& Title, const FString& Details) const;
+	void LogFailureMessage(const FString& Title, const FString& Details) const;
 
 	FDelegateHandle NetworkFailureHandle;
 	FDelegateHandle TravelFailureHandle;

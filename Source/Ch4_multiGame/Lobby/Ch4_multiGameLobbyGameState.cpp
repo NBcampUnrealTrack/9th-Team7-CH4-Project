@@ -3,7 +3,6 @@
 #include "Lobby/Ch4_multiGameLobbyGameState.h"
 
 #include "Ch4_multiGame.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 
@@ -17,7 +16,6 @@ void ACh4_multiGameLobbyGameState::BeginPlay()
 			TEXT("[Lobby] CLIENT CONNECTED | Replicated Players: %d / %d"),
 			CurrentPlayerCount,
 			MaxPlayerCount);
-		ShowClientDebugStatus();
 	}
 }
 
@@ -83,7 +81,6 @@ void ACh4_multiGameLobbyGameState::OnRep_CurrentPlayerCount()
 		MaxPlayerCount);
 	BroadcastPlayerCountChanged();
 	BroadcastReadySummaryChanged();
-	ShowClientDebugStatus();
 }
 
 void ACh4_multiGameLobbyGameState::OnRep_ReadyPlayerCount()
@@ -97,8 +94,11 @@ void ACh4_multiGameLobbyGameState::OnRep_ReadyPlayerCount()
 
 void ACh4_multiGameLobbyGameState::OnRep_MaxPlayerCount()
 {
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[Lobby] Replicated Players: %d / %d"),
+		CurrentPlayerCount,
+		MaxPlayerCount);
 	BroadcastPlayerCountChanged();
-	ShowClientDebugStatus();
 }
 
 void ACh4_multiGameLobbyGameState::BroadcastPlayerCountChanged()
@@ -109,15 +109,4 @@ void ACh4_multiGameLobbyGameState::BroadcastPlayerCountChanged()
 void ACh4_multiGameLobbyGameState::BroadcastReadySummaryChanged()
 {
 	OnReadySummaryChanged.Broadcast(ReadyPlayerCount, CurrentPlayerCount);
-}
-
-void ACh4_multiGameLobbyGameState::ShowClientDebugStatus() const
-{
-	if (GEngine && GetNetMode() == NM_Client)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, FString::Printf(
-			TEXT("[LOBBY CLIENT CONNECTED]\nPlayers: %d / %d\nMap: L_Lobby"),
-			CurrentPlayerCount,
-			MaxPlayerCount));
-	}
 }

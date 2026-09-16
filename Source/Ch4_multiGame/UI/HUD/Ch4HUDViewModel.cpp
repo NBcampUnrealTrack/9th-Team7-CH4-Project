@@ -1,4 +1,5 @@
 #include "UI/HUD/Ch4HUDViewModel.h"
+#include "Ch4_multiGame.h"
 #include "GameFlow/Ch4_multiGameGameState.h"
 #include "Lobby/Ch4_multiGameLobbyGameState.h"
 #include "Lobby/Ch4_multiGameLobbyPlayerState.h"
@@ -231,14 +232,8 @@ void UCh4HUDViewModel::SetMicActive(bool bActive)
 
 		TriggerMicPop();
 
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(
-				-1,
-				2.0f,
-				bIsMicActive ? FColor::Green : FColor::Red,
-				bIsMicActive ? TEXT("[VOICE] Mic UNMUTED (ON)") : TEXT("[VOICE] Mic MUTED (OFF)"));
-		}
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[VOICE] Mic %s"),
+			bIsMicActive ? TEXT("UNMUTED (ON)") : TEXT("MUTED (OFF)"));
 	}
 }
 
