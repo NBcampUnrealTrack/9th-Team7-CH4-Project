@@ -137,8 +137,12 @@ void UCh4_multiGameGameInstance::UpdateSteamSessionPlayerCount(int32 NewPlayerCo
 	const int32 ClampedPlayerCount = FMath::Clamp(NewPlayerCount, 1, MaxPlayers);
 	const int32 NewOpenSlots = FMath::Clamp(MaxPlayers - ClampedPlayerCount, 0, MaxPlayers);
 
-	if (Session->NumOpenPublicConnections != NewOpenSlots)
+	int32 CurrentAdvertised = 0;
+	const bool bHasAdvertised = Session->SessionSettings.Get(Ch4SteamSessions::PlayerCountKey, CurrentAdvertised);
+
+	if (!bHasAdvertised || CurrentAdvertised != ClampedPlayerCount || Session->NumOpenPublicConnections != NewOpenSlots)
 	{
+		Session->SessionSettings.Set(Ch4SteamSessions::PlayerCountKey, ClampedPlayerCount, EOnlineDataAdvertisementType::ViaOnlineService);
 		Session->NumOpenPublicConnections = NewOpenSlots;
 		SteamSessionInterface->UpdateSession(NAME_GameSession, Session->SessionSettings, true);
 		UE_LOG(LogCh4_multiGame, Log,
@@ -318,7 +322,15 @@ void UCh4_multiGameGameInstance::HandleSteamFindComplete(bool bSucceeded)
 		UCh4RoomEntryData* Entry = NewObject<UCh4RoomEntryData>(this);
 		Entry->ServerName = Result.Session.OwningUserName.IsEmpty() ? TEXT("Steam Host") : Result.Session.OwningUserName;
 		Entry->MaxPlayers = Result.Session.SessionSettings.NumPublicConnections;
-		Entry->CurrentPlayers = FMath::Clamp(Entry->MaxPlayers - Result.Session.NumOpenPublicConnections, 0, Entry->MaxPlayers);
+		int32 AdvertisedPlayers = 0;
+		if (Result.Session.SessionSettings.Get(Ch4SteamSessions::PlayerCountKey, AdvertisedPlayers))
+		{
+			Entry->CurrentPlayers = FMath::Clamp(AdvertisedPlayers, 1, Entry->MaxPlayers);
+		}
+		else
+		{
+			Entry->CurrentPlayers = FMath::Clamp(Entry->MaxPlayers - Result.Session.NumOpenPublicConnections, 0, Entry->MaxPlayers);
+		}
 		Entry->PingInMs = Result.PingInMs;
 		Entry->SearchResultIndex = Index;
 		SteamRooms.Add(Entry);
@@ -345,7 +357,12 @@ bool UCh4_multiGameGameInstance::BeginSteamJoin(const FOnlineSessionSearchResult
 	{
 		return RejectSteamRequest(TEXT("This Steam room belongs to a different game or incompatible build/protocol."));
 	}
-	if (Result.Session.NumOpenPublicConnections <= 0) return RejectSteamRequest(TEXT("This Steam room is full."));
+	int32 AdvertisedPlayers = 0;
+	const bool bHasAdvertised = Result.Session.SessionSettings.Get(Ch4SteamSessions::PlayerCountKey, AdvertisedPlayers);
+	const int32 EffectiveOpenSlots = bHasAdvertised
+		? FMath::Max(Result.Session.SessionSettings.NumPublicConnections - AdvertisedPlayers, 0)
+		: Result.Session.NumOpenPublicConnections;
+	if (EffectiveOpenSlots <= 0) return RejectSteamRequest(TEXT("This Steam room is full."));
 	SetSteamOperation(ECh4SteamSessionOperation::Joining, LOCTEXT("Joining", "Joining Steam room..."));
 	SteamJoinHandle = SteamSessionInterface->AddOnJoinSessionCompleteDelegate_Handle(
 		FOnJoinSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleSteamJoinComplete));

@@ -50,6 +50,9 @@ bool FCh4SteamSessionSettingsTest::RunTest(const FString& Parameters)
 	int32 Protocol = 0;
 	TestTrue(TEXT("Game ID is filtered before the Steam result cap"), Search->QuerySettings.Get(Ch4SteamSessions::GameIdKey, GameId) && GameId == Ch4SteamSessions::GameId);
 	TestTrue(TEXT("Protocol is filtered at the backend too"), Search->QuerySettings.Get(Ch4SteamSessions::ProtocolKey, Protocol) && Protocol == Ch4SteamSessions::ProtocolVersion);
+	int32 AdvertisedPlayers = 0;
+	TestTrue(TEXT("Initial player count is advertised as 1"),
+		Settings.Get(Ch4SteamSessions::PlayerCountKey, AdvertisedPlayers) && AdvertisedPlayers == 1);
 	return true;
 }
 
@@ -109,6 +112,11 @@ bool FCh4SteamSessionGuardsTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Second visible room keeps index one"), GI->SteamRooms[1]->SearchResultIndex, 1);
 		TestEqual(TEXT("Displayed player count includes the host"), GI->SteamRooms[0]->CurrentPlayers, 1);
 	}
+	RoomResult.Session.SessionSettings.Set(Ch4SteamSessions::PlayerCountKey, 3, EOnlineDataAdvertisementType::ViaOnlineService);
+	GI->SteamSearch->SearchResults = {RoomResult};
+	GI->SteamOperation = ECh4SteamSessionOperation::Finding;
+	GI->HandleSteamFindComplete(true);
+	TestEqual(TEXT("Advertised player count overrides fallback slot calculation"), GI->SteamRooms[0]->CurrentPlayers, 3);
 	GI->SteamOperation = ECh4SteamSessionOperation::Finding;
 	TestFalse(TEXT("Create during Find is rejected"), GI->HostSteamGame());
 	TestFalse(TEXT("Duplicate Find is rejected"), GI->FindSteamGames());

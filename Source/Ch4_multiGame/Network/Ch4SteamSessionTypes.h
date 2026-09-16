@@ -23,6 +23,7 @@ namespace Ch4SteamSessions
 {
 	inline const FName GameIdKey(TEXT("CH4_GAME_ID"));
 	inline const FName ProtocolKey(TEXT("CH4_PROTOCOL"));
+	inline const FName PlayerCountKey(TEXT("CH4_PLAYER_COUNT"));
 	inline const FString GameId(TEXT("Ch4MultiGame"));
 	inline constexpr int32 ProtocolVersion = 1;
 	inline constexpr int32 MaxPlayers = 4;

@@ -18,6 +18,7 @@ FOnlineSessionSettings Ch4SteamSessions::BuildSettings()
 	Settings.bUseLobbiesVoiceChatIfAvailable = false;
 	Settings.Set(GameIdKey, GameId, EOnlineDataAdvertisementType::ViaOnlineService);
 	Settings.Set(ProtocolKey, ProtocolVersion, EOnlineDataAdvertisementType::ViaOnlineService);
+	Settings.Set(PlayerCountKey, 1, EOnlineDataAdvertisementType::ViaOnlineService);
 	// Preserve UE's BuildUniqueId in addition to our explicit application protocol version.
 	return Settings;
 }
