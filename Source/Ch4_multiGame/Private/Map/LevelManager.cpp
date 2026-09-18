@@ -7,6 +7,7 @@
 #include "GameFlow/FinalDeliveryZone.h"
 #include "Kismet/GameplayStatics.h"
 #include "PCGComponent.h"
+#include "Map/BounceComponent.h"
 
 ALevelManager::ALevelManager()
 {
@@ -138,16 +139,10 @@ bool ALevelManager::IsLevelManagerManagedActor(const AActor* Actor) const
 
 void ALevelManager::MoveTaggedActorsWithRoad(ARoadBase* Road, const FTransform& OriginalRoadTransform, const FTransform& FinalRoadTransform)
 {
-    if (!Road) return;
-
-    // 멀티플레이어 환경 안전성 확보:
-    // 태그된 외부 액터들의 이동은 서버에서만 처리하며, 클라이언트는 서버로부터 Transform 복제를 받습니다.
-    if (!HasAuthority()) return;
+    if (!Road || !HasAuthority()) return;
 
     const TArray<FName>& RoadTags = Road->Tags;
     if (RoadTags.Num() == 0) return;
-
-    const FVector RoadLocationDelta = FinalRoadTransform.GetLocation() - OriginalRoadTransform.GetLocation();
 
     for (const FName& RoadTag : RoadTags)
     {
@@ -163,14 +158,25 @@ void ALevelManager::MoveTaggedActorsWithRoad(ARoadBase* Road, const FTransform& 
             USceneComponent* ActorRootComponent = Actor->GetRootComponent();
             if (!ActorRootComponent) continue;
 
-            const FVector OriginalActorLocation = Actor->GetActorLocation();
-            const FVector FinalActorLocation = OriginalActorLocation + RoadLocationDelta;
+            // 1. 도로 기준 액터의 원래 상대적인 Transform 계산
+            const FTransform RelativeTransform = Actor->GetActorTransform().GetRelativeTransform(OriginalRoadTransform);
+
+            // 2. 최종 배치될 도로 Transform을 곱해 정확한 월드 Transform 도출
+            const FTransform NewWorldTransform = RelativeTransform * FinalRoadTransform;
 
             const EComponentMobility::Type OriginalMobility = ActorRootComponent->GetMobility();
+            const bool bHasBounceComp = (Actor->FindComponentByClass<UBounceComponent>() != nullptr);
+            const bool bIsPhysics = ActorRootComponent->IsSimulatingPhysics();
 
             ActorRootComponent->SetMobility(EComponentMobility::Movable);
-            Actor->SetActorLocation(FinalActorLocation);
-            ActorRootComponent->SetMobility(OriginalMobility);
+            
+            // 3. 위치뿐만 아니라 회전값까지 바닥 도로에 완벽히 맞춤
+            Actor->SetActorTransform(NewWorldTransform);
+
+            if (!bHasBounceComp && !bIsPhysics)
+            {
+                ActorRootComponent->SetMobility(OriginalMobility);
+            }
         }
     }
 }
