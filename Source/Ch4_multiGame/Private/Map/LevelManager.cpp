@@ -62,16 +62,25 @@ void ALevelManager::OnRep_MiddleZoneOrder()
 
     // 클라이언트는 받은 배치 정보로 도로 및 로컬 액터 위치 정렬
     ArrangePlacedZones();
+
+    // 클라이언트에서 도로 배치 완료 후 PCG 생성 실행
+    if (!HasAuthority() && PCGSeed != 0)
+    {
+        GetWorldTimerManager().SetTimer(PCGGenerateTimerHandle, this, &ALevelManager::TriggerPCGGeneration, 0.1f, false);
+    }
+}
+
+void ALevelManager::OnRep_PCGSeed()
+{
+    // PCGSeed가 수신되었을 때, 이미 도로 배치가 완료된 경우 PCG 생성
+    if (!HasAuthority() && PCGSeed != 0)
+    {
+        GetWorldTimerManager().SetTimer(PCGGenerateTimerHandle, this, &ALevelManager::TriggerPCGGeneration, 0.1f, false);
+    }
 }
 
 void ALevelManager::TriggerPCGGeneration()
 {
-    // 서버에서만 실행 보장
-    if (!HasAuthority())
-    {
-        return;
-    }
-
     if (PCGSeed == 0)
     {
         UE_LOG(LogTemp, Error, TEXT("PCGSeed is 0"));

@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "WindObstacle.generated.h"
 
+class UObstacleMovementComponent;
 class UBoxComponent;
 class UStaticMeshComponent;
 
@@ -28,6 +29,10 @@ protected:
 	void Tick(float DeltaTime);
 
 protected:
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Movement")
+	TObjectPtr<UObstacleMovementComponent> ObstacleMovementComp;
+	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Wind")
 	TObjectPtr<USceneComponent> SceneRoot;
 
