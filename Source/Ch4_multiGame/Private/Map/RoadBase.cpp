@@ -67,9 +67,12 @@ void ARoadBase::OnConstruction(const FTransform& Transform)
 
         SplineMeshComp->CreationMethod = EComponentCreationMethod::UserConstructionScript;
         SplineMeshComp->SetMobility(EComponentMobility::Movable);
+        
         SplineMeshComp->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
         SplineMeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
+        SplineMeshComp->SetUseCCD(true);
+        
         SplineMeshComp->AttachToComponent(SplineComponent, FAttachmentTransformRules::KeepRelativeTransform);
         SplineMeshComp->SetStaticMesh(MeshToUse);
         SplineMeshComp->SetForwardAxis(ForwardAxis);
@@ -86,6 +89,8 @@ void ARoadBase::OnConstruction(const FTransform& Transform)
         EndTangent = EndTangent.GetClampedToMaxSize(MeshLength);
 
         SplineMeshComp->SetStartAndEnd(StartPos, StartTangent, EndPos, EndTangent, true);
+        SplineMeshComp->UpdateMesh();
+        
         SplineMeshComp->RegisterComponent();
         SplineMeshComponents.Add(SplineMeshComp);
     }

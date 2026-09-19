@@ -4,6 +4,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Map/ObstacleMovementComponent.h"
 
 AWindObstacle::AWindObstacle()
 {
@@ -12,6 +13,9 @@ AWindObstacle::AWindObstacle()
 
 	bReplicates = true;
 
+	ObstacleMovementComp = CreateDefaultSubobject<UObstacleMovementComponent>(TEXT("ObstacleMovementComp"));
+	SetRootComponent(ObstacleMovementComp);
+	
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
 
