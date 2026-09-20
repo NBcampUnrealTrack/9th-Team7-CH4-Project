@@ -14,16 +14,18 @@ class CH4_MULTIGAME_API ARoadBase : public AActor
 {
 	GENERATED_BODY()
 
+public:
+	ARoadBase();
+
 protected:
 	virtual void BeginPlay() override;
 
 public:
-	ARoadBase();
-
 	virtual void OnConstruction(const FTransform& Transform) override;
     
+	// [수정] 클라이언트 및 서버 공용 PCG 생성 함수
 	UFUNCTION(BlueprintCallable, Category = "PCG")
-	void GenerateObstacles(int32 InRandomSeed);
+	void GenerateObstacles(int32 InRandomSeed, bool bIsForce = true);
 
 	void DrawBackgroundGuides();
 	void SetRoadComponentsStatic();

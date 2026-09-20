@@ -26,6 +26,13 @@ ARoadBase::ARoadBase()
     ForwardAxis = ESplineMeshAxis::X;
     
     PCGComponent = CreateDefaultSubobject<UPCGComponent>(TEXT("PCGComponent"));
+    
+    // [핵심] PCG 컴포넌트 자체의 네트워크 복제를 차단하여
+    // 클라이언트가 서버 패킷을 어설프게 받아 메쉬가 투명해지는 현상 방지
+    if (PCGComponent)
+    {
+        PCGComponent->SetIsReplicated(false);
+    }
 }
 
 void ARoadBase::BeginPlay()
@@ -96,11 +103,12 @@ void ARoadBase::OnConstruction(const FTransform& Transform)
     }
 }
 
-void ARoadBase::GenerateObstacles(int32 InRandomSeed)
+void ARoadBase::GenerateObstacles(int32 InRandomSeed, bool bIsForce)
 {
     UPCGComponent* PCGComp = FindComponentByClass<UPCGComponent>();
     if (!PCGComp) return;
 
+    RandomSeed = InRandomSeed;
     PCGComp->Seed = InRandomSeed;
 
     // 도로 위치 이동에 맞춰 Spline 좌표와 Transform 강제 갱신
@@ -110,21 +118,21 @@ void ARoadBase::GenerateObstacles(int32 InRandomSeed)
     }
     UpdateComponentTransforms();
 
-    // 기존에 생성되어 있던 PCG 리소스 정리
+    // 기존 리소스 즉시 정제
     PCGComp->CleanupLocalImmediate(true);
 
 #if WITH_EDITOR
-    // 에디터 뷰포트 미플레이(Editor World) 상태일 때 강제 갱신 처리
+    // 에디터 뷰포트 미플레이(Editor World) 상태 처리
     if (!GetWorld() || !GetWorld()->IsGameWorld())
     {
         PCGComp->DirtyGenerated();
-        PCGComp->Generate(true);
+        PCGComp->Generate(bIsForce);
         return;
     }
 #endif
 
-    // 런타임 게임 중 (서버) 실행
-    PCGComp->Generate(true);
+    // [핵심] HasAuthority() 제약 없이 서버와 클라이언트 모두 각자의 로컬 World에서 생성 연산 수행
+    PCGComp->Generate(bIsForce);
 }
 
 void ARoadBase::SetRoadComponentsStatic()
