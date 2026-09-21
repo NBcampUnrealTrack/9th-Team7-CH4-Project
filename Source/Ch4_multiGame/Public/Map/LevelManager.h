@@ -68,10 +68,14 @@ public:
     UPROPERTY(EditInstanceOnly, Category = "Zone Setup|End")
     AZonePostProcessVolume* EndPostProcessVolume;
     
-    UPROPERTY(Replicated)
+    UPROPERTY(ReplicatedUsing = OnRep_PCGSeed)
     int32 PCGSeed = 0;
 
     void TriggerPCGGeneration();
+
+protected:
+    UFUNCTION()
+    void OnRep_PCGSeed();
 
 protected:
     virtual void BeginPlay() override;

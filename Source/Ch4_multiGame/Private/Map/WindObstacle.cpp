@@ -4,6 +4,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Map/ObstacleMovementComponent.h"
 
 AWindObstacle::AWindObstacle()
 {
@@ -12,8 +13,12 @@ AWindObstacle::AWindObstacle()
 
 	bReplicates = true;
 
+	// 1. Root Component 설정
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
+
+	// 2. ObstacleMovementComp는 UActorComponent이므로 CreateDefaultSubobject만 해주면 끝납니다. (SetRootComponent 금지)
+	ObstacleMovementComp = CreateDefaultSubobject<UObstacleMovementComponent>(TEXT("ObstacleMovementComp"));
 
 	WindArea = CreateDefaultSubobject<UBoxComponent>(TEXT("WindArea"));
 	WindArea->SetupAttachment(SceneRoot);

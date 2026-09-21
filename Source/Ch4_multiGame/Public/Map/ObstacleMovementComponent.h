@@ -1,11 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/SceneComponent.h"
+#include "Components/ActorComponent.h"
 #include "ObstacleMovementComponent.generated.h"
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class CH4_MULTIGAME_API UObstacleMovementComponent : public USceneComponent
+class CH4_MULTIGAME_API UObstacleMovementComponent : public UActorComponent
 {
     GENERATED_BODY()
 
@@ -26,7 +26,7 @@ protected:
     FVector MovementDirection = FVector(1.0f, 0.0f, 0.0f);
 
     // true: 장애물의 현재 회전 방향을 이동 방향에 적용
-    // false: MovementDirection을 컴포넌트의 현재 회전과 관계없이 사용
+    // false: MovementDirection을 액터의 회전과 관계없이 사용
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Obstacle Movement")
     bool bUseRotatedMovementDirection = false;
 
@@ -51,7 +51,7 @@ protected:
     float RotationSpeed = 90.0f;
 
 private:
-    // 게임 시작 시점의 상대 위치
+    // 게임 시작 시점 소유 액터의 상대 위치
     FVector InitialRelativeLocation;
 
     // 이동 경과 시간
@@ -62,4 +62,7 @@ private:
 
     // 회전 축
     FVector NormalizedRotationDirection;
+
+    // 레벨 매니저에 의한 도로 정렬 완료 후 초기 위치가 확정되었는지 여부
+    bool bInitializedLocation = false;
 };
