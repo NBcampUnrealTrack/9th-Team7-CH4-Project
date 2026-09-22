@@ -59,105 +59,68 @@ void AWobbleRoad::Tick(float DeltaTime)
 
 void AWobbleRoad::UpdateWobble()
 {
-	if (!SplineComponent)
-	{
-		return;
-	}
+    if (!SplineComponent || OriginalSplinePointLocations.Num() == 0)
+    {
+       return;
+    }
 
-	if (OriginalSplinePointLocations.Num() == 0)
-	{
-		return;
-	}
+    AGameStateBase* GameState = GetWorld()->GetGameState();
+    if (!GameState)
+    {
+       return;
+    }
 
-	AGameStateBase* GameState = GetWorld()->GetGameState();
+    const float CurrentServerTime = GameState->GetServerWorldTimeSeconds();
+    const float ElapsedTime = CurrentServerTime - WobbleStartServerTime;
+    const float SplineLength = SplineComponent->GetSplineLength();
 
-	if (!GameState)
-	{
-		return;
-	}
+    // 1. 스플라인 제어점 위치를 바꾸는 대신, 원래 스플라인에서 위치/탄젠트를 계산합니다.
+    for (int32 Index = 0; Index < SplineMeshComponents.Num(); ++Index)
+    {
+       USplineMeshComponent* SplineMeshComp = SplineMeshComponents[Index];
+       if (!SplineMeshComp)
+       {
+          continue;
+       }
 
-	const float CurrentServerTime = GameState->GetServerWorldTimeSeconds();
-	const float ElapsedTime = CurrentServerTime - WobbleStartServerTime;
+       const float StartDistance = Index * MeshLength;
+       if (StartDistance >= SplineLength)
+       {
+          continue;
+       }
 
-	const int32 NumPoints = FMath::Min(
-		SplineComponent->GetNumberOfSplinePoints(),
-		OriginalSplinePointLocations.Num());
+       const float EndDistance = FMath::Min((Index + 1) * MeshLength, SplineLength);
 
-	for (int32 Index = 0; Index < NumPoints; ++Index)
-	{
-		FVector NewLocation = OriginalSplinePointLocations[Index];
+       // 원래 스플라인 선상의 기준 위치 및 탄젠트 구하기
+       FVector StartPos = SplineComponent->GetLocationAtDistanceAlongSpline(StartDistance, ESplineCoordinateSpace::Local);
+       FVector StartTangent = SplineComponent->GetTangentAtDistanceAlongSpline(StartDistance, ESplineCoordinateSpace::Local);
+       FVector EndPos = SplineComponent->GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::Local);
+       FVector EndTangent = SplineComponent->GetTangentAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::Local);
 
-		const float Distance = SplineComponent->GetDistanceAlongSplineAtSplinePoint(Index);
+       // 2. 거리(Distance) 기반으로 오프셋 Z 계산
+       const float StartPhase = ElapsedTime * WobbleSpeed - StartDistance * WobbleFrequency;
+       const float EndPhase = ElapsedTime * WobbleSpeed - EndDistance * WobbleFrequency;
 
-		const float WavePhase =
-			ElapsedTime * WobbleSpeed - Distance * WobbleFrequency;
+       const float StartOffsetZ = FMath::Sin(StartPhase) * WobbleAmplitude;
+       const float EndOffsetZ = FMath::Sin(EndPhase) * WobbleAmplitude;
 
-		const float OffsetZ =
-			FMath::Sin(WavePhase) * WobbleAmplitude;
+       // 높이 적용
+       StartPos.Z += StartOffsetZ;
+       EndPos.Z += EndOffsetZ;
 
-		NewLocation.Z += OffsetZ;
+       // 3. 파형의 기울기(미분값)를 탄젠트 Z에 반영하여 메시 연결 부위가 자연스럽게 기울어지도록 보정
+       const float StartSlope = FMath::Cos(StartPhase) * WobbleAmplitude * WobbleFrequency;
+       const float EndSlope = FMath::Cos(EndPhase) * WobbleAmplitude * WobbleFrequency;
 
-		SplineComponent->SetLocationAtSplinePoint(
-			Index,
-			NewLocation,
-			ESplineCoordinateSpace::Local,
-			false);
-	}
+       StartTangent.Z += StartSlope;
+       EndTangent.Z += EndSlope;
 
-	SplineComponent->UpdateSpline();
+       StartTangent = StartTangent.GetClampedToMaxSize(MeshLength);
+       EndTangent = EndTangent.GetClampedToMaxSize(MeshLength);
 
-	const float SplineLength = SplineComponent->GetSplineLength();
-
-	for (int32 Index = 0; Index < SplineMeshComponents.Num(); ++Index)
-	{
-		USplineMeshComponent* SplineMeshComp = SplineMeshComponents[Index];
-
-		if (!SplineMeshComp)
-		{
-			continue;
-		}
-
-		const float StartDistance = Index * MeshLength;
-
-		if (StartDistance >= SplineLength)
-		{
-			continue;
-		}
-
-		const float EndDistance = FMath::Min(
-			(Index + 1) * MeshLength,
-			SplineLength);
-
-		FVector StartPos =
-			SplineComponent->GetLocationAtDistanceAlongSpline(
-				StartDistance,
-				ESplineCoordinateSpace::Local);
-
-		FVector StartTangent =
-			SplineComponent->GetTangentAtDistanceAlongSpline(
-				StartDistance,
-				ESplineCoordinateSpace::Local);
-
-		FVector EndPos =
-			SplineComponent->GetLocationAtDistanceAlongSpline(
-				EndDistance,
-				ESplineCoordinateSpace::Local);
-
-		FVector EndTangent =
-			SplineComponent->GetTangentAtDistanceAlongSpline(
-				EndDistance,
-				ESplineCoordinateSpace::Local);
-
-		StartTangent = StartTangent.GetClampedToMaxSize(MeshLength);
-		EndTangent = EndTangent.GetClampedToMaxSize(MeshLength);
-
-		SplineMeshComp->SetStartAndEnd(
-			StartPos,
-			StartTangent,
-			EndPos,
-			EndTangent,
-			true);
-	}
+       // 4. 메시 업데이트 (UpdateMesh = true)
+       SplineMeshComp->SetStartAndEnd(StartPos, StartTangent, EndPos, EndTangent, true);
+    }
 }
 
 void AWobbleRoad::ResetSplineToOriginal()
